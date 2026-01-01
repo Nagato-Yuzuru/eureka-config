@@ -1,0 +1,143 @@
+export EDITOR=nvim 
+bindkey -e
+
+setopt autopushd
+typeset -i DIRSTACKSIZE=127
+
+eval "$(mise activate zsh)"
+
+
+
+eval "$(/opt/homebrew/bin/brew shellenv)"
+# Added by Toolbox App
+export PATH="$PATH:${HOME}/Library/Application Support/JetBrains/Toolbox/scripts"
+
+
+[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+# The following lines have been added by Docker Desktop to enable Docker CLI
+# completions.
+fpath=($HOME/.docker/completions $fpath)
+
+# End of Docker CLI completions
+
+
+### Added by Zinit's installer
+if [[ ! -f $HOME/.local/share/zinit/zinit.git/zinit.zsh ]]; then 
+    print -P "%F{33} %F{220}Installing %F{33}ZDHARMA-CONTINUUM%F{220} Initiative Plugin Manager (%F{33}zdharma-continuum/zinit%F{220})…%f" 
+    command mkdir -p "$HOME/.local/share/zinit" && command chmod g-rwX "$HOME/.local/share/zinit" 
+    command git clone https://github.com/zdharma-continuum/zinit "$HOME/.local/share/zinit/zinit.git" && \ 
+        print -P "%F{33} %F{34}Installation successful.%f%b" || \ 
+        print -P "%F{160} The clone has failed.%f%b" 
+fi
+
+
+source "$HOME/.local/share/zinit/zinit.git/zinit.zsh"
+
+autoload -Uz _zinit 
+(( ${+_comps} )) && _comps[zinit]=_zinit
+
+# Load a few important annexes, without Turbo (this is currently required for
+# annexes)
+zinit light-mode for \
+    zdharma-continuum/zinit-annex-as-monitor \
+    zdharma-continuum/zinit-annex-bin-gem-node \
+    zdharma-continuum/zinit-annex-patch-dl \
+    zdharma-continuum/zinit-annex-rust
+
+zinit ice as "command" from "gh-r" \
+    atclone"./starship init zsh > init.zsh; ./starship completions zsh > _starship" \
+    atpull"%atclone" \
+    src"init.zsh"
+
+
+
+zinit light starship/starship 2&> /dev/null
+zinit load zsh-users/zsh-syntax-highlighting 
+zinit load zsh-users/zsh-autosuggestions
+zinit load zsh-users/zsh-completions 
+zinit load junegunn/fzf
+# 加载目录跳转工具
+zinit load rupa/z
+
+export WORDCHARS=${WORDCHARS/\/}
+
+# shell hotkey settings
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}' 
+fpath=(~/.zsh/completions $fpath) 
+zstyle ':completion:*' menu select
+
+autoload -Uz edit-command-line 
+zle -N edit-command-line 
+bindkey '^U' backward-kill-line 
+bindkey '^X^E' edit-command-line
+
+
+
+# 确保补全和 reverse-menu-complete 小工具已加载
+
+autoload -Uz reverse-menu-complete 
+zle -N reverse-menu-complete 
+zmodload zsh/complist 
+bindkey -M menuselect '^[[Z' reverse-menu-complete
+
+setopt auto_cd
+
+export HOMEBREW_AUTO_UPDATE_SECS=3600
+
+# use gnu tools
+for gnu in make grep gnu-sed gawk coreutils; do
+    export PATH="/opt/homebrew/opt/${gnu}/libexec/gnubin:$PATH" 
+done
+
+fpath+=( ' /opt/homebrew/share/zsh/site-functions ' )
+
+# aliases
+alias rm='rm -i' 
+alias mv='mv -i'
+alias pip='pip3' 
+alias python='python3' 
+alias typora='open -a Typora' 
+alias vim='nvim' 
+alias watch='watch --color' 
+alias ls='ls -G --color=auto' 
+alias grep='grep --color=auto'
+alias fd='fd --color=auto'
+alias cleanproxy='networksetup -setwebproxystate Wi-Fi off && networksetup -setsecurewebproxystate Wi-Fi off && networksetup -setautoproxystate Wi-Fi off'
+alias tf='terraform'
+
+
+function wellcome() { 
+    local cows=( alpaca bud-frogs cheese cupcake daemon elephant eyes fox head-in llama milk moose mutilated stegosaurus sus turtle tux) 
+    local cow=$(shuf -n 1 -e "${cows[@]}") 
+    local mood=$(shuf -n 1 -e -- -b -d -g -p -s -t -w) 
+    local spread=$(shuf -i 2-6 -n 1) 
+    local freq=$(shuf -i 5-15 -n 1) 
+    local speed=$(shuf -i 10-30 -n 1)
+
+    figlet -c "Wellcome $1" \
+        | cowsay -n "$mood" -f "$cow" \
+        | lolcat -t --spread="$spread" --freq="0.$freq" --speed="$speed" 
+    
+}
+
+# export GOENV_PATH_ORDER="front"
+# if command -v goenv >/dev/null 2>&1; then
+#     eval "$(goenv init -)"
+# fi
+
+alias pip3='uv pip'
+
+fpath=(${(u)fpath}) 
+autoload bashcompinit && bashcompinit 
+autoload -Uz compinit
+compinit
+
+complete -C "$(which aws_completer)" aws 
+complete -o nospace -C "$(which terraform)" terraform
+
+source "$HOME/.config/op/plugins.sh"
+
+source ~/.python/.venv/bin/activate 
+
+wellcome "YuzuRu"
+

@@ -1,0 +1,25 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+# 2026-01-01 23:09:56
+
+[tools]
+go = "latest"
+uv = "latest"
+rust = "latest"
+deno = "latest"
+
+usage = "latest"
+terraform = "latest"
+kubectl = "latest"
+k9s = "latest"
+
+1password = "latest"
+fzf = "latest"
+just = "latest"
+jq = "latest"
+lazygit = "latest"
+lazydocker = "latest"
+
+
+[settings]
+experimental = true
+python_venv_auto_create = false # use uv
