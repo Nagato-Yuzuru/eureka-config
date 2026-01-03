@@ -4,6 +4,11 @@ if [[ -x /opt/homebrew/bin/brew ]];then
     eval "$(/opt/homebrew/bin/brew shellenv)"
 fi
 
+# MISE
+
+eval "$(mise activate zsh)"
+
+
 local gnu_path=""
 for gnu in make grep gnu-sed gawk coreutils; do
     gnu_path="/opt/homebrew/opt/${gnu}/libexec/gnubin:$gnu_path"
@@ -15,16 +20,13 @@ export PATH="$PATH:${HOME}/Library/Application Support/JetBrains/Toolbox/scripts
 
 export EDITOR=nvim 
 # ------------
-source "$(brew --prefix)/share/antidote/antidote.zsh"
-antidote load
-
+#
 fpath=(
     "${HOME}"/.docker/completions
     "${HOME}/.zsh/completions"
     '/opt/homebrew/share/zsh/site-functions'
     "${fpath[@]}"
 )
-
 fpath=(${(u)fpath}) 
 
 autoload -Uz compinit
@@ -32,23 +34,28 @@ compinit
 
 autoload bashcompinit && bashcompinit 
 
-complete -C "$(which aws_completer)" aws 
-complete -o nospace -C "$(which terraform)" terraform
+source "$(brew --prefix)/share/antidote/antidote.zsh"
+
+antidote load
+
+
+if command -v aws_completer >/dev/null; then
+    complete -C "$(which aws_completer)" aws
+fi
+
+if command -v terraform >/dev/null; then
+    complete -o nospace -C "$(which terraform)" terraform
+fi
 
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}' 
 zstyle ':completion:*' menu select
 
 
-# MISE
-
-eval "$(mise activate zsh)"
 
 
 # Starship
 eval "$(starship init zsh)"
 
-# Zoxide 
-eval "$(zoxide init zsh)"
 
 
 # 1password
@@ -57,6 +64,9 @@ eval "$(zoxide init zsh)"
 # fzf
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
+zstyle ':completion:*:git-checkout:*' sort false
+zstyle ':completion:*' list-colors ${(s.:.)LS_COLORS}
+zstyle ':fzf-tab:complete:*:*' fzf-preview 'less ${(Q)realpath}'
 
 # -------------------
 # zsh options
@@ -82,6 +92,10 @@ zle -N reverse-menu-complete
 zmodload zsh/complist 
 bindkey -M menuselect '^[[Z' reverse-menu-complete
 
+bindkey '^[[A' history-substring-search-up
+bindkey '^[[B' history-substring-search-down
+bindkey '^P' history-substring-search-up
+bindkey '^N' history-substring-search-down
 
 
 
