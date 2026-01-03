@@ -1,0 +1,8 @@
+.DS_Store
+**/.DS_Store
+
+# Vim/Nvim temp
+*.swp
+lazy-lock.json
+
+.config/wezterm/wezterm-gui-sock-*

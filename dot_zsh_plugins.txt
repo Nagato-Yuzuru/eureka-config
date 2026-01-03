@@ -1,0 +1,9 @@
+ohmyzsh/ohmyzsh path:lib/completion.zsh
+ohmyzsh/ohmyzsh path:lib/key-bindings.zsh
+
+# 语法高亮
+zsh-users/zsh-syntax-highlighting
+# 自动建议
+zsh-users/zsh-autosuggestions
+# 额外的补全库 (对应原本的 zsh-users/zsh-completions)
+zsh-users/zsh-completions kind:fpath
