@@ -6,11 +6,13 @@ go = "latest"
 uv = "latest"
 rust = "latest"
 deno = "latest"
+pnpm = "latest"
 
 usage = "latest"
 terraform = "latest"
 kubectl = "latest"
 k9s = "latest"
+cmake = "latest"
 
 1password = "latest"
 fzf = "latest"
@@ -19,6 +21,7 @@ just = "latest"
 jq = "latest"
 lazygit = "latest"
 lazydocker = "latest"
+buf = "latest"
 
 
 [settings]
