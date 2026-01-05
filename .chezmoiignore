@@ -4,5 +4,6 @@
 # Vim/Nvim temp
 *.swp
 lazy-lock.json
-
+README.md
+.git/
 .config/wezterm/wezterm-gui-sock-*
