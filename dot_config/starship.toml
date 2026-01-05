@@ -108,21 +108,29 @@ symbol = ""
 style = "bg:color_aqua"
 format = '[[ $symbol $branch ](fg:color_fg0 bg:color_aqua)]($style)'
 
-# 新增：显示代码变动统计 (Added/Deleted)
 [git_metrics]
 added_style = "bold fg:color_bg1 bg:color_aqua"
 deleted_style = "bold fg:color_red bg:color_aqua"
+only_nonzero_diffs = true
 disabled = false
-format = '[+$added]($added_style)[-$deleted]($deleted_style)'
+format = '([+$added]($added_style))([-$deleted]($deleted_style))'
 
 [git_status]
 style = "bg:color_aqua"
-# 优化了间距逻辑
-format = '[[($all_status$ahead_behind )](fg:color_fg0 bg:color_aqua)]($style)'
 
-# ------------------------------------------------------------------------------
-# 语言模块 (统一使用 bg:color_blue)
-# ------------------------------------------------------------------------------
+conflicted = " "
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕⇡${ahead_count}⇣${behind_count}"
+up_to_date = "✓"
+untracked = " "
+stashed = " "
+modified = " "
+staged = " "
+renamed = " "
+deleted = " "
+
+format = '[[($all_status$ahead_behind )](fg:color_fg0 bg:color_aqua)]($style)'
 
 [nodejs]
 symbol = ""
@@ -167,7 +175,6 @@ format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
 [python]
 symbol = ""
 style = "bg:color_blue"
-# 修复：增加了 $version 前的空格，保持与其他模块一致
 format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
 
 # ------------------------------------------------------------------------------
