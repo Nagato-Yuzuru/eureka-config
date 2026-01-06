@@ -114,7 +114,7 @@ added_style = "bold fg:color_bg1 bg:color_aqua"
 deleted_style = "bold fg:color_red bg:color_aqua"
 only_nonzero_diffs = true
 disabled = false
-format = '([+$added]($added_style))([-$deleted]($deleted_style))'
+format = '([+$added ]($added_style))([-$deleted ]($deleted_style))'
 
 [git_status]
 style = "bg:color_aqua"

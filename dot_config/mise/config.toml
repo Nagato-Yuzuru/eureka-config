@@ -14,16 +14,36 @@ kubectl = "latest"
 k9s = "latest"
 cmake = "latest"
 
-1password = "latest"
-starship = "latest"
-fzf = "latest"
 just = "latest"
 jq = "latest"
-lazygit = "latest"
-lazydocker = "latest"
 buf = "latest"
 
 
 [settings]
 experimental = true
 python_venv_auto_create = false # use uv
+
+[tasks.refresh-completions]
+description = "generate zsh completions scripts"
+run = """
+#!/bin/bash
+set -e
+
+COMP_DIR="${XDG_DATA_HOME}/zsh/site-functions"
+mkdir -p "${COMP_DIR}"
+
+echo "Generating completions into $COMP_DIR..."
+
+if command -v uv >/dev/null; then
+    uv generate-shell-completion zsh > "${COMP_DIR}/_uv"
+fi
+
+if command -v kubectl >/dev/null; then
+    kubectl completion zsh > "${COMP_DIR}/_kubectl" 
+fi
+
+if command -v buf >/dev/null; then
+    buf completion zsh > "${COMP_DIR}/_buf"
+fi
+
+"""
