@@ -1,12 +1,12 @@
 #:schema https://mise.jdx.dev/schema/mise.json
 # 2026-01-01 23:09:56
-
 [tools]
 go = "latest"
 uv = "latest"
 rust = "latest"
 deno = "latest"
 pnpm = "latest"
+node = "lts"
 
 usage = "latest"
 terraform = "latest"
@@ -16,9 +16,13 @@ cmake = "latest"
 carapace = "latest"
 
 just = "latest"
+ripgrep = "latest"
+fd = "latest"
+zoxide = "latest"
+neovim = "latest"
+
 jq = "latest"
 buf = "latest"
-
 
 [settings]
 experimental = true
@@ -35,16 +39,32 @@ mkdir -p "${COMP_DIR}"
 
 echo "Generating completions into $COMP_DIR..."
 
-if command -v uv >/dev/null; then
-    uv generate-shell-completion zsh > "${COMP_DIR}/_uv"
-fi
+function load_completion_from_cache() {
+    local cmd="$1"
+    local cache_file="${COMP_DIR}/_${cmd}"
 
-if command -v kubectl >/dev/null; then
-    kubectl completion zsh > "${COMP_DIR}/_kubectl" 
-fi
+    if command -v ${cmd} &>/dev/null && ( [[ ! -f "$cache_file" ]] || [[ "$(mise which ${cmd})" -nt "$cache_file" ]] ); then
+        echo "Generating completion for $cmd..."
+        
+        case "$cmd" in
+            kubectl) kubectl completion zsh > "$cache_file" ;;
+            k9s)     k9s completion zsh > "$cache_file" ;;
+            uv)      uv generate-shell-completion zsh > "${cache_file}" ;;
+            buf)     buf completion zsh > "$cache_file" ;;
+        esac
+    fi
 
-if command -v buf >/dev/null; then
-    buf completion zsh > "${COMP_DIR}/_buf"
-fi
+}
 
+# 按需加载
+cmds=(
+    kubectl
+    k9s
+    uv
+    buf
+    )
+
+for cmd in "${cmds[@]}"; do
+    load_completion_from_cache "$cmd"
+done
 """

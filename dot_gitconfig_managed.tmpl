@@ -1,0 +1,36 @@
+{{- if lookPath "delta" }}
+[core]
+    pager = delta
+
+[interactive]
+    differFilter = delta --color-only
+
+[delta]
+    navigate = true
+    light = false
+    line-numbers = true
+    side-by-side = true
+    syntax-theme = Dracula
+
+[merge]
+    conflictstyle = diff3
+
+[diff]
+    colorMoved = default
+{{- end }}
+
+
+{{- if lookPath "nvim" }}
+[diff]
+    tool = nvimdiff
+
+[difftool "nvimdiff"]
+    cmd = nvim -d "$LOCAL" "$REMOTE"
+
+[merge]
+    tool = nvimdiff
+
+[mergetool "nvimdiff"]
+    cmd = nvim -d "$LOCAL" "$BASE" "$REMOTE" "$MERGED" -c '$wincmd w' -c 'wincmd J'
+{{- end }}
+

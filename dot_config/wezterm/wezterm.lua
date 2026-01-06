@@ -14,9 +14,9 @@ end
 
 config.use_ime = true
 -- 外观设置
---config.color_scheme = "Dark Violet (base16)" -- 粉嫩
-config.color_scheme = "synthwave"
--- config.color_scheme = "iTerm2 Dark Background"
+config.color_scheme = "Dark Violet (base16)" -- 粉嫩
+-- config.color_scheme = "Synthwave (Gogh)"
+-- config.color_scheme = "SynthwaveAlpha" -- 粉嫩
 config.font = wezterm.font("JetBrainsMono Nerd Font", { weight = "Medium" })
 config.colors = {
 	cursor_bg = "#E98038", -- 鲜明的绿色
