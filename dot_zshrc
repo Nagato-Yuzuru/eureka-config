@@ -10,6 +10,7 @@ eval "$(mise activate zsh)"
 
 
 local gnu_path=""
+
 for gnu in make grep gnu-sed gawk coreutils; do
     gnu_path="/opt/homebrew/opt/${gnu}/libexec/gnubin:$gnu_path"
 done
@@ -21,12 +22,16 @@ export PATH="$PATH:${HOME}/Library/Application Support/JetBrains/Toolbox/scripts
 export EDITOR=nvim 
 # ------------
 #
+source "$(brew --prefix)/share/antidote/antidote.zsh"
+
 fpath=(
     "${HOME}/.zsh/completions"
     "${XDG_DATA_HOME}/zsh/site-functions"
+    $(antidote path)
     '/opt/homebrew/share/zsh/site-functions'
     "${fpath[@]}"
 )
+
 fpath=(${(u)fpath}) 
 
 autoload -Uz compinit
@@ -34,17 +39,12 @@ compinit
 
 autoload bashcompinit && bashcompinit 
 
-source "$(brew --prefix)/share/antidote/antidote.zsh"
-
 antidote load
 
-
-if command -v aws_completer >/dev/null; then
-    complete -C "$(which aws_completer)" aws
-fi
-
-if command -v terraform >/dev/null; then
-    complete -o nospace -C "$(which terraform)" terraform
+if command -v carapace &> /dev/null; then
+    export CARAPACE_BRIDGES='zsh,bash,inshellisense' 
+    zstyle ':completion:*' format-explanation '  %e'
+    source <(carapace _carapace)
 fi
 
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}' 
