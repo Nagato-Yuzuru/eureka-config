@@ -39,6 +39,10 @@ if command -v uv >/dev/null; then
     uv generate-shell-completion zsh > "${COMP_DIR}/_uv"
 fi
 
+if command -v kubectl >/dev/null; then
+    kubectl completion zsh > "${COMP_DIR}/_kubectl" 
+fi
+
 if command -v buf >/dev/null; then
     buf completion zsh > "${COMP_DIR}/_buf"
 fi
