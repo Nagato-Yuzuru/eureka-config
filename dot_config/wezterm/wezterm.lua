@@ -14,7 +14,7 @@ end
 
 config.use_ime = true
 -- 外观设置
-config.color_scheme = "Dark Violet (base16)" -- 粉嫩
+config.color_scheme = "Sakura" -- 粉嫩
 -- config.color_scheme = "Synthwave (Gogh)"
 -- config.color_scheme = "SynthwaveAlpha" -- 粉嫩
 config.font = wezterm.font("JetBrainsMono Nerd Font", { weight = "Medium" })
