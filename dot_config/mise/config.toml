@@ -8,6 +8,9 @@ deno = "latest"
 pnpm = "latest"
 node = "lts"
 
+golangci-lint = "latest"
+
+
 usage = "latest"
 terraform = "latest"
 kubectl = "latest"
@@ -24,6 +27,7 @@ zoxide = "latest"
 
 jq = "latest"
 buf = "latest"
+act = "latest"
 
 [settings]
 experimental = true
