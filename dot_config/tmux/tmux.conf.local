@@ -1,0 +1,313 @@
+
+# https://github.com/gpakosz/.tmux
+# (‑●‑●)> dual licensed under the WTFPL v2 license and the MIT license,
+#         without any warranty.
+#         Copyright 2012— Gregory Pakosz (@gpakosz).
+
+tmux_conf_preserve_stock_bindings=false
+
+# 新建会话/窗口设置
+tmux_conf_new_session_prompt=false
+tmux_conf_new_session_retain_current_path=false
+tmux_conf_new_window_retain_current_path=false
+tmux_conf_new_window_reconnect_ssh=false
+tmux_conf_new_pane_retain_current_path=true
+tmux_conf_new_pane_reconnect_ssh=false
+
+# 剪贴板与 URL 设置
+tmux_conf_copy_to_os_clipboard=true
+tmux_conf_urlscan_options="--compact --dedupe"
+
+# set -gu prefix2
+unbind C-a
+unbind C-b
+unbind -n C-,
+bind -n C-, send-keys C-,
+
+set -gu prefix2
+set -g prefix M-\'
+bind M-\' send-prefix
+
+# select windows
+unbind -n C-p
+unbind -n C-n
+
+
+bind C-n next-window 
+bind C-p previous-window
+
+
+# set -g prefix C-a
+# bind C-a send-prefix
+
+# if you don't want Oh my tmux! to alter a binding or a setting, use #!important
+# bind c new-window -c '#{pane_current_path}' #!important
+
+# display a message after toggling mouse support
+bind m run "cut -c3- '#{TMUX_CONF}' | sh -s _toggle_mouse" \; display 'mouse #{?#{mouse},on,off}'
+
+
+# display
+tmux_conf_24b_colour=auto
+set -g default-terminal "tmux-256color"
+set -as terminal-overrides ',*:Tc'
+tmux_conf_theme=enabled
+
+# 2. 定义调色板 (Tokyo Night Palette)
+tmux_conf_theme_colour_1="#1a1b26"    # Black (Night BG)
+tmux_conf_theme_colour_2="#24283b"    # Dark Grey (Storm BG) - 状态栏底色
+tmux_conf_theme_colour_3="#414868"    # Grey (Selection)
+tmux_conf_theme_colour_4="#7aa2f7"    # Blue (Focus) - 强调色
+tmux_conf_theme_colour_5="#e0af68"    # Yellow (Warning)
+tmux_conf_theme_colour_6="#1a1b26"    # Black
+tmux_conf_theme_colour_7="#c0caf5"    # White
+tmux_conf_theme_colour_8="#1a1b26"    # Black
+tmux_conf_theme_colour_9="#bb9af7"    # Magenta - 用户名背景
+tmux_conf_theme_colour_10="#f7768e"   # Red
+tmux_conf_theme_colour_11="#9ece6a"   # Green
+tmux_conf_theme_colour_12="#a9b1d6"   # Light Grey - 默认文字
+tmux_conf_theme_colour_13="#c0caf5"   # White
+tmux_conf_theme_colour_14="#1a1b26"   # Black
+tmux_conf_theme_colour_15="#1a1b26"   # Black
+tmux_conf_theme_colour_16="#f7768e"   # Red
+tmux_conf_theme_colour_17="#c0caf5"   # White
+
+# 3. 界面元素样式 (引用上方变量)
+
+# 状态栏背景/前景
+tmux_conf_theme_status_bg="$tmux_conf_theme_colour_2"
+tmux_conf_theme_status_fg="$tmux_conf_theme_colour_12"
+tmux_conf_theme_status_attr="none"
+
+# 窗口标题栏
+tmux_conf_theme_window_status_bg="$tmux_conf_theme_colour_2"
+tmux_conf_theme_window_status_fg="$tmux_conf_theme_colour_12"
+tmux_conf_theme_window_status_attr="none"
+
+# 当前活动窗口 (Tokyo Night Blue)
+tmux_conf_theme_window_status_current_bg="$tmux_conf_theme_colour_4"
+tmux_conf_theme_window_status_current_fg="$tmux_conf_theme_colour_1"
+tmux_conf_theme_window_status_current_attr="bold"
+
+# 边框样式
+tmux_conf_theme_pane_border_style=thin
+tmux_conf_theme_pane_border="$tmux_conf_theme_colour_3"
+tmux_conf_theme_pane_active_border="$tmux_conf_theme_colour_4" # 激活边框变蓝
+tmux_conf_theme_pane_indicator="$tmux_conf_theme_colour_4"
+tmux_conf_theme_pane_active_indicator="$tmux_conf_theme_colour_4"
+
+# 消息/命令模式 (Cyan/Blue 风格)
+tmux_conf_theme_message_bg="$tmux_conf_theme_colour_4"
+tmux_conf_theme_message_fg="$tmux_conf_theme_colour_1"
+tmux_conf_theme_message_attr="bold"
+tmux_conf_theme_mode_bg="$tmux_conf_theme_colour_4"   # 复制模式选中色
+tmux_conf_theme_mode_fg="$tmux_conf_theme_colour_1"
+tmux_conf_theme_mode_attr="bold"
+tmux_conf_theme_message_command_bg="$tmux_conf_theme_colour_4"
+tmux_conf_theme_message_command_fg="$tmux_conf_theme_colour_1"
+
+# 4. 状态栏内容配置
+tmux_conf_theme_terminal_title="#h ❐ #S ● #I #W"
+tmux_conf_theme_window_status_format="#I #W#{?#{||:#{window_bell_flag},#{window_zoomed_flag}}, ,}#{?window_bell_flag,!,}#{?window_zoomed_flag,Z,}"
+tmux_conf_theme_window_status_current_format="#I #W#{?#{||:#{window_bell_flag},#{window_zoomed_flag}}, ,}#{?window_bell_flag,!,}#{?window_zoomed_flag,Z,}"
+
+# 分隔符 (Powerline)
+tmux_conf_theme_left_separator_main=""
+tmux_conf_theme_left_separator_sub=""
+
+tmux_conf_theme_right_separator_main=""
+tmux_conf_theme_right_separator_sub=""
+# --- 左侧状态栏修改 ---
+# 结构： Session名称 | CPU负载
+tmux_conf_theme_status_left="   #S "
+# 颜色逻辑：
+tmux_conf_theme_status_left_fg="$tmux_conf_theme_colour_1"
+tmux_conf_theme_status_left_bg="$tmux_conf_theme_colour_4"
+tmux_conf_theme_status_left_attr="bold"
+
+# --- 右侧状态栏 (Nerd Font 数值仪表盘) ---
+# 结构： Prefix | CPU | RAM | Swap | Battery | User | Host
+# 特性： 
+# 1. 动态颜色：CPU/RAM/Swap 正常显示蓝色(#7aa2f7)，高负载变红(#f7768e)
+# 2. 区分用户：User 使用洋红背景(Magenta)，Host 使用蓝色背景(Blue)
+
+tmux_conf_theme_status_right=" #{prefix}#{mouse}#{pairing}#{synchronized} \
+#[fg=#3b4261]| #{cpu_fg_color} #{cpu_percentage} \
+#[fg=#3b4261]| #{ram_fg_color} #{ram_percentage} \
+#[fg=#3b4261]| #[fg=#7aa2f7]󰓡 #[fg=#a9b1d6]#{swap_percentage} \
+#[fg=#3b4261]| #{battery_color_charge_fg}#{battery_icon} #{battery_percentage} \
+#[fg=#3b4261]| #[fg=#bb9af7,bold]#{username}#[fg=#a9b1d6,nobold] @ #[fg=#7aa2f7,bold]#{hostname} "
+
+# 兜底样式 (深灰背景)
+tmux_conf_theme_status_right_fg="$tmux_conf_theme_colour_12"
+tmux_conf_theme_status_right_bg="$tmux_conf_theme_colour_2"
+tmux_conf_theme_status_right_attr="none"
+
+# 电池与时钟样式
+tmux_conf_battery_bar_palette="gradient"
+tmux_conf_theme_clock_colour="$tmux_conf_theme_colour_4"
+tmux_conf_theme_clock_style="24"
+
+# move status line to top
+#set -g status-position top
+
+
+# -- tpm -----------------------------------------------------------------------
+
+# while I don't use tpm myself, many people requested official support so here
+# is a seamless integration that automatically installs plugins in parallel
+
+# whenever a plugin introduces a variable to be used in 'status-left' or
+# 'status-right', you can use it in 'tmux_conf_theme_status_left' and
+# 'tmux_conf_theme_status_right' variables.
+
+# by default, launching tmux will update tpm and all plugins
+#   - true (default)
+#   - false
+tmux_conf_update_plugins_on_launch=true
+
+# by default, reloading the configuration will update tpm and all plugins
+#   - true (default)
+#   - false
+tmux_conf_update_plugins_on_reload=true
+
+# by default, reloading the configuration will uninstall tpm and plugins when no
+# plugins are enabled
+#   - true (default)
+#   - false
+tmux_conf_uninstall_plugins_on_reload=true
+
+# /!\ the tpm bindings differ slightly from upstream:
+#   - installing plugins: <prefix> + I
+#   - uninstalling plugins: <prefix> + Alt + u
+#   - updating plugins: <prefix> + u
+
+# /!\ do not add set -g @plugin 'tmux-plugins/tpm'
+# /!\ do not add run '~/.tmux/plugins/tpm/tpm'
+
+# /!\ the 'set -g @tpm_plugins' syntax is not supported
+# to enable a plugin, use the 'set -g @plugin' syntax:
+# visit https://github.com/tmux-plugins for available plugins
+set -g @plugin 'tmux-plugins/tmux-resurrect'
+set -g @plugin 'tmux-plugins/tmux-continuum'
+
+set -g @continuum-restore 'off'
+set -g @continuum-save-interval '10'
+set -g @resurrect-dir "$HOME/.local/state/tmux/resurrect"
+
+set -g @plugin 'tmux-plugins/tmux-cpu'
+set -g @plugin 'tmux-plugins/tmux-battery'
+
+# 2.1 监控颜色阈值 (Tokyo Night)
+# 正常: Blue(#7aa2f7), 警告: Yellow(#e0af68), 严重: Red(#f7768e)
+set -g @cpu_low_fg_color "#[fg=#7aa2f7]"
+set -g @cpu_medium_fg_color "#[fg=#e0af68]"
+set -g @cpu_high_fg_color "#[fg=#f7768e]"
+
+set -g @ram_low_fg_color "#[fg=#7aa2f7]"
+set -g @ram_medium_fg_color "#[fg=#e0af68]"
+set -g @ram_high_fg_color "#[fg=#f7768e]"
+
+set -g @swap_low_fg_color "#[fg=#7aa2f7]"
+set -g @swap_medium_fg_color "#[fg=#e0af68]"
+set -g @swap_high_fg_color "#[fg=#f7768e]"
+
+# 2.2 电池图标与颜色
+set -g @batt_icon_charge_tier8 ' '
+set -g @batt_icon_charge_tier7 ' '
+set -g @batt_icon_charge_tier6 ' '
+set -g @batt_icon_charge_tier5 ' '
+set -g @batt_icon_charge_tier4 ' '
+set -g @batt_icon_charge_tier3 ' '
+set -g @batt_icon_charge_tier2 ' '
+set -g @batt_icon_charge_tier1 ' '
+set -g @batt_icon_status_charged ' '
+set -g @batt_icon_status_charging '⚡'
+
+# Tier 8-5 (高电量): 使用柔和的 Tokyo Night Blue (#7aa2f7)
+# Tier 4-3 (中电量): 使用 Light Grey (#a9b1d6) 或 Yellow (#e0af68) 过渡
+# Tier 2-1 (低电量): 保持 Red (#f7768e) 警告
+
+set -g @batt_color_charge_primary_tier8 '#7aa2f7'
+set -g @batt_color_charge_primary_tier7 '#7aa2f7'
+set -g @batt_color_charge_primary_tier6 '#7aa2f7'
+set -g @batt_color_charge_primary_tier5 '#7aa2f7'
+set -g @batt_color_charge_primary_tier4 '#a9b1d6'
+set -g @batt_color_charge_primary_tier3 '#e0af68'
+set -g @batt_color_charge_primary_tier2 '#f7768e'
+set -g @batt_color_charge_primary_tier1 '#f7768e'
+
+
+set -g @plugin 'omerxx/tmux-sessionx'
+set -g @sessionx-window-height '85%'
+set -g @sessionx-window-width '75%'
+set -g @sessionx-bind 'o'
+
+
+set -g @sessionx-preview-location 'right'
+set -g @sessionx-preview-ratio '55%'
+
+set -g @plugin 'christoomey/vim-tmux-navigator'
+
+set -g @plugin 'tmux-plugins/tmux-yank' # 辅助复制
+set -g @plugin 'laktak/extrakto'
+set -g @extrakto_clip_tool "pbcopy" # macOS 剪贴板
+set -g @extrakto_editor "nvim"      # 按 ctrl-e 编辑时使用 nvim
+set -g @extrakto_fzf_tool "fzf"
+
+cpu_load_path="#($HOME/.config/tmux/plugins/tmux-mem-cpu-load/tmux-mem-cpu-load -a 0 -g 0 --cpu-mode 1 --interval 2)"
+
+# -- custom variables ----------------------------------------------------------
+
+# to define a custom #{foo} variable, define a POSIX shell function between the
+# '# EOF' and the '# "$@"' lines. Please note that the opening brace { character
+# must be on the same line as the function name otherwise the parse won't detect
+# it.
+#
+# then, use #{foo} in e.g. the 'tmux_conf_theme_status_left' or the
+# 'tmux_conf_theme_status_right' variables.
+
+# ------------------------------------------------------------------------------
+
+# # /!\ do not remove the following line
+# EOF
+#
+# # /!\ do not "uncomment" the functions: the leading "# " characters are needed
+#
+# # usage: #{weather}
+# weather() {                                         # see https://github.com/chubin/wttr.in#one-line-output
+#   curl -f -s -m 2 'wttr.in?format=3' || printf '\n' # /!\ make sure curl is installed
+#   sleep 900                                         # sleep for 15 minutes, throttle network requests whatever the value of status-interval
+# }
+#
+# # usage: #{online}
+# online() {
+#   ping -c 1 1.1.1.1 >/dev/null 2>&1 && printf '✔' || printf '✘'
+# }
+#
+# # usage: #{wan_ip_v4}
+# wan_ip_v4() {
+#   curl -f -s -m 2 -4 ifconfig.me
+#   sleep 300                                         # sleep for 5 minutes, throttle network requests whatever the value of status-interval
+# }
+#
+# # usage: #{wan_ip_v6}
+# wan_ip_v6() {
+#   curl -f -s -m 2 -6 ifconfig.me
+#   sleep 300                                         # sleep for 5 minutes, throttle network requests whatever the value of status-interval
+# }
+#
+# # usage: #{github_stars}, #{github_stars tmux/tmux}, ...
+# github_stars() {
+#   repository=${1##*https://github.com/}
+#   repository=${repository%% *}
+#   repository=${repository%%.git}
+#   url="https://api.github.com/repos/${repository:-gpakosz/.tmux}"
+#   curl -s "$url" | perl -MJSON::PP=decode_json -CO -0777 -E '$response = decode_json(readline *STDIN); say ($response->{stargazers_count})'
+#   sleep 300                                         # sleep for 5 minutes, throttle network requests whatever the value of status-interval
+# }
+#
+# "$@"
+# # /!\ do not remove the previous line
+# #     do not write below this line
+
