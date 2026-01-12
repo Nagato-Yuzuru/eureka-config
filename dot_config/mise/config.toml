@@ -28,6 +28,7 @@ zoxide = "latest"
 jq = "latest"
 buf = "latest"
 act = "latest"
+gh = "latest"
 
 [settings]
 experimental = true
