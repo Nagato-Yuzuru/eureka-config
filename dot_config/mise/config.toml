@@ -17,7 +17,6 @@ kubectl = "latest"
 k9s = "latest"
 cmake = "latest"
 carapace = "latest"
-neovim = "latest"
 
 just = "latest"
 
