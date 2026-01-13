@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# packages.yaml hash: {{ include ".chezmoidata/packages.yaml" | sha256sum }}
+
+{{ if eq .chezmoi.os "darwin" -}}
+if command -v brew >/dev/null 2>&1; then
+    echo "Detecting changes in packages.yaml, updating system packages via Stdin..."
+
+    # 使用管道从 Heredoc 读取渲染后的清单
+    brew bundle install --file=- <<EOF
+{{ range .packages.common -}}
+brew "{{ . }}"
+{{ end -}}
+{{ range .packages.darwin.brews -}}
+brew "{{ . }}"
+{{ end -}}
+{{ range .packages.darwin.casks -}}
+cask "{{ . }}"
+{{ end -}}
+EOF
+
+else
+    echo "Homebrew not found. Skipping installation."
+fi
+{{ end -}}
+
+{{ if eq .chezmoi.os "linux" -}}
+# 预留 Linux/Pacman 逻辑，后续可按需扩展
+# echo "Linux environment detected. System package management not yet implemented."
+{{ end -}}
+

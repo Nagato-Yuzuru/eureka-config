@@ -20,17 +20,9 @@ carapace = "latest"
 neovim = "latest"
 
 just = "latest"
-ripgrep = "latest"
-fd = "latest"
-delta = "latest"
-zoxide = "latest"
 
-jq = "latest"
 buf = "latest"
 act = "latest"
-gh = "latest"
-bat = "latest"
-tmux = "latest"
 
 [settings]
 experimental = true

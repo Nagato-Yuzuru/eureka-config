@@ -1,0 +1,21 @@
+packages:
+  common:
+    - lazygit
+    - ripgrep
+    - fd
+    - jq
+    - bat
+    - delta
+    - zoxide
+    - fzf
+    - bottom
+    - tmux
+    - neovim
+    - fzf
+    - gh
+  darwin:
+    brews:
+    casks:
+      - wezterm
+      - raycast
+      - 1password-cli
