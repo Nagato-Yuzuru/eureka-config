@@ -275,19 +275,6 @@ set -g @sessionx-bind 'o'
 set -g @sessionx-preview-location 'right'
 set -g @sessionx-preview-ratio '55%'
 
-set -g @plugin 'christoomey/vim-tmux-navigator'
-set -g @vim_tmux_navigator_no_mappings 1
-
-bind C-h select-pane -L
-bind C-j select-pane -D
-bind C-k select-pane -U
-bind C-l select-pane -R
-
-bind-key -T copy-mode-vi C-h select-pane -L
-bind-key -T copy-mode-vi C-j select-pane -D
-bind-key -T copy-mode-vi C-k select-pane -U
-bind-key -T copy-mode-vi C-l select-pane -R
-
 set -g @plugin 'tmux-plugins/tmux-yank' # 辅助复制
 set -g @plugin 'laktak/extrakto'
 set -g @extrakto_clip_tool "pbcopy" # macOS 剪贴板
