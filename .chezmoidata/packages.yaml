@@ -19,3 +19,4 @@ packages:
       - wezterm
       - raycast
       - 1password-cli
+      - orbstack
