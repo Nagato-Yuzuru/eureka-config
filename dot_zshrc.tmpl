@@ -1,13 +1,16 @@
 export LANG=en_US.UTF-8
 
+{{- if eq .chezmoi.os "darwin" }}
 if [[ -x /opt/homebrew/bin/brew ]];then
     eval "$(/opt/homebrew/bin/brew shellenv)"
 fi
+{{- end }}
 
 # MISE
 
 eval "$(mise activate zsh)"
 
+{{- if eq .chezmoi.os "darwin" }}
 
 local gnu_path=""
 
@@ -18,36 +21,45 @@ done
 export PATH="$gnu_path$PATH"
 
 export PATH="$PATH:${HOME}/Library/Application Support/JetBrains/Toolbox/scripts"
+{{- end }}
 
-export EDITOR=nvim 
+export EDITOR=nvim
 # ------------
 #
+{{- if eq .chezmoi.os "darwin" }}
 source "$(brew --prefix)/share/antidote/antidote.zsh"
+{{- else if eq .chezmoi.os "linux" }}
+# Antidote installation path for Linux
+# Install antidote: git clone --depth=1 https://github.com/mattmc3/antidote.git ${ZDOTDIR:-~}/.antidote
+source "${ZDOTDIR:-~}/.antidote/antidote.zsh"
+{{- end }}
 
 fpath=(
     "${HOME}/.zsh/completions"
     "${XDG_DATA_HOME}/zsh/site-functions"
     $(antidote path)
+{{- if eq .chezmoi.os "darwin" }}
     '/opt/homebrew/share/zsh/site-functions'
+{{- end }}
     "${fpath[@]}"
 )
 
-fpath=(${(u)fpath}) 
+fpath=(${(u)fpath})
 
 autoload -Uz compinit
 compinit
 
-autoload bashcompinit && bashcompinit 
+autoload bashcompinit && bashcompinit
 
 antidote load
 
 if command -v carapace &> /dev/null; then
-    export CARAPACE_BRIDGES='zsh,bash,inshellisense' 
+    export CARAPACE_BRIDGES='zsh,bash,inshellisense'
     zstyle ':completion:*' format-explanation '  %e'
     source <(carapace _carapace)
 fi
 
-zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}' 
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
 zstyle ':completion:*' menu select
 
 
@@ -57,11 +69,13 @@ zstyle ':completion:*' menu select
 eval "$(starship init zsh)"
 
 
+{{- if eq .chezmoi.os "darwin" }}
 
 # 1password
 
 export SSH_AUTH_SOCK="${HOME}/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
 [ -f "$HOME/.config/op/plugins.sh" ] && source "${HOME}/.config/op/plugins.sh"
+{{- end }}
 
 # fzf
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
@@ -81,18 +95,20 @@ setopt autopushd
 typeset -i DIRSTACKSIZE=127
 
 export WORDCHARS=${WORDCHARS/\/}
+{{- if eq .chezmoi.os "darwin" }}
 export HOMEBREW_AUTO_UPDATE_SECS=3600
+{{- end }}
 
 # shell hotkey settings
 
-autoload -Uz edit-command-line 
-zle -N edit-command-line 
-bindkey '^U' backward-kill-line 
+autoload -Uz edit-command-line
+zle -N edit-command-line
+bindkey '^U' backward-kill-line
 bindkey '^X^E' edit-command-line
 
-autoload -Uz reverse-menu-complete 
-zle -N reverse-menu-complete 
-zmodload zsh/complist 
+autoload -Uz reverse-menu-complete
+zle -N reverse-menu-complete
+zmodload zsh/complist
 bindkey -M menuselect '^[[Z' reverse-menu-complete
 
 bindkey '^[[A' history-substring-search-up
@@ -103,30 +119,38 @@ bindkey '^N' history-substring-search-down
 
 
 # aliases
-alias rm='rm -i' 
+alias rm='rm -i'
 alias mv='mv -i'
-alias typora='open -a Typora' 
-alias vim='nvim' 
-alias watch='watch --color' 
-alias ls='ls -G --color=auto' 
+{{- if eq .chezmoi.os "darwin" }}
+alias typora='open -a Typora'
+{{- end }}
+alias vim='nvim'
+alias watch='watch --color'
+{{- if eq .chezmoi.os "darwin" }}
+alias ls='ls -G --color=auto'
+{{- else }}
+alias ls='ls --color=auto'
+{{- end }}
 alias grep='grep --color=auto'
 
-alias pip='uv pip' 
+alias pip='uv pip'
 alias pip3='uv pip'
-alias python='python3' 
+alias python='python3'
 
 alias fd='fd --color=auto'
+{{- if eq .chezmoi.os "darwin" }}
 alias cleanproxy='networksetup -setwebproxystate Wi-Fi off && networksetup -setsecurewebproxystate Wi-Fi off && networksetup -setautoproxystate Wi-Fi off'
+{{- end }}
 alias tf='terraform'
 
 
 function wellcome() {
     if ! command -v cowsay &> /dev/null; then return; fi
-    
+
     local cows=( alpaca bud-frogs cheese cupcake daemon elephant eyes fox head-in llama milk moose mutilated stegosaurus sus turtle tux)
     local cow=$(shuf -n 1 -e "${cows[@]}")
-    local mood=$(shuf -n 1 -e -- -b -d -g -p -s -t -w) 
-    
+    local mood=$(shuf -n 1 -e -- -b -d -g -p -s -t -w)
+
     figlet -c "Welcome $1" \
         | cowsay -n "$mood" -f "$cow" \
         | lolcat
@@ -135,4 +159,3 @@ function wellcome() {
 
 
 [[ -o interactive ]] && wellcome "YuzuRu"
-
