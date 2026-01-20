@@ -31,7 +31,7 @@ source "$(brew --prefix)/share/antidote/antidote.zsh"
 {{- else if eq .chezmoi.os "linux" }}
 # Antidote installation path for Linux
 # Install antidote: git clone --depth=1 https://github.com/mattmc3/antidote.git ${ZDOTDIR:-~}/.antidote
-source "${ZDOTDIR:-~}/.antidote/antidote.zsh"
+source "${ZDOTDIR:-${HOME}}/.antidote/antidote.zsh"
 {{- end }}
 
 fpath=(
@@ -78,7 +78,9 @@ export SSH_AUTH_SOCK="${HOME}/Library/Group Containers/2BUA8C4S2C.com.1password/
 {{- end }}
 
 # fzf
-[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+if command -v fzf &> /dev/null; then
+    source <(fzf --zsh) 
+fi
 
 zstyle ':completion:*:git-checkout:*' sort false
 zstyle ':completion:*' list-colors ${(s.:.)LS_COLORS}
