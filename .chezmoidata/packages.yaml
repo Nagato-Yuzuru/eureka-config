@@ -13,8 +13,13 @@ packages:
     - neovim
     - fzf
     - gh
+    - make
   darwin:
     brews:
+      - gawk
+      - grep
+      - gnu-sed
+      - coreutils
     casks:
       - wezterm
       - raycast

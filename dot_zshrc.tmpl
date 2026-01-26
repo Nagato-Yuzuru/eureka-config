@@ -14,7 +14,7 @@ eval "$(mise activate zsh)"
 
 local gnu_path=""
 
-for gnu in make grep gnu-sed gawk coreutils; do
+for gnu in make grep gawk; do
     gnu_path="/opt/homebrew/opt/${gnu}/libexec/gnubin:$gnu_path"
 done
 
@@ -82,8 +82,23 @@ if command -v fzf &> /dev/null; then
     source <(fzf --zsh) 
 fi
 
+{{ if eq .chezmoi.os "darwin" }}
+if command -v gdircolors &> /dev/null; then
+    eval "$(gdircolors -b)"
+    zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
+else
+    export CLICOLOR=1
+fi
+{{- else if eq .chezmoi.os "linux" }}
+if command -v dircolors &> /dev/null; then
+    eval "$(dircolors -b)"
+    zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
+else
+    export CLICOLOR=1
+fi
+{{- end }}
+
 zstyle ':completion:*:git-checkout:*' sort false
-zstyle ':completion:*' list-colors ${(s.:.)LS_COLORS}
 zstyle ':fzf-tab:complete:*:*' fzf-preview 'less ${(Q)realpath}'
 zstyle ':fzf-tab:*' fzf-bindings 'forward-slash:accept'
 zstyle ':fzf-tab:*' fzf-bindings 'ctrl-e:accept'
@@ -123,11 +138,22 @@ bindkey '^N' history-substring-search-down
 # aliases
 alias rm='rm -i'
 alias mv='mv -i'
-{{- if eq .chezmoi.os "darwin" }}
-alias typora='open -a Typora'
-{{- end }}
 alias vim='nvim'
 alias watch='watch --color'
+
+alias pip='uv pip'
+alias pip3='uv pip'
+alias python='python3'
+
+alias fd='fd --color=auto'
+alias tf='terraform'
+
+
+{{- if eq .chezmoi.os "darwin" }}
+alias typora='open -a Typora'
+alias sed='gsed'
+alias date='gdate'
+{{- end }}
 {{- if eq .chezmoi.os "darwin" }}
 alias ls='ls -G --color=auto'
 {{- else }}
@@ -135,15 +161,9 @@ alias ls='ls --color=auto'
 {{- end }}
 alias grep='grep --color=auto'
 
-alias pip='uv pip'
-alias pip3='uv pip'
-alias python='python3'
-
-alias fd='fd --color=auto'
 {{- if eq .chezmoi.os "darwin" }}
 alias cleanproxy='networksetup -setwebproxystate Wi-Fi off && networksetup -setsecurewebproxystate Wi-Fi off && networksetup -setautoproxystate Wi-Fi off'
 {{- end }}
-alias tf='terraform'
 
 
 function wellcome() {
