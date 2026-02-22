@@ -13,6 +13,7 @@ golangci-lint = "latest"
 
 usage = "latest"
 terraform = "latest"
+opentofu = "latest"
 kubectl = "latest"
 k9s = "latest"
 cmake = "latest"
@@ -22,6 +23,7 @@ just = "latest"
 
 buf = "latest"
 act = "latest"
+wrangler = "latest"
 
 [settings]
 experimental = true
