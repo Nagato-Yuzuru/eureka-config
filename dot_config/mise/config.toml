@@ -27,7 +27,7 @@ wrangler = "latest"
 
 [settings]
 experimental = true
-python_venv_auto_create = false # use uv
+python.uv_venv_auto = "source" # use uv
 
 [tasks.refresh-completions]
 description = "generate zsh completions scripts"
