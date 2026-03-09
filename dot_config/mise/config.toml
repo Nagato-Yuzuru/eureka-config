@@ -24,6 +24,7 @@ just = "latest"
 buf = "latest"
 act = "latest"
 wrangler = "latest"
+hugo-extended = "latest"
 
 [settings]
 experimental = true
