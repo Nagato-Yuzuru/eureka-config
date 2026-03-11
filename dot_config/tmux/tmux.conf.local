@@ -34,6 +34,7 @@ unbind -n C-j
 unbind -n C-k
 unbind -n C-l
 
+bind-key / copy-mode \; send-keys "?"
 
 # See: https://github.com/christoomey/vim-tmux-navigator
 vim_pattern='(\S+/)?g?\.?(view|l?n?vim?x?|fzf)(diff)?(-wrapped)?'
