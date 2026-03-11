@@ -1,7 +1,5 @@
 [merge]
-    command = "nvim"
-    args = ["-d", "{{ "{{ .Destination }}" }}", "{{ "{{ .Source }}" }}", "{{ "{{ .Target }}" }}"]
-
+command = "nvim"
+args = ["-d", "{{ "{{ .Destination }}" }}", "{{ "{{ .Source }}" }}", "{{ "{{ .Target }}" }}"]
 [diff]
-    pager = "delta"
-
+pager = "delta --dark --line-numbers --side-by-side"
