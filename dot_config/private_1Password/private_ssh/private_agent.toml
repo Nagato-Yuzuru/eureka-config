@@ -28,6 +28,15 @@
 #
 # More examples can be found here:
 #  https://developer.1password.com/docs/ssh/agent/config
+
+[[ssh-keys]]
+item = "Machina-Arcus-Yuzurii Self"
+vault = "Personal"
+
+[[ssh-keys]]
+item = "yuzuru.me GitHub"
+vault = "Dev"
+
 [[ssh-keys]]
 item = "Github"
 vault = 'Dev'
