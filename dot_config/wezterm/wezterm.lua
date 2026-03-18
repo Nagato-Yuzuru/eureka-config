@@ -100,6 +100,7 @@ config.set_environment_variables = {
 	-- 告诉远程服务器支持 OSC 52 剪贴板
 	TERM = "wezterm",
 }
+config.enable_kitty_keyboard = true
 
 -- 鼠标设置
 config.mouse_bindings = {
