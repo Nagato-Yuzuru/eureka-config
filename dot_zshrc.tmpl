@@ -1,8 +1,10 @@
 export LANG=en_US.UTF-8
 
 {{- if eq .chezmoi.os "darwin" }}
-if [[ -x /opt/homebrew/bin/brew ]];then
+if [[ -x /opt/homebrew/bin/brew ]]; then
     eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [[ -x /usr/local/bin/brew ]]; then
+    eval "$(/usr/local/bin/brew shellenv)"
 fi
 {{- end }}
 
@@ -12,10 +14,11 @@ eval "$(mise activate zsh)"
 
 {{- if eq .chezmoi.os "darwin" }}
 
+local brew_prefix="$(brew --prefix)"
 local gnu_path=""
 
 for gnu in make grep gawk; do
-    gnu_path="/opt/homebrew/opt/${gnu}/libexec/gnubin:$gnu_path"
+    gnu_path="${brew_prefix}/opt/${gnu}/libexec/gnubin:$gnu_path"
 done
 
 export PATH="$gnu_path$PATH"
@@ -39,7 +42,7 @@ fpath=(
     "${XDG_DATA_HOME}/zsh/site-functions"
     $(antidote path)
 {{- if eq .chezmoi.os "darwin" }}
-    '/opt/homebrew/share/zsh/site-functions'
+    "$(brew --prefix)/share/zsh/site-functions"
 {{- end }}
     "${fpath[@]}"
 )
@@ -180,4 +183,5 @@ function wellcome() {
 
 
 
-[[ -o interactive ]] && wellcome "YuzuRu"
+[[ -o interactive && -z "${INTELLIJ_ENVIRONMENT_READER}" ]] && wellcome "YuzuRu"
+
