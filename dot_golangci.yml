@@ -1,0 +1,81 @@
+version: "2"
+
+linters:
+  enable:
+    # 正确性
+    - errcheck          # 未检查的 error
+    - govet             # go vet 检查
+    - staticcheck       # 综合静态分析（含 gosimple、stylecheck）
+    - bodyclose         # HTTP response body 未关闭
+    - nilerr            # err != nil 时返回 nil
+    - noctx             # HTTP 请求缺少 context
+    - durationcheck     # time.Duration 乘法错误
+    - makezero          # slice append 前未清零
+    - rowserrcheck      # sql.Rows.Err() 未检查
+    - sqlclosecheck     # sql.Rows/Stmt 未关闭
+
+    # 错误处理
+    - errorlint         # 正确使用 errors.Is/As 和 %w
+    - wrapcheck         # 外部包 error 需要 wrap
+    - errname           # error 类型命名规范（ErrXxx）
+
+    # 代码质量
+    - gocritic          # 高质量建议（风格+性能+诊断）
+    - revive            # 可配置的 golint 替代
+    - unconvert         # 不必要的类型转换
+    - unparam           # 未使用的函数参数
+    - unused            # 未使用的代码
+    - ineffassign       # 无效赋值
+    - prealloc          # 建议预分配 slice
+    - goconst           # 重复字符串/数字应提取为常量
+
+    # 风格
+    - gofumpt           # 比 gofmt 更严格的格式化
+    - misspell          # 注释/字符串拼写检查
+    - predeclared       # 防止覆盖内置名（true/false/nil 等）
+    - exhaustive        # switch 对 enum 要穷举
+
+    # 测试
+    - tenv              # 测试中用 t.Setenv 替代 os.Setenv
+    - tparallel         # 测试缺少 t.Parallel()
+
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - hugeParam       # 大 struct 传值警告，有时太吵
+
+    revive:
+      rules:
+        - name: exported
+          disabled: true  # 不强制公开函数写注释（全局配置太严格）
+        - name: unexported-return
+          disabled: true
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment  # struct 字段对齐优化，太吵
+
+    exhaustive:
+      default-signifies-exhaustive: true  # switch 有 default 视为穷举
+
+    errcheck:
+      check-type-assertions: true   # 检查类型断言是否处理 ok
+      check-blank: false             # 不检查 _ = err
+
+formatters:
+  enable:
+    - gofumpt
+  settings:
+    gofumpt:
+      extra-rules: true
+
+output:
+  sort-order:
+    - file
+    - severity
+    - linter
