@@ -12,14 +12,16 @@
 | Run a script         | `pnpm run <script>` or `pnpm <script>`   |
 | One-off execution    | `pnpm dlx <pkg>` or `deno run npm:<pkg>` |
 
-Prefer deno run npm:<pkg> over pnpm dlx when the tool is non-interactive and has minimal system access (e.g. formatters, type checkers, code generators with no file I/O). For interactive CLI tools or tools that require filesystem/network access, use pnpm dlx.
+Prefer `deno run npm:<pkg>` over `pnpm dlx` for non-interactive, minimal-access tools (formatters, type checkers, codegen). Use `pnpm dlx` for interactive CLIs or tools needing filesystem/network access.
 
 ## Python — Toolchain
 
-- **Never** invoke the system Python interpreter or modify system-level packages:
+- **Never** invoke the system Python or modify system-level packages.
   - Forbidden: `python`, `python3`, `pip`, `pip3`, `python -m pip`, `sudo pip`, `virtualenv`, `poetry`.
-  - This applies even when a venv is active — always go through `uv`.
+  - This applies even inside a venv — always go through `uv`.
 - Always use `uv` for environment and dependency management.
+- For single-file scripts with dependencies, prefer PEP 723 inline metadata (`uv run file.py`) over creating a full project.
+- Always use `ty` for static type checking instead of `mypy` or `pyright`.
 
 | Intent                         | Command              |
 | ------------------------------ | -------------------- |
@@ -30,28 +32,5 @@ Prefer deno run npm:<pkg> over pnpm dlx when the tool is non-interactive and has
 | One-off tool execution         | `uvx <tool>`         |
 | Run Python directly            | `uv run python`      |
 | Run a PEP 723 inline-meta file | `uv run <file.py>`   |
-
-### PEP 723 — Inline Script Metadata
-
-For single-file scripts with dependencies, prefer PEP 723 inline metadata over creating a full project. `uv` resolves and installs dependencies automatically on first run.
-
-```python
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["httpx", "rich"]
-# ///
-
-import httpx
-...
-```
-
-Run with: `uv run file.py` — no `uv sync`, no `pyproject.toml` required.
-
-Use a full `uv` project (`uv sync`) when the script grows into a multi-file module, requires editable installs, or is intended as a reusable library.
-
-- Always use `ty` for static type checking instead of `mypy` or `pyright`.
-
-| Intent                     | Command           |
-| -------------------------- | ----------------- |
-| Type-check current project | `ty check`        |
-| Type-check a specific file | `ty check <path>` |
+| Type-check project             | `ty check`           |
+| Type-check a file              | `ty check <path>`    |
