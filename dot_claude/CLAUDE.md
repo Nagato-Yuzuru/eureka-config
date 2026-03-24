@@ -34,3 +34,11 @@ Prefer `deno run npm:<pkg>` over `pnpm dlx` for non-interactive, minimal-access 
 | Run a PEP 723 inline-meta file | `uv run <file.py>`   |
 | Type-check project             | `ty check`           |
 | Type-check a file              | `ty check <path>`    |
+
+## Engineering Principles
+
+**Error handling**: Prefer loud failure over silent suppression. Do not add fallbacks, default values, or catch-and-continue logic for internal code paths. At system boundaries (user input, external APIs), handle errors explicitly — everywhere else, let them propagate so they surface early.
+
+**Tests**: Tests must verify actual runtime behavior and must be capable of failing. Do not write tests that always pass regardless of behavior — e.g., asserting a function exists, checking its type signature, or testing constants.
+
+**No duplication**: If something is defined in one place, reference or import it — don't copy it. Duplication creates divergence.
