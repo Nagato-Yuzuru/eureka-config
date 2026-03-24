@@ -17,7 +17,7 @@ COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 # Check for npm/npx usage (word boundary matching)
 # Allow "pnpm" — only block standalone "npm" or "npx"
 if echo "$COMMAND" | grep -qE '(^|[;&|( ])n(pm|px)( |$|[;&|)])'; then
-  cat <<'EOF'
+  cat >&2 <<'EOF'
 BLOCKED: Do not use npm or npx.
 
 Use instead:
