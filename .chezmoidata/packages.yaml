@@ -16,6 +16,7 @@ packages:
     - antidote
     - starship
     - git-cliff
+    - yazi
   darwin:
     brews:
       - gawk

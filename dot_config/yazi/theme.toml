@@ -1,0 +1,4 @@
+#:schema https://raw.githubusercontent.com/yazi-rs/schemas/refs/heads/main/schemas/theme.json
+
+[flavor]
+dark = "rose-pine-moon"

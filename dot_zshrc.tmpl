@@ -164,6 +164,15 @@ alias ls='ls --color=auto'
 {{- end }}
 alias grep='grep --color=auto'
 
+function yazi() {
+    local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
+    command yazi "$@" --cwd-file="$tmp"
+    if cwd="$(command cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
+        builtin cd -- "$cwd"
+    fi
+    rm -f -- "$tmp"
+}
+
 {{- if eq .chezmoi.os "darwin" }}
 alias cleanproxy='networksetup -setwebproxystate Wi-Fi off && networksetup -setsecurewebproxystate Wi-Fi off && networksetup -setautoproxystate Wi-Fi off'
 {{- end }}
