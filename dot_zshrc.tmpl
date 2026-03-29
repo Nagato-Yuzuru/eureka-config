@@ -54,13 +54,13 @@ compinit
 
 autoload bashcompinit && bashcompinit
 
-antidote load
-
 if command -v carapace &> /dev/null; then
     export CARAPACE_BRIDGES='zsh,bash,inshellisense'
     zstyle ':completion:*' format-explanation '  %e'
     source <(carapace _carapace)
 fi
+
+antidote load
 
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
 zstyle ':completion:*' menu select
@@ -102,9 +102,11 @@ fi
 {{- end }}
 
 zstyle ':completion:*:git-checkout:*' sort false
-zstyle ':fzf-tab:complete:*:*' fzf-preview 'less ${(Q)realpath}'
+zstyle ':fzf-tab:complete:*:*' fzf-preview '[[ -n ${(Q)realpath} ]] && { [[ -d ${(Q)realpath} ]] && ls -la -- ${(Q)realpath} || less -- ${(Q)realpath} }'
 zstyle ':fzf-tab:*' fzf-bindings 'forward-slash:accept'
 zstyle ':fzf-tab:*' fzf-bindings 'ctrl-e:accept'
+zstyle ':fzf-tab:*' continuous-trigger '/'
+zstyle ':fzf-tab:*' query-string prefix first
 # -------------------
 # zsh options
 
