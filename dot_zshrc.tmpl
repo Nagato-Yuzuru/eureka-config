@@ -64,6 +64,7 @@ antidote load
 
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
 zstyle ':completion:*' menu select
+zstyle ':completion:*:descriptions' format '%d'
 
 
 
@@ -102,9 +103,17 @@ fi
 {{- end }}
 
 zstyle ':completion:*:git-checkout:*' sort false
-zstyle ':fzf-tab:complete:*:*' fzf-preview '[[ -n ${(Q)realpath} ]] && { [[ -d ${(Q)realpath} ]] && ls -la -- ${(Q)realpath} || less -- ${(Q)realpath} }'
-zstyle ':fzf-tab:*' fzf-bindings 'forward-slash:accept'
-zstyle ':fzf-tab:*' fzf-bindings 'ctrl-e:accept'
+zstyle ':fzf-tab:complete:*' fzf-preview \
+  'local p=${word%% }
+   if [[ -d $p ]]; then tree -C -L 2 $p
+   elif [[ -f $p ]]; then bat --color=always --line-range=:300 --style=numbers $p
+   fi'
+zstyle ':fzf-tab:complete:*' fzf-flags --preview-window=right:60%:wrap
+zstyle ':fzf-tab:*' fzf-bindings \
+    'ctrl-e:accept' \
+    'ctrl-f:preview-half-page-down' \
+    'ctrl-b:preview-half-page-up' \
+    'ctrl-/:toggle-preview'
 zstyle ':fzf-tab:*' continuous-trigger '/'
 zstyle ':fzf-tab:*' query-string prefix first
 # -------------------
