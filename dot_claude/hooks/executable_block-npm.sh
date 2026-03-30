@@ -9,15 +9,18 @@ TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
 
 # Only check Bash tool calls
 if [[ "$TOOL_NAME" != "Bash" ]]; then
-  exit 0
+    exit 0
 fi
 
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 
-# Check for npm/npx usage (word boundary matching)
-# Allow "pnpm" — only block standalone "npm" or "npx"
-if echo "$COMMAND" | grep -qE '(^|[;&|( ])n(pm|px)( |$|[;&|)])'; then
-  cat >&2 <<'EOF'
+# Check for npm/npx usage in command position only.
+# 1. Strip single- and double-quoted strings so text like echo "use npm" is ignored.
+# 2. Strip comments (# ...).
+# 3. Match npm/npx only at command position: start of line, or after && || ; | ( — optionally preceded by sudo.
+SANITIZED=$(echo "$COMMAND" | sed "s/'[^']*'//g; s/\"[^\"]*\"//g; s/#.*//")
+if echo "$SANITIZED" | grep -qP '(?:^|&&|\|\|?|;|\()\s*(?:sudo\s+)?\bn(?:pm|px)\b'; then
+    cat >&2 <<'EOF'
 BLOCKED: Do not use npm or npx.
 
 Use instead:
@@ -28,7 +31,7 @@ Use instead:
 
 This is enforced by user policy. See ~/.claude/CLAUDE.md for details.
 EOF
-  exit 2
+    exit 2
 fi
 
 exit 0
