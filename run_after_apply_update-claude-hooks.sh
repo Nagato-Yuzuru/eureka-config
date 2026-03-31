@@ -6,7 +6,7 @@
 set -euo pipefail
 
 SETTINGS_FILE="${HOME}/.claude/settings.json"
-EXPECTED_COMMAND="${HOME}/.local/bin/claude-block-npm"
+EXPECTED_COMMAND="${HOME}/.claude/hooks/block-npm.sh"
 
 if [[ ! -f "$SETTINGS_FILE" ]]; then
   exit 0
