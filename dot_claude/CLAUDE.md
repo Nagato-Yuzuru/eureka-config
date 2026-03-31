@@ -42,3 +42,7 @@ Prefer `deno run npm:<pkg>` over `pnpm dlx` for non-interactive, minimal-access 
 **Tests**: Tests must verify actual runtime behavior and must be capable of failing. Do not write tests that always pass regardless of behavior — e.g., asserting a function exists, checking its type signature, or testing constants.
 
 **No duplication**: If something is defined in one place, reference or import it — don't copy it. Duplication creates divergence.
+
+## API Design
+
+- When designing or modifying APIs, you MUST fetch and read the relevant AIP rules from https://google.aip.dev before proceeding. NEVER assume you know what an AIP rule says from memory — always verify against the actual documentation.
