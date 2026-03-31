@@ -1,0 +1,2 @@
+#:schema https://raw.githubusercontent.com/SchemaStore/schemastore/master/src/schemas/json/uv.json
+exclude-newer = "P7D"
