@@ -15,6 +15,7 @@ packages:
     - make
     - antidote
     - starship
+    - shellcheck
     - git-cliff
     - yazi
   darwin:
