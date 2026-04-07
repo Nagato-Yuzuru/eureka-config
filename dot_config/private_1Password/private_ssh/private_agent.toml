@@ -42,13 +42,5 @@ item = "Github"
 vault = 'Dev'
 
 [[ssh-keys]]
-item = "Major EC2 Admin"
-vault = "AWS Admin IAM"
-
-[[ssh-keys]]
-item = "AWS Major EC2 DevOps"
-vault = "AWS DevOps IAM"
-
-[[ssh-keys]]
 item = "Terraqt"
 vault = "Work"
