@@ -30,3 +30,4 @@ packages:
       - 1password-cli
       - orbstack
       - istat-menus
+      - copilot-cli
