@@ -4,6 +4,7 @@ packages:
     - ripgrep
     - fd
     - jq
+    - git
     - bat
     - delta
     - zoxide
@@ -31,3 +32,4 @@ packages:
       - orbstack
       - istat-menus
       - copilot-cli
+      - karabiner-elements
