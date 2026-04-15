@@ -43,6 +43,23 @@ Prefer `deno run npm:<pkg>` over `pnpm dlx` for non-interactive, minimal-access 
 
 **No duplication**: If something is defined in one place, reference or import it — don't copy it. Duplication creates divergence.
 
+## Subagent Model Selection
+
+**This rule is MANDATORY. You MUST follow it every single time you spawn a subagent, without exception.**
+
+When calling the Agent tool, you MUST select the model based on task type:
+
+| Task type | Required model |
+|-----------|----------------|
+| Web fetching, summarization, document retrieval | `haiku` |
+| File search, grep/glob aggregation, log scanning | `haiku` |
+| Code reasoning, architecture analysis, code generation | `sonnet` |
+| Complex multi-file planning or refactoring | `opus` |
+
+**Default to `haiku` for any subagent that does not require reasoning or code generation.** If you are unsure, ask yourself: "Does this task require judgment, or just retrieval and aggregation?" If the answer is retrieval/aggregation, use `haiku`.
+
+Never spawn a subagent without explicitly setting the `model` parameter. Inheriting the parent model for lightweight tasks is **wasteful and forbidden**.
+
 ## API Design
 
 - When designing or modifying APIs, you MUST fetch and read the relevant AIP rules from https://google.aip.dev before proceeding. NEVER assume you know what an AIP rule says from memory — always verify against the actual documentation.
