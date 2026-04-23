@@ -19,6 +19,7 @@ packages:
     - shellcheck
     - git-cliff
     - yazi
+    - jd
   darwin:
     brews:
       - gawk
