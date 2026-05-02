@@ -26,8 +26,9 @@ packages:
       - grep
       - gnu-sed
       - coreutils
+      - daipeihust/tap/im-select
     casks:
-      - wezterm
+      - wezterm@nightly
       - raycast
       - 1password-cli
       - orbstack

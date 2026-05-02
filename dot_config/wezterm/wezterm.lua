@@ -88,7 +88,6 @@ config.enable_scroll_bar = true
 -- 默认工作目录
 config.default_cwd = wezterm.home_dir
 
--- 启动时最大化窗口
 config.initial_cols = 120
 config.initial_rows = 30
 
@@ -104,11 +103,11 @@ config.enable_kitty_keyboard = true
 
 -- 鼠标设置
 config.mouse_bindings = {
-	-- 单击左键打开链接
+	-- 无修饰键左键：有选区时完成选中并复制，否则打开链接
 	{
 		event = { Up = { streak = 1, button = "Left" } },
 		mods = "NONE",
-		action = wezterm.action.CompleteSelection("ClipboardAndPrimarySelection"),
+		action = wezterm.action.CompleteSelectionOrOpenLinkAtMouseCursor("ClipboardAndPrimarySelection"),
 	},
 	-- Ctrl+左键点击打开链接（改进版）
 	{
@@ -116,11 +115,23 @@ config.mouse_bindings = {
 		mods = "CTRL",
 		action = wezterm.action.OpenLinkAtMouseCursor,
 	},
+	-- 吞掉 Ctrl+Down，避免事件透传给 vim/tmux 等监听鼠标的程序
+	{
+		event = { Down = { streak = 1, button = "Left" } },
+		mods = "CTRL",
+		action = wezterm.action.Nop,
+	},
 	-- Command+左键点击打开链接（Mac友好）
 	{
 		event = { Up = { streak = 1, button = "Left" } },
 		mods = "SUPER",
 		action = wezterm.action.OpenLinkAtMouseCursor,
+	},
+	-- 吞掉 Cmd+Down，避免事件透传给 vim/tmux 等监听鼠标的程序
+	{
+		event = { Down = { streak = 1, button = "Left" } },
+		mods = "SUPER",
+		action = wezterm.action.Nop,
 	},
 }
 
