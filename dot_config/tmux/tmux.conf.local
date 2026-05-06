@@ -82,6 +82,14 @@ bind m run "cut -c3- '#{TMUX_CONF}' | sh -s _toggle_mouse" \; display 'mouse #{?
 tmux_conf_24b_colour=auto
 set -g default-terminal "tmux-256color"
 set -as terminal-overrides ',*:Tc'
+
+# Forward kitty-keyboard-protocol / CSI-u extended keys to inner programs.
+# Required by ~/.config/nvim/lua/core/keymaps.lua — <C-S-A> (decrement) must be
+# distinguishable from <C-a> (increment). Outer terminal must also support it
+# (WezTerm: enable_kitty_keyboard = true). After changing, run `tmux kill-server`.
+set -s  extended-keys on
+set -as terminal-features '*:extkeys'
+
 tmux_conf_theme=enabled
 
 set -g allow-passthrough on
