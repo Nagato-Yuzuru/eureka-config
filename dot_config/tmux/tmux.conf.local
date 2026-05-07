@@ -19,6 +19,8 @@ tmux_conf_copy_to_os_clipboard=true
 tmux_conf_urlscan_options="--compact --dedupe"
 
 set -g mouse on
+# 缩短 Esc 抖动延迟，让 nvim 退 insert 模式即时响应（默认 500ms 太长）
+set -g escape-time 10
 # set -gu prefix2
 unbind C-a
 unbind C-b
@@ -57,15 +59,17 @@ bind-key -T copy-mode-vi 'C-k' select-pane -U
 bind-key -T copy-mode-vi 'C-l' select-pane -R
 bind-key -T copy-mode-vi 'C-\' select-pane -l
 
-bind -T copy-mode-vi y send-keys -X copy-pipe "say"
-
 # select windows
 unbind -n C-p
 unbind -n C-n
 
 
-bind C-n next-window 
+bind C-n next-window
 bind C-p previous-window
+
+# sync panes：把当前 window 内所有 pane 的键盘输入广播在一起。常用于多机 SSH 同步操作。
+# prefix + S 切换；状态栏会闪一下提示新状态，平时由 #{synchronized} 持续指示。
+bind S setw synchronize-panes \; display-message "Sync panes: #{?pane_synchronized,ON,off}"
 
 
 # set -g prefix C-a
@@ -89,6 +93,10 @@ set -as terminal-overrides ',*:Tc'
 # (WezTerm: enable_kitty_keyboard = true). After changing, run `tmux kill-server`.
 set -s  extended-keys on
 set -as terminal-features '*:extkeys'
+
+# OSC 52：让 tmux 把 set-buffer -w 的内容转发给宿主终端剪贴板（WezTerm 原生支持）。
+# 默认值 external 已够用；显式置 on 同时允许内层程序（如 nvim）通过 OSC 52 写剪贴板。
+set -s set-clipboard on
 
 tmux_conf_theme=enabled
 
@@ -114,6 +122,9 @@ tmux_conf_theme_colour_14="#1a1b26"   # Black
 tmux_conf_theme_colour_15="#1a1b26"   # Black
 tmux_conf_theme_colour_16="#f7768e"   # Red
 tmux_conf_theme_colour_17="#c0caf5"   # White
+
+# 状态栏内部分隔符色（更暗的 Tokyo Night Storm 灰，独立于 17 标准槽）
+tmux_conf_theme_separator_fg="#3b4261"
 
 # 3. 界面元素样式 (引用上方变量)
 
@@ -175,11 +186,11 @@ tmux_conf_theme_status_left_attr="bold"
 # 2. 区分用户：User 使用洋红背景(Magenta)，Host 使用蓝色背景(Blue)
 
 tmux_conf_theme_status_right=" #{prefix}#{mouse}#{pairing}#{synchronized} \
-#[fg=#3b4261]| #{cpu_fg_color} #{cpu_percentage} \
-#[fg=#3b4261]| #{ram_fg_color} #{ram_percentage} \
-#[fg=#3b4261]| #[fg=#7aa2f7]󰓡 #[fg=#a9b1d6]#{swap_percentage} \
-#[fg=#3b4261]| #{battery_color_charge_fg}#[bg=#24283b]#{battery_icon} #[bg=#24283b]#{battery_percentage} \
-#[fg=#3b4261]| #[fg=#bb9af7,bold]#{username}#[fg=#a9b1d6,nobold] @ #[fg=#7aa2f7,bold]#{hostname} "
+#[fg=$tmux_conf_theme_separator_fg]| #{cpu_fg_color} #{cpu_percentage} \
+#[fg=$tmux_conf_theme_separator_fg]| #{ram_fg_color} #{ram_percentage} \
+#[fg=$tmux_conf_theme_separator_fg]| #[fg=$tmux_conf_theme_colour_4]󰓡 #[fg=$tmux_conf_theme_colour_12]#{swap_percentage} \
+#[fg=$tmux_conf_theme_separator_fg]| #{battery_color_charge_fg}#[bg=$tmux_conf_theme_colour_2]#{battery_icon} #[bg=$tmux_conf_theme_colour_2]#{battery_percentage} \
+#[fg=$tmux_conf_theme_separator_fg]| #[fg=$tmux_conf_theme_colour_9,bold]#{username}#[fg=$tmux_conf_theme_colour_12,nobold] @ #[fg=$tmux_conf_theme_colour_4,bold]#{hostname} "
 
 # 兜底样式 (深灰背景)
 tmux_conf_theme_status_right_fg="$tmux_conf_theme_colour_12"
@@ -290,13 +301,41 @@ set -g @sessionx-bind 'o'
 set -g @sessionx-preview-location 'right'
 set -g @sessionx-preview-ratio '55%'
 
-set -g @plugin 'tmux-plugins/tmux-yank' # 辅助复制
+set -g @plugin 'tmux-plugins/tmux-yank' # 辅助复制（自动探测 pbcopy/xclip/wl-copy/clip.exe）
 set -g @plugin 'laktak/extrakto'
-set -g @extrakto_clip_tool "pbcopy" # macOS 剪贴板
+set -g @extrakto_clip_tool "auto"   # 让 extrakto 自己探测平台剪贴板
 set -g @extrakto_editor "nvim"      # 按 ctrl-e 编辑时使用 nvim
 set -g @extrakto_fzf_tool "fzf"
 
-cpu_load_path="#($HOME/.config/tmux/plugins/tmux-mem-cpu-load/tmux-mem-cpu-load -a 0 -g 0 --cpu-mode 1 --interval 2)"
+# === 升级补丁：discoverability + fzf + 抓屏 jump + 浮窗 ===
+
+# tmux-which-key：prefix + Space 弹出按键菜单，告别"不会就不会用"
+set -g @plugin 'alexwforsythe/tmux-which-key'
+
+# tmux-fzf：prefix + f 进入 fzf 总入口（kill-pane / kill-window / kill-session / 切 session …）
+set -g @plugin 'sainnhe/tmux-fzf'
+set-environment -g TMUX_FZF_LAUNCH_KEY 'f'
+
+# tmux-thumbs：prefix + j 在屏幕上对 URL / 路径 / hash / 数字 打 hint
+# 小写字母 = 拷到系统剪贴板（走 tmux OSC 52，无需 pbcopy/xclip）
+# 大写字母 = 拷贝并直接粘到当前 pane（终端内立即用）
+set -g @plugin 'fcsonline/tmux-thumbs'
+set -g @thumbs-key j
+set -g @thumbs-command 'tmux set-buffer -w -- {}'
+set -g @thumbs-upcase-command 'tmux set-buffer -w -- {} && tmux paste-buffer'
+
+# tmux-jump：vim-easymotion 风格的"任意字符"跳转（thumbs 是固定正则匹配，jump 才是任意文本）
+# 用法：prefix + J → 输入一个字符 → 屏幕上该字符的所有出现位置叠加字母 → 按字母光标直接跳过去
+# （进 copy-mode 后用更顺手；外面用会自动切到 copy-mode）
+set -g @plugin 'schasse/tmux-jump'
+set -g @jump-key 'J'
+
+# 浮窗（display-popup，tmux 3.2+）：弹输入框 → 把输入的命令在浮窗里跑
+# - 例：输入 "lazygit" / "btop" / "nvim ." / "git log --oneline -20"
+# - 空输入直接 Enter → 浮窗打开当前 $SHELL（默认行为）
+# - 输出看完后按命令自身退出键，浮窗会关掉（display-popup -E）
+bind -N "Popup prompt" ';' command-prompt -p "popup>" \
+  "display-popup -E -w 80% -h 80% -d '#{pane_current_path}' '%%'"
 
 # -- custom variables ----------------------------------------------------------
 
@@ -346,6 +385,17 @@ cpu_load_path="#($HOME/.config/tmux/plugins/tmux-mem-cpu-load/tmux-mem-cpu-load 
 #   url="https://api.github.com/repos/${repository:-gpakosz/.tmux}"
 #   curl -s "$url" | perl -MJSON::PP=decode_json -CO -0777 -E '$response = decode_json(readline *STDIN); say ($response->{stargazers_count})'
 #   sleep 300                                         # sleep for 5 minutes, throttle network requests whatever the value of status-interval
+# }
+#
+# # usage: #{swap_percentage}  — portable swap %, Linux + macOS
+# swap_percentage() {
+#   if [ -r /proc/meminfo ]; then
+#     awk '/^SwapTotal:/{t=$2} /^SwapFree:/{f=$2} END{ if(t>0) printf "%d%%",(t-f)*100/t; else printf "0%%" }' /proc/meminfo
+#   elif command -v sysctl >/dev/null 2>&1; then
+#     sysctl -n vm.swapusage 2>/dev/null | awk '{ if ($3+0 > 0) printf "%d%%", ($6+0)*100/($3+0); else printf "0%%" }'
+#   else
+#     printf 'n/a'
+#   fi
 # }
 #
 # "$@"
