@@ -67,6 +67,9 @@ unbind -n C-n
 bind C-n next-window
 bind C-p previous-window
 
+# next-layout：prefix+Space 已被 which-key 占用，挪到 Alt+Space
+bind -r M-Space next-layout
+
 # sync panes：把当前 window 内所有 pane 的键盘输入广播在一起。常用于多机 SSH 同步操作。
 # prefix + S 切换；状态栏会闪一下提示新状态，平时由 #{synchronized} 持续指示。
 bind S setw synchronize-panes \; display-message "Sync panes: #{?pane_synchronized,ON,off}"
