@@ -66,13 +66,18 @@ config.keys = {
 	{ key = "k", mods = "SUPER|SHIFT", action = wezterm.action.ActivatePaneDirection("Up") },
 	{ key = "j", mods = "SUPER|SHIFT", action = wezterm.action.ActivatePaneDirection("Down") },
 
-	-- 字体大小调整
+	-- 字体大小调整：只走 SUPER（macOS 习惯）。CTRL+0/=/- 是 WezTerm 默认
+	-- action，会在协议编码前被吞，挡住 nvim 收到 <C-0>/<C-=>/<C-->——显式
+	-- DisableDefaultAssignment 把 CTRL 这组放行给内层 TUI。
+	-- 整体约定：Cmd/Super 域归 WezTerm，Ctrl 域归 nvim/tmux/shell。
 	{ key = "=", mods = "SUPER", action = wezterm.action.IncreaseFontSize },
 	{ key = "-", mods = "SUPER", action = wezterm.action.DecreaseFontSize },
-	-- { key = "-", mods = "CTRL|SHIFT", action = wezterm.action.SendString("\x1f") },
-	{ key = "_", mods = "CTRL|SHIFT", action = wezterm.action.DisableDefaultAssignment }, -- 添加这个作为备选
-
 	{ key = "0", mods = "SUPER", action = wezterm.action.ResetFontSize },
+
+	{ key = "0", mods = "CTRL", action = wezterm.action.DisableDefaultAssignment },
+	{ key = "=", mods = "CTRL", action = wezterm.action.DisableDefaultAssignment },
+	{ key = "-", mods = "CTRL", action = wezterm.action.DisableDefaultAssignment },
+	{ key = "_", mods = "CTRL|SHIFT", action = wezterm.action.DisableDefaultAssignment },
 	-- 全屏切换
 	{ key = "f", mods = "SUPER|SHIFT", action = wezterm.action.ToggleFullScreen },
 }
