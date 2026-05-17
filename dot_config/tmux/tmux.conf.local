@@ -81,8 +81,20 @@ bind S setw synchronize-panes \; display-message "Sync panes: #{?pane_synchroniz
 # if you don't want Oh my tmux! to alter a binding or a setting, use #!important
 # bind c new-window -c '#{pane_current_path}' #!important
 
-# display a message after toggling mouse support
-bind m run "cut -c3- '#{TMUX_CONF}' | sh -s _toggle_mouse" \; display 'mouse #{?#{mouse},on,off}'
+# pane mark / unmark：恢复 tmux 默认含义（原来 `m` 被改成 mouse toggle，已去掉；
+# 临时开关 mouse 用 `prefix :` set mouse on/off 兜底）。
+# mark 后，`prefix @` 把它拉到当前 pane 旁边；swap-pane / move-pane 也默认用 marked pane。
+bind m select-pane -m \; display "pane marked"
+bind M select-pane -M \; display "mark cleared"
+
+# join-pane：与 tmux 默认 `prefix !` break-pane 对称。
+# 默认 -h，marked pane 出现在当前 pane 右侧（左右分屏）。
+bind @ join-pane -h
+
+# prefix ? 改成 tmux-fzf 的 keybinding 模糊搜索（替换默认 list-keys 纯文本 dump）。
+# 内容仍来自 `tmux list-keys`（全量），多了 fzf 过滤；选中回车直接执行。
+# 想看原始 dump：`prefix :` list-keys。
+bind ? run-shell -b "#{TMUX_PLUGIN_MANAGER_PATH}/tmux-fzf/scripts/keybinding.sh"
 
 
 # display
