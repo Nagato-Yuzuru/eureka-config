@@ -17,7 +17,6 @@ opentofu = "latest"
 kubectl = "latest"
 k9s = "latest"
 cmake = "latest"
-carapace = "latest"
 
 just = "latest"
 

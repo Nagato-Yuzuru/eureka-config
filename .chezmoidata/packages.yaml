@@ -20,6 +20,7 @@ packages:
     - git-cliff
     - yazi
     - jd
+    - carapace
   darwin:
     brews:
       - gawk
