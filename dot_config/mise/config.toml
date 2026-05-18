@@ -3,7 +3,7 @@
 [tools]
 go = "latest"
 uv = "latest"
-rust = "latest"
+rust = "stable"
 deno = "latest"
 pnpm = "latest"
 node = "lts"
