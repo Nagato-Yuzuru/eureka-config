@@ -66,9 +66,6 @@ zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
 zstyle ':completion:*' menu select
 zstyle ':completion:*:descriptions' format '%d'
 
-
-
-
 # Starship
 eval "$(starship init zsh)"
 
@@ -86,8 +83,8 @@ if command -v fzf &>/dev/null; then
     source <(fzf --zsh)
 fi
 
-{{ if eq .chezmoi.os "darwin" }}
-if command -v gdircolors &> /dev/null; then
+{{- if eq .chezmoi.os "darwin" }}
+if command -v gdircolors &>/dev/null; then
     eval "$(gdircolors -b)"
     zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
 else
@@ -125,7 +122,7 @@ setopt auto_cd
 setopt autopushd
 typeset -i DIRSTACKSIZE=127
 
-export WORDCHARS=${WORDCHARS/\/}
+export WORDCHARS=${WORDCHARS/\//}
 {{- if eq .chezmoi.os "darwin" }}
 export HOMEBREW_AUTO_UPDATE_SECS=3600
 {{- end }}
@@ -146,8 +143,6 @@ bindkey '^[[A' history-substring-search-up
 bindkey '^[[B' history-substring-search-down
 bindkey '^P' history-substring-search-up
 bindkey '^N' history-substring-search-down
-
-
 
 # aliases
 alias rm='rm -i'
@@ -197,20 +192,17 @@ function yazi() {
 alias cleanproxy='networksetup -setwebproxystate Wi-Fi off && networksetup -setsecurewebproxystate Wi-Fi off && networksetup -setautoproxystate Wi-Fi off'
 {{- end }}
 
-
 function wellcome() {
-    if ! command -v cowsay &> /dev/null; then return; fi
+    if ! command -v cowsay &>/dev/null; then return; fi
 
-    local cows=( alpaca bud-frogs cheese cupcake daemon elephant eyes fox head-in llama milk moose mutilated stegosaurus sus turtle tux)
+    local cows=(alpaca bud-frogs cheese cupcake daemon elephant eyes fox head-in llama milk moose mutilated stegosaurus sus turtle tux)
     local cow=$(shuf -n 1 -e "${cows[@]}")
     local mood=$(shuf -n 1 -e -- -b -d -g -p -s -t -w)
 
-    figlet -c "Welcome $1" \
-        | cowsay -n "$mood" -f "$cow" \
-        | lolcat
+    figlet -c "Welcome $1" |
+        cowsay -n "$mood" -f "$cow" |
+        lolcat
 }
-
-
 
 [[ -o interactive && -z "${INTELLIJ_ENVIRONMENT_READER}" ]] && wellcome "YuzuRu"
 
