@@ -1,5 +1,7 @@
-[plugin]
-deps = []
+[[plugin.deps]]
+use = "XYenon/clipboard"
+rev = "68b506d"
+hash = "f43576db983846d8d5b139ece1eda439"
 
 [[flavor.deps]]
 use = "Miuzarte/synthwave84"

@@ -7,3 +7,18 @@ desc = "Quit"
 on = "Q"
 run = "quit"
 desc = "Quit and cd to current dir"
+
+[[mgr.prepend_keymap]]
+on = "y"
+run = ["yank", "plugin clipboard -- --action=copy"]
+desc = "Yank + system clipboard"
+
+[[mgr.prepend_keymap]]
+on = "x"
+run = ["yank --cut", "plugin clipboard -- --action=copy"]
+desc = "Cut + system clipboard"
+
+[[mgr.prepend_keymap]]
+on = "<C-p>"
+run = "plugin clipboard -- --action=paste"
+desc = "Paste from system clipboard"
