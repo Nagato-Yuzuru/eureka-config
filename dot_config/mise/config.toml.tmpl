@@ -5,7 +5,11 @@ go = "latest"
 uv = "latest"
 rust = "stable"
 deno = "latest"
+{{- if and (eq .chezmoi.os "darwin") ( eq .chezmoi.arch "amd64" ) }}
+"npm:pnpm" = "latest"
+{{- else }}
 pnpm = "latest"
+{{- end }}
 node = "lts"
 
 golangci-lint = "latest"
@@ -28,6 +32,8 @@ hugo-extended = "latest"
 [settings]
 experimental = true
 python.uv_venv_auto = "source" # use uv
+env_cache = true
+env_cache_ttl = "6h"
 
 [tasks.refresh-completions]
 description = "generate zsh completions scripts"
