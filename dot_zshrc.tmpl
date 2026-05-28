@@ -30,12 +30,21 @@ export EDITOR=nvim
 # ------------
 #
 {{- if eq .chezmoi.os "darwin" }}
-source "$(brew --prefix)/share/antidote/antidote.zsh"
+ANTIDOTE_HOME="$(brew --prefix)/share/antidote"
 {{- else if eq .chezmoi.os "linux" }}
 # Antidote installation path for Linux
 # Install antidote: git clone --depth=1 https://github.com/mattmc3/antidote.git ${ZDOTDIR:-~}/.antidote
-source "${ZDOTDIR:-${HOME}}/.antidote/antidote.zsh"
+ANTIDOTE_HOME="${ZDOTDIR:-${HOME}}/.antidote/"
 {{- end }}
+
+zsh_plugins_txt=${ZDOTDIR:-$HOME}/.zsh_plugins.txt
+zsh_plugins_zsh=${ZDOTDIR:-$HOME}/.zsh_plugins.zsh
+
+source $ANTIDOTE_HOME/antidote.zsh
+
+if [[ ! -s $zsh_plugins_zsh || ! $zsh_plugins_zsh -nt $zsh_plugins_txt ]]; then
+    antidote bundle <$zsh_plugins_txt >|$zsh_plugins_zsh
+fi
 
 fpath=(
     "${HOME}/.zsh/completions"
@@ -50,9 +59,18 @@ fpath=(
 fpath=(${(u)fpath})
 
 autoload -Uz compinit
-compinit
+
+if [[ -n ${ZDOTDIR:-$HOME}/.zcompdump(#qNmh+24) ]]; then
+    compinit
+else
+    compinit -C
+fi
+
+{ zcompile ${ZDOTDIR:-$HOME}/.zcompdump; } &|
 
 autoload bashcompinit && bashcompinit
+
+source $zsh_plugins_zsh
 
 if command -v carapace &>/dev/null; then
     export CARAPACE_BRIDGES='zsh,bash,inshellisense'
@@ -60,7 +78,7 @@ if command -v carapace &>/dev/null; then
     source <(carapace _carapace)
 fi
 
-antidote load
+# antidote load
 
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
 zstyle ':completion:*' menu select
@@ -205,4 +223,3 @@ function wellcome() {
 }
 
 [[ -o interactive && -z "${INTELLIJ_ENVIRONMENT_READER}" ]] && wellcome "YuzuRu"
-
