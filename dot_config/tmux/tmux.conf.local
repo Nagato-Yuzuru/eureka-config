@@ -101,6 +101,7 @@ bind ? run-shell -b "#{TMUX_PLUGIN_MANAGER_PATH}/tmux-fzf/scripts/keybinding.sh"
 tmux_conf_24b_colour=auto
 set -g default-terminal "tmux-256color"
 set -as terminal-overrides ',*:Tc'
+set -g focus-events on
 
 # Forward kitty-keyboard-protocol / CSI-u extended keys to inner programs.
 # Required by ~/.config/nvim/lua/core/keymaps.lua — <C-S-A> (decrement) must be

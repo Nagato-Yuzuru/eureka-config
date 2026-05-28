@@ -28,6 +28,7 @@ packages:
       - gnu-sed
       - coreutils
       - daipeihust/tap/im-select
+      - imagemagick
     casks:
       - wezterm@nightly
       - raycast
