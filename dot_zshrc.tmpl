@@ -84,6 +84,10 @@ zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
 zstyle ':completion:*' menu select
 zstyle ':completion:*:descriptions' format '%d'
 
+if command -v prek &>/dev/null; then
+    eval "$(COMPLETE=zsh prek)"
+fi
+
 # Starship
 eval "$(starship init zsh)"
 
