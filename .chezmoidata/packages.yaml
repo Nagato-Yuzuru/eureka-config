@@ -21,6 +21,7 @@ packages:
     - yazi
     - jd
     - carapace
+    - ast-grep
   darwin:
     brews:
       - gawk
