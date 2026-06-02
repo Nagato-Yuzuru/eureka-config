@@ -43,18 +43,29 @@ Prefer `deno run npm:<pkg>` over `pnpm dlx` for non-interactive, minimal-access 
 
 **No duplication**: If something is defined in one place, reference or import it — don't copy it. Duplication creates divergence.
 
+## Code Search — ast-grep vs. ripgrep
+
+- **Default to the ripgrep-backed `Grep` tool** for text searches: a string, identifier, import, log line, or "where does this name appear".
+- **Reach for `ast-grep` (`sg`) when the match depends on syntax, not text:**
+  - Call sites of a function (`foo($$$)`) — without hitting its definition, comments, or same-named strings.
+  - Filtering by node type (only type annotations, only decorators, a specific `try/catch` shape).
+  - Multi-line structural shapes that defeat regex.
+  - Structural rewrites / codemods (`sg --rewrite`).
+- **An empty `ast-grep` result never proves absence.** A mistyped pattern or unsupported language silently yields zero matches. On a surprising miss, fall back to ripgrep and say so — never report "not found" on an ast-grep miss alone.
+- Use ripgrep when the language isn't in ast-grep's parsers.
+
 ## Subagent Model Selection
 
 **This rule is MANDATORY. You MUST follow it every single time you spawn a subagent, without exception.**
 
 When calling the Agent tool, you MUST select the model based on task type:
 
-| Task type | Required model |
-|-----------|----------------|
-| Web fetching, summarization, document retrieval | `haiku` |
-| File search, grep/glob aggregation, log scanning | `haiku` |
-| Code reasoning, architecture analysis, code generation | `sonnet` |
-| Complex multi-file planning or refactoring | `opus` |
+| Task type                                              | Required model |
+| ------------------------------------------------------ | -------------- |
+| Web fetching, summarization, document retrieval        | `haiku`        |
+| File search, grep/glob aggregation, log scanning       | `haiku`        |
+| Code reasoning, architecture analysis, code generation | `sonnet`       |
+| Complex multi-file planning or refactoring             | `opus`         |
 
 **Default to `haiku` for any subagent that does not require reasoning or code generation.** If you are unsure, ask yourself: "Does this task require judgment, or just retrieval and aggregation?" If the answer is retrieval/aggregation, use `haiku`.
 
