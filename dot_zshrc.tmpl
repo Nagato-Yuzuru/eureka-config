@@ -73,7 +73,13 @@ autoload bashcompinit && bashcompinit
 source $zsh_plugins_zsh
 
 if command -v carapace &>/dev/null; then
-    export CARAPACE_BRIDGES='zsh,bash,inshellisense'
+    # NOTE: do NOT add 'zsh' here. carapace is already the zsh completer for
+    # every command, so bridging zsh->zsh is circular: carapace's ~1578
+    # "bridge to zsh" commands (uv, etc.) resolve back to _carapace_completer,
+    # which the bridge subshell can't invoke -> "command not found:
+    # _carapace_completer". Omitting zsh lets those commands keep their own
+    # native completions (e.g. _uv).
+    export CARAPACE_BRIDGES='bash,inshellisense'
     zstyle ':completion:*' format-explanation '  %e'
     source <(carapace _carapace)
 fi
