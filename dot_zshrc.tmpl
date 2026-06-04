@@ -94,8 +94,8 @@ if command -v prek &>/dev/null; then
     eval "$(COMPLETE=zsh prek)"
 fi
 
-if command -v ast-grep &>/dev/null && command -v sg &>/dev/null \
-    && whence -w _ast-grep &>/dev/null; then
+if command -v ast-grep &>/dev/null && command -v sg &>/dev/null &&
+    whence -w _ast-grep &>/dev/null; then
     compdef _ast-grep sg
 fi
 
