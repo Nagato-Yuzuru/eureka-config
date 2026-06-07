@@ -54,11 +54,14 @@ Prefer `deno run npm:<pkg>` over `pnpm dlx` for non-interactive, minimal-access 
 - **An empty `ast-grep` result never proves absence.** A mistyped pattern or unsupported language silently yields zero matches. On a surprising miss, fall back to ripgrep and say so — never report "not found" on an ast-grep miss alone.
 - Use ripgrep when the language isn't in ast-grep's parsers.
 
-## Subagent Model Selection
+## Subagent & Workflow Model Selection
 
-**This rule is MANDATORY. You MUST follow it every single time you spawn a subagent, without exception.**
+**This rule is MANDATORY. You MUST follow it every single time you spawn a subagent, without exception.** "Spawning a subagent" covers BOTH mechanisms:
 
-When calling the Agent tool, you MUST select the model based on task type:
+1. **The Agent tool** — set its `model` parameter.
+2. **The Workflow tool's `agent()` calls** — set `opts.model` on every call.
+
+Select the model based on task type:
 
 | Task type                                              | Required model |
 | ------------------------------------------------------ | -------------- |
@@ -69,7 +72,23 @@ When calling the Agent tool, you MUST select the model based on task type:
 
 **Default to `haiku` for any subagent that does not require reasoning or code generation.** If you are unsure, ask yourself: "Does this task require judgment, or just retrieval and aggregation?" If the answer is retrieval/aggregation, use `haiku`.
 
-Never spawn a subagent without explicitly setting the `model` parameter. Inheriting the parent model for lightweight tasks is **wasteful and forbidden**.
+Never spawn a subagent without explicitly setting its model — the Agent tool's `model` parameter or `agent()`'s `opts.model`. Inheriting the parent model for lightweight tasks is **wasteful and forbidden**.
+
+**Workflow caveat — this is the trap to avoid.** Workflow's `agent()` defaults to _inheriting the main-loop model_ (often `opus`), which silently bypasses this table and makes every workflow agent run as Opus. The Workflow tool's own guidance ("when unsure, omit `model`") is OVERRIDDEN by this rule. In a workflow script, encode the table once and pass `opts.model` on every `agent()`:
+
+```js
+const M = {
+  fetch: "haiku",
+  search: "haiku",
+  scan: "haiku",
+  reason: "sonnet",
+  codegen: "sonnet",
+  plan: "opus",
+};
+await agent(`Fetch and summarize ${url}`, { model: M.fetch });
+```
+
+Mirror the choice in `meta.phases[].model` for the progress UI if you like, but `opts.model` is what actually selects the model.
 
 ## API Design
 
