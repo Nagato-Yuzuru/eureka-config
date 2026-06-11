@@ -23,18 +23,18 @@ Prefer `deno run npm:<pkg>` over `pnpm dlx` for non-interactive, minimal-access 
 - For single-file scripts with dependencies, prefer PEP 723 inline metadata (`uv run file.py`) over creating a full project.
 - Always use `ty` for static type checking instead of `mypy` or `pyright`.
 
-| Intent                         | Command              |
-| ------------------------------ | -------------------- |
-| Create / sync environment      | `uv sync`            |
-| Add a package                  | `uv add <pkg>`       |
-| Add a dev dependency           | `uv add --dev <pkg>` |
-| Run a script                   | `uv run <script>`    |
-| One-off tool execution         | `uvx <tool>`         |
-| Run Python directly            | `uv run python`      |
-| Run a PEP 723 inline-meta file | `uv run <file.py>`   |
-| Type-check project             | `ty check`           |
-| Type-check a file              | `ty check <path>`    |
-| Audit deps (missing / unused)  | `uvx deptry .`       |
+| Intent                         | Command                         |
+| ------------------------------ | ------------------------------- |
+| Create / sync environment      | `uv sync`                       |
+| Add a package                  | `uv add <pkg>`                  |
+| Add a dev dependency           | `uv add --dev <pkg>`            |
+| Run a script                   | `uv run <script>`               |
+| One-off tool execution         | `uvx <tool>`                    |
+| Run Python directly            | `uv run python`                 |
+| Run a PEP 723 inline-meta file | `uv run <file.py>`              |
+| Type-check project             | `ty check`                      |
+| Type-check a file              | `ty check <path>`               |
+| Audit deps (missing / unused)  | `uv run --with deptry deptry .` |
 
 ## Python — Code Style
 
@@ -51,8 +51,12 @@ Prefer `deno run npm:<pkg>` over `pnpm dlx` for non-interactive, minimal-access 
   so it lands in `pyproject.toml` and the lockfile. Never rely on a transitively-
   or ambient-installed package. If you introduce an import, update
   `pyproject.toml` in the same change — code that imports an undeclared package
-  is incomplete. `deptry` (`uvx deptry .`) flags missing and unused
-  dependencies — run it to verify.
+  is incomplete. `deptry` flags missing and unused dependencies — run it in the
+  synced env (`uv run --with deptry deptry .`), never via `uvx` (an isolated env
+  can't read installed packages and mis-guesses module names, e.g.
+  `pyyaml`→`yaml`, producing false positives). In a monorepo, run it per package
+  (`uv run --with deptry deptry packages/<pkg>`), and whitelist runtime-only /
+  string-loaded backends via `[tool.deptry.per_rule_ignores]`.
 
 - **Be liberal in what you accept, strict in what you emit.** Type a parameter
   with the narrowest interface that actually works — `Iterable[SomeInterface]`,
