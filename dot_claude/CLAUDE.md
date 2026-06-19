@@ -109,6 +109,56 @@ _These principles are language-agnostic — apply them across all languages, not
 
 **Precise types over escape hatches**: Avoid dynamic escape-hatch types — Python `Any`, Go `any` / `interface{}`, TypeScript `unknown` / `any` — unless there is a specific, documented reason (genuinely dynamic data whose shape cannot be known, or an untyped third-party boundary). They disable the type checker for everything they touch. Prefer real types: concrete classes, generics, `Protocol` / interfaces, unions, `TypedDict`. When an escape hatch is truly necessary, add a comment explaining why a real type is not feasible.
 
+## Observability
+
+_Language-agnostic; these are the logging/instrumentation face of the error-handling and `context` rules above. The app emits to stdout / a collector — it does not own routing, rotation, or shipping. Decide level and payload while writing the code, not after._
+
+- **Emit structured events, never interpolated prose.** Log key–value / JSON
+  fields (`logger.info("order placed", order_id=id, amount=cents)`), not
+  `f"order {id} placed for {cents}"`. Structured fields are queryable and
+  aggregatable; a formatted sentence is neither. (This is "strict in what you
+  emit" applied to logs.)
+- **Levels carry meaning, and code branches on that meaning.** ERROR = a human
+  must act / an invariant broke; WARN = degraded but handled, self-healing;
+  INFO = a business-significant state transition (request served, job done,
+  payment captured); DEBUG = developer detail, off in production. "Everything at
+  INFO" is not observability. Tune verbosity by level, never by deleting logs.
+- **Log once, at the boundary where you handle — not at every layer.** Pairs with
+  the error-handling rule: an error that propagates is logged at the boundary
+  that finally handles it, not re-logged at each frame it crosses. **Never
+  log-and-throw** — that is the same failure recorded N times with no new
+  information. Either handle it (and log), or propagate it (and stay silent).
+- **Never log secrets, credentials, tokens, PII, or full request/response
+  bodies.** Treat the log sink as a lower trust boundary than the process. Redact
+  at the point of emission; log an identifier, not the sensitive value.
+- **Propagate correlation context.** Thread a trace/request id through the call
+  graph so a single operation is reconstructable across functions and services —
+  in Go this rides on the `context.Context` you already pass; elsewhere use the
+  OpenTelemetry context. A log line with no correlating id is hard to act on.
+- **Three pillars, used for what each is good at.** Logs = discrete events;
+  metrics = aggregates and rates (RED/USE); traces = cross-service latency and
+  causality. Keep metric/label cardinality bounded — never put unbounded values
+  (user id, request id, raw URL) in a metric label; those belong in logs or trace
+  attributes. **OpenTelemetry is the vendor-neutral default** for traces/metrics.
+
+| Language  | Structured logging           | Traces / metrics  |
+| --------- | ---------------------------- | ----------------- |
+| Python    | `structlog` (JSON to stdout) | OpenTelemetry SDK |
+| Go        | `log/slog` (stdlib, 1.21+)   | OpenTelemetry Go  |
+| TS / Node | `pino`                       | OpenTelemetry JS  |
+
+## Comments & Documentation
+
+_Governs committed, shared code; your local working tree is your own. Guiding ideas: an explanation rots with its distance from the code, a comment is unchecked by any compiler, and a caller must never need to read an implementation to use it._
+
+- **Comments carry _why_ and contract, never _what_.** If a comment explains what code does, prefer clearer code; keep it only for irreducible complexity (clever algorithm, workaround), and then say why the odd form is necessary.
+- **Doc comments are the contract, from the caller's view.** Signature + doc must suffice to use the thing without reading its body. State only what the signature can't: timezone/units, lifecycle/ownership, thread-safety, what it throws, side effects, how to cancel.
+- **Put each explanation in its closest home.** Symbol → doc comment; module rationale → module doc/ADR; architecture/runbooks → external docs. Prefer executable examples (doctest, Go `Example`, Rust doc-tests) over prose ones.
+- **A comment is a liability.** Change the code, change the comment in the same edit; if you can't keep it true, delete it.
+- **No commented-out code or inline changelogs in commits.** Git remembers better (`blame`, `log -L/-S`). Delete it; if the _absence_ is non-obvious, leave a `NOTE` with the why.
+- **Tag and link actionable debt.** Use the repo's TODO/FIXME/HACK/PERF/NOTE tags so debt stays queryable; give each an owner or ticket (`TODO(owner|#123)`). Cross-person or long-lived work goes in the tracker, not just a tag. "Fix later" is a tag, not buried prose.
+- **Defer format to the language's linter; scale doc effort to reach.** Public lib ≫ internal app ≫ throwaway. Match repo tone — keep it clean for public/customer-facing.
+
 ## Code Search — ast-grep vs. ripgrep
 
 - **Default to the ripgrep-backed `Grep` tool** for text searches: a string, identifier, import, log line, or "where does this name appear".
