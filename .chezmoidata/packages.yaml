@@ -30,6 +30,7 @@ packages:
       - coreutils
       - daipeihust/tap/im-select
       - imagemagick
+      - docker
     casks:
       - wezterm@nightly
       - raycast
