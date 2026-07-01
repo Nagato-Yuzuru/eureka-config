@@ -1,5 +1,19 @@
 # Global Preferences
 
+## Shell / Bash Tool — Active Aliases
+
+The Bash tool runs through my interactive zsh config (shell snapshot), so these aliases/functions are **live — it is not a vanilla shell**. Bypass any with `command <cmd>` (works for aliases and functions; `\cmd` escapes aliases only).
+
+| Typed  | Actually runs                 | Note                                                                                                                                  |
+| ------ | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `rm`   | `rm -i`                       | no TTY → silently **skips** the delete (does not hang); use `command rm` when you mean it                                             |
+| `mv`   | `mv -i`                       | no TTY → silently **skips** overwrite when dest exists                                                                                |
+| `sed`  | `gsed`                        | GNU syntax — do NOT use BSD `sed -i ''`                                                                                               |
+| `date` | `gdate`                       | GNU flags (`-d`, `+%s%N`), not BSD `-v`                                                                                               |
+| `grep` | ripgrep (Claude Code wrapper) | gitignore/VCS-aware, skips binaries — **not POSIX grep** (won't search ignored/.git files), not colored; `command grep` for real grep |
+
+(`ls`/`fd` are aliased to `--color=auto` but that is a no-op here — color is auto-suppressed when output isn't a TTY.)
+
 ## JavaScript / TypeScript — Package Manager
 
 - Always use `pnpm` instead of `npm` for all package operations.
