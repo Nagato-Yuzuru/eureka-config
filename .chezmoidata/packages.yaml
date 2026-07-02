@@ -29,7 +29,7 @@ packages:
       - gnu-sed
       - coreutils
       - daipeihust/tap/im-select
-      - imagemagick
+      - imagemagick-full
       - docker
     casks:
       # - wezterm@nightly
