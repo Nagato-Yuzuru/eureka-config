@@ -32,7 +32,8 @@ packages:
       - imagemagick
       - docker
     casks:
-      - wezterm@nightly
+      # - wezterm@nightly
+      - ghostty
       - raycast
       - 1password-cli
       - orbstack

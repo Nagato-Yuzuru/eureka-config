@@ -1,0 +1,38 @@
+font-family = JetBrainsMono Nerd Font
+font-style = Medium
+font-size = 14
+
+# ── 配色 / 主题 ──（对应 color_scheme = "Sakura"，Ghostty 内置同名主题）
+theme = Sakura
+# 光标颜色覆盖主题（对应 cursor_bg / cursor_fg）
+# Ghostty 块状光标没有单独的 border 颜色，cursor_border 无等价，已省略
+cursor-color = #E98038
+cursor-text = #FFFFFF
+
+# ── 光标样式 ──（对应 default_cursor_style = "SteadyBlock"）
+cursor-style = block
+cursor-style-blink = false
+
+background-opacity = 0.95
+
+macos-titlebar-style = hidden
+
+window-padding-x = 5
+window-padding-y = 5
+
+window-width = 120
+window-height = 30
+
+macos-option-as-alt = left
+
+selection-word-chars = " \t{}[]()\"'`,;:"
+
+shell-integration-features = no-cursor,no-sudo,title,ssh-env,ssh-terminfo,path
+
+auto-update = check
+auto-update-channel = stable
+
+mouse-hide-while-typing = true
+
+link-url = true
+
