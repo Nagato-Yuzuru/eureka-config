@@ -2,10 +2,8 @@ font-family = JetBrainsMono Nerd Font
 font-style = Medium
 font-size = 14
 
-# ── 配色 / 主题 ──（对应 color_scheme = "Sakura"，Ghostty 内置同名主题）
-theme = Sakura
-# 光标颜色覆盖主题（对应 cursor_bg / cursor_fg）
-# Ghostty 块状光标没有单独的 border 颜色，cursor_border 无等价，已省略
+theme = TokyoNight Storm
+
 cursor-color = #E98038
 cursor-text = #FFFFFF
 
