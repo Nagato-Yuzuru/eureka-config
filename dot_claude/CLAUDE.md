@@ -14,10 +14,9 @@ The Bash tool runs through my interactive zsh config (shell snapshot), so these 
 
 (`ls`/`fd` are aliased to `--color=auto` but that is a no-op here — color is auto-suppressed when output isn't a TTY.)
 
-## JavaScript / TypeScript — Package Manager
+## JavaScript / TypeScript
 
-- Always use `pnpm` instead of `npm` for all package operations.
-- Never run `npm install`, `npm ci`, `npm run`, or `npx`.
+Package manager is `pnpm` — never `npm`/`npx`. (A PreToolUse hook also blocks them; its error message carries this map.)
 
 | Intent               | Command                                  |
 | -------------------- | ---------------------------------------- |
@@ -26,134 +25,100 @@ The Bash tool runs through my interactive zsh config (shell snapshot), so these 
 | Run a script         | `pnpm run <script>` or `pnpm <script>`   |
 | One-off execution    | `pnpm dlx <pkg>` or `deno run npm:<pkg>` |
 
-Prefer `deno run npm:<pkg>` over `pnpm dlx` for non-interactive, minimal-access tools (formatters, type checkers, codegen). Use `pnpm dlx` for interactive CLIs or tools needing filesystem/network access.
+Prefer `deno run npm:<pkg>` for non-interactive, minimal-access tools (formatters, type checkers, codegen); `pnpm dlx` for interactive CLIs or tools needing filesystem/network access.
 
-## Python — Toolchain
+## Python
 
-- **Never** invoke the system Python or modify system-level packages.
-  - Forbidden: `python`, `python3`, `pip`, `pip3`, `python -m pip`, `sudo pip`, `virtualenv`, `poetry`.
-  - This applies even inside a venv — always go through `uv`.
-- Always use `uv` for environment and dependency management.
-- For single-file scripts with dependencies, prefer PEP 723 inline metadata (`uv run file.py`) over creating a full project.
-- Always use `ty` for static type checking instead of `mypy` or `pyright`.
+- **Never invoke the system Python or modify system-level packages** — `python(3)`, `pip(3)`, `python -m pip`, `sudo pip`, `virtualenv`, `poetry` are all forbidden, even inside a venv. Everything goes through `uv`.
+- Static type checking: `ty`.
+- Single-file scripts with deps: PEP 723 inline metadata + `uv run file.py`, not a full project. Manage the metadata through uv — `uv init --script` to create, `uv add --script` to add deps — not by hand-editing the inline block (it is a tool-owned file, per the rule below).
 
-| Intent                         | Command                         |
-| ------------------------------ | ------------------------------- |
-| Create / sync environment      | `uv sync`                       |
-| Add a package                  | `uv add <pkg>`                  |
-| Add a dev dependency           | `uv add --dev <pkg>`            |
-| Run a script                   | `uv run <script>`               |
-| One-off tool execution         | `uvx <tool>`                    |
-| Run Python directly            | `uv run python`                 |
-| Run a PEP 723 inline-meta file | `uv run <file.py>`              |
-| Type-check project             | `ty check`                      |
-| Type-check a file              | `ty check <path>`               |
-| Audit deps (missing / unused)  | `uv run --with deptry deptry .` |
+| Intent                         | Command                           |
+| ------------------------------ | --------------------------------- |
+| Create / sync environment      | `uv sync`                         |
+| Add a package                  | `uv add <pkg>`                    |
+| Add a dev dependency           | `uv add --dev <pkg>`              |
+| Run a script                   | `uv run <script>`                 |
+| One-off tool execution         | `uvx <tool>`                      |
+| Run Python directly            | `uv run python`                   |
+| Create a PEP 723 script        | `uv init --script <file.py>`      |
+| Add a dep to a PEP 723 script  | `uv add --script <file.py> <pkg>` |
+| Run a PEP 723 inline-meta file | `uv run <file.py>`                |
+| Type-check project / file      | `ty check [path]`                 |
+| Audit deps (missing / unused)  | `uv run --with deptry deptry .`   |
 
-## Python — Code Style
+### Python style
 
-- **Imports go at module top level.** Do not place `import` statements inside
-  functions or methods. The only exceptions are a genuine, documented reason:
-  breaking an actual circular import, or guarding a heavy/optional dependency
-  that must stay lazy. "It's only used in one function" is NOT a reason — a
-  function-local import hides the dependency, defeats static analysis, and
-  re-runs the import machinery on every call. If you add a function-local
-  import, add a comment stating which of the two allowed reasons applies.
+- **Imports at module top level.** Only two exceptions, each requiring a comment naming which applies: breaking a real circular import, or keeping a heavy/optional dependency lazy. "Only used in one function" is not a reason — a local import hides the dependency and defeats static analysis.
+- **Every third-party import is declared via `uv add` in the same change** — code importing an undeclared package is incomplete. Audit with `uv run --with deptry deptry .` (never via `uvx`: an isolated env mis-guesses module names, e.g. `pyyaml`→`yaml`). In a monorepo run it per package; whitelist runtime-only backends via `[tool.deptry.per_rule_ignores]`.
+- **Accept the narrowest interface that works, return concrete types** — `Iterable[SomeInterface]` in, specific types out. Never bare `dict`/`list`/`tuple`; dict-shaped data gets a `TypedDict`, or `@dataclass(slots=True)` when you own the shape.
+- **No `print` for application output** (ruff T20) — use `logging`/`structlog`. `print` only in throwaway scripts.
+- **When scaffolding a project, enable at least ruff families `PTH`, `C4`, `SIM`, `T20`** — mechanize idiom instead of relying on prose (see Mechanization ladder below).
 
-- **Declare every dependency in `pyproject.toml`.** Any third-party package you
-  `import` must be added via `uv add <pkg>` (or `uv add --dev <pkg>` for tooling)
-  so it lands in `pyproject.toml` and the lockfile. Never rely on a transitively-
-  or ambient-installed package. If you introduce an import, update
-  `pyproject.toml` in the same change — code that imports an undeclared package
-  is incomplete. `deptry` flags missing and unused dependencies — run it in the
-  synced env (`uv run --with deptry deptry .`), never via `uvx` (an isolated env
-  can't read installed packages and mis-guesses module names, e.g.
-  `pyyaml`→`yaml`, producing false positives). In a monorepo, run it per package
-  (`uv run --with deptry deptry packages/<pkg>`), and whitelist runtime-only /
-  string-loaded backends via `[tool.deptry.per_rule_ignores]`.
+## Go style
 
-- **Be liberal in what you accept, strict in what you emit.** Type a parameter
-  with the narrowest interface that actually works — `Iterable[SomeInterface]`,
-  not `list[SomeConcrete]` — and return concrete, specific types. Never annotate
-  with a bare, unparameterized `dict` / `list` / `tuple`: they carry no
-  information and defeat the type checker. For structured dict-shaped data, use a
-  `TypedDict`, or better a `@dataclass(slots=True)` when the shape is owned by
-  your code.
-
-- **No `print` for application output (ruff T20).** Use `logging` (or
-  `structlog`) so output has levels, structure, and routing. `print` is
-  acceptable only in genuinely throwaway, one-off scripts.
-
-## Go — Code Style
-
-- **Never ignore a returned `error` without an extremely strong, documented
-  reason.** When you do intentionally ignore one, assign it to `_` and add a
-  comment stating why it is safe to drop — e.g.
-  `_ = w.Close() // best-effort cleanup; error not actionable here`. A dropped
-  error with no `_` and no comment is a bug. (This is the Go-specific form of the
-  loud-failure principle below.)
-
-- **Inspect errors with `errors.Is` / `errors.As`, never by string-matching.**
-  Do not write `if err.Error() == "..."` or `strings.Contains(err.Error(), ...)`
-  to branch on an error — the message is for humans and can change. Use
-  `errors.Is(err, ErrSentinel)` to test for a sentinel and `errors.As(err,
-&target)` to extract a typed error. Wrap with `fmt.Errorf("...: %w", err)` to
-  preserve the chain so `Is`/`As` keep working up the stack.
-
-- **Every function that does I/O, network/fetch, or starts concurrency takes a
-  `context.Context`** as its first parameter (conventionally `ctx`) and
-  propagates it to the calls it makes. Do not store a context in a struct field,
-  and do not mint a fresh `context.Background()` deep in the call tree when a
-  caller's context is available.
-
-- **Goroutines must have a managed lifecycle.** Every goroutine you start must be
-  bounded by `ctx` cancellation, an `errgroup.Group`, a `sync.WaitGroup`, or
-  channel signaling — something that guarantees it terminates. No
-  fire-and-forget goroutines that can outlive their caller and leak.
+- **Never silently ignore a returned `error`.** Intentional drops are `_ = w.Close() // why it's safe here`. No `_`, no comment → it's a bug.
+- **Inspect errors with `errors.Is`/`errors.As`, never string-matching** — the message is for humans and can change. Wrap with `fmt.Errorf("...: %w", err)` to keep the chain.
+- **Every function doing I/O or starting concurrency takes `ctx context.Context` first** and propagates it. No context in struct fields; no fresh `context.Background()` deep in the tree when a caller's ctx exists.
+- **Every goroutine has a managed lifecycle** — bounded by ctx cancellation, `errgroup`, `WaitGroup`, or channel signaling. No fire-and-forget.
 
 ## Engineering Principles
 
-_These principles are language-agnostic — apply them across all languages, not only Python._
+_Language-agnostic._
 
-**Error handling**: Prefer loud failure over silent suppression. Do not add fallbacks, default values, or catch-and-continue logic for internal code paths. At system boundaries (user input, external APIs), handle errors explicitly — everywhere else, let them propagate so they surface early. Never silently swallow an error anywhere: discarding or ignoring one requires a specific, documented reason and an inline comment marking it intentional (in Go, the ignored value must be assigned to `_` with that comment).
+**Mechanization ladder — prose is the enforcement of last resort.** To encode a convention, prefer (strongest first): types > linter/formatter > tests > hooks/CI > instructions in this file. When you repeatedly follow (or violate) the same prose rule, propose moving it down the ladder — a lint rule, a test, a hook — instead of relying on instructions.
 
-**Tests**: Tests must verify actual runtime behavior and must be capable of failing. Do not write tests that always pass regardless of behavior — e.g., asserting a function exists, checking its type signature, or testing constants.
+**Every change must be reproducible from committed state.** Never mutate untracked state: installed packages (`site-packages`, `node_modules`), cloned dependency source, global machine config. When a dependency is broken, escalate in order: pin/upgrade the version → the ecosystem's recorded patch mechanism (`pnpm patch`, Cargo `[patch]`, `go.mod replace`, uv `[tool.uv.sources]` → fork) → fork and point the manifest at it. All three leave a replayable record; patching in place leaves none. Litmus test: a teammate reproduces this from a fresh clone with one command.
 
-**No duplication**: If something is defined in one place, reference or import it — don't copy it. Duplication creates divergence.
+**Mutate tool-owned files through the tool, never by hand.** If a tool regenerates or validates a file, that file is a projection of tool state — change it via the owning command: `uv add`, `pnpm add`, `go get` + `go mod tidy`, `cargo add`, `mise use`, `alembic revision` (list is illustrative; the criterion decides). The command validates, resolves, and keeps manifest and lockfile in sync; a hand edit silently desyncs them. Hand-edit only sections the tool has no command for (e.g. `[tool.*]` blocks in pyproject.toml). Lockfiles are never hand-edited.
 
-**Precise types over escape hatches**: Avoid dynamic escape-hatch types — Python `Any`, Go `any` / `interface{}`, TypeScript `unknown` / `any` — unless there is a specific, documented reason (genuinely dynamic data whose shape cannot be known, or an untyped third-party boundary). They disable the type checker for everything they touch. Prefer real types: concrete classes, generics, `Protocol` / interfaces, unions, `TypedDict`. When an escape hatch is truly necessary, add a comment explaining why a real type is not feasible.
+**When blocked, no expedient hacks.** Do not monkey-patch, sleep to mask races, broaden exception handlers, weaken assertions, or special-case test inputs to force a pass. Fix the root cause; if you can't, stop and report the blocker. For third-party behavior that must change, escalate: official config/extension point → subclass or wrapper → fork (recorded, per reproducibility above). Runtime patching only in tests (`mock.patch`, scoped to the test).
+
+**Errors fail loudly.** No fallbacks, defaults, or catch-and-continue on internal paths. Handle explicitly at system boundaries (user input, external APIs); everywhere else let errors propagate so they surface early. Discarding an error requires a specific reason and an inline comment marking it intentional.
+
+**Precise types over escape hatches.** No `Any` / `any` / `interface{}` / `unknown` without a documented reason (genuinely dynamic shape, or an untyped third-party boundary) — they disable the checker for everything they touch. Prefer concrete classes, generics, `Protocol`/interfaces, unions, `TypedDict`.
+
+**Single source of truth.** Every fact — constant, config value, schema, explanation — has exactly one authoritative home; everything else references it. Code: import, don't copy. Config: one declared value, derived everywhere else. Docs: each explanation lives in its closest home (symbol → doc comment; module rationale → module doc/ADR; runbook → external doc) and other documents link to it rather than paraphrase; prefer executable examples (doctest, Go `Example`) over prose ones — an example that runs cannot silently diverge. When you need a fact where it doesn't live, the fix is a reference or a move, never a second copy.
+
+**Build what was asked — no speculative generality.** No config options, plugin points, or abstraction layers for hypothetical future needs. Introduce an abstraction at the second concrete use, not the first.
+
+**A contract change isn't done until every caller is updated.** Enumerate call sites (LSP `findReferences` / `sg 'foo($$$)'`) — never patch just the ones you remember. Don't leave backwards-compat aliases or re-export shims unless asked.
+
+**New dependencies clear a bar.** Prefer stdlib and already-declared deps. A new third-party package needs a reason: actively maintained, typed, and pulling in less than it saves.
+
+**Write the language, not JavaScript.** Litmus test: if the code would translate to JavaScript nearly line-for-line, you are writing the intersection of all languages — rewrite with this language's native constructs. Frequent offenders (mostly restatements of the typing/error rules above):
+
+| JS reflex                                       | Native idiom                                       |
+| ----------------------------------------------- | -------------------------------------------------- |
+| dict + `.get()` chains for structured data (Py) | `dataclass` / `TypedDict`; let `KeyError` surface  |
+| manual accumulator loops (Py)                   | comprehensions / generators / itertools            |
+| try/finally cleanup; string-built paths (Py)    | context managers; `pathlib`                        |
+| defensive `if x is None` / `x or default` (Py)  | EAFP — let exceptions propagate                    |
+| async by default (Py)                           | sync unless concurrency is real                    |
+| `map[string]any` for structured data (Go)       | named structs                                      |
+| `panic`/`recover` as try/catch (Go)             | error returns                                      |
+| goroutines/channels as promises (Go)            | synchronous calls; `errgroup` for real concurrency |
+
+## Tests
+
+A behavior isn't tested until it has all three:
+
+1. **Positive case** — valid input → expected output, asserted on specific values (not truthiness, not "no exception").
+2. **Negative case** — invalid input → the specific error type/message, not just "raises".
+3. **Boundaries** — empty / one / many / max / off-by-one.
+
+Test names state the expected behavior. Mock only at system boundaries you don't own — a test that mocks the unit under test verifies nothing. Every test must be able to fail: asserting existence, signatures, or constants is not a test.
 
 ## Observability
 
-_Language-agnostic; these are the logging/instrumentation face of the error-handling and `context` rules above. The app emits to stdout / a collector — it does not own routing, rotation, or shipping. Decide level and payload while writing the code, not after._
+_The app emits to stdout / a collector; it does not own routing, rotation, or shipping. Decide level and payload while writing the code._
 
-- **Emit structured events, never interpolated prose.** Log key–value / JSON
-  fields (`logger.info("order placed", order_id=id, amount=cents)`), not
-  `f"order {id} placed for {cents}"`. Structured fields are queryable and
-  aggregatable; a formatted sentence is neither. (This is "strict in what you
-  emit" applied to logs.)
-- **Levels carry meaning, and code branches on that meaning.** ERROR = a human
-  must act / an invariant broke; WARN = degraded but handled, self-healing;
-  INFO = a business-significant state transition (request served, job done,
-  payment captured); DEBUG = developer detail, off in production. "Everything at
-  INFO" is not observability. Tune verbosity by level, never by deleting logs.
-- **Log once, at the boundary where you handle — not at every layer.** Pairs with
-  the error-handling rule: an error that propagates is logged at the boundary
-  that finally handles it, not re-logged at each frame it crosses. **Never
-  log-and-throw** — that is the same failure recorded N times with no new
-  information. Either handle it (and log), or propagate it (and stay silent).
-- **Never log secrets, credentials, tokens, PII, or full request/response
-  bodies.** Treat the log sink as a lower trust boundary than the process. Redact
-  at the point of emission; log an identifier, not the sensitive value.
-- **Propagate correlation context.** Thread a trace/request id through the call
-  graph so a single operation is reconstructable across functions and services —
-  in Go this rides on the `context.Context` you already pass; elsewhere use the
-  OpenTelemetry context. A log line with no correlating id is hard to act on.
-- **Three pillars, used for what each is good at.** Logs = discrete events;
-  metrics = aggregates and rates (RED/USE); traces = cross-service latency and
-  causality. Keep metric/label cardinality bounded — never put unbounded values
-  (user id, request id, raw URL) in a metric label; those belong in logs or trace
-  attributes. **OpenTelemetry is the vendor-neutral default** for traces/metrics.
+- **Structured events, never interpolated prose** — `logger.info("order placed", order_id=id)`, not f-strings. Fields are queryable; sentences aren't.
+- **Levels carry meaning**: ERROR = human must act / invariant broke; WARN = degraded but self-healing; INFO = business-significant transition; DEBUG = dev detail, off in prod. Tune verbosity by level, never by deleting logs.
+- **Log once, at the boundary that handles.** Never log-and-throw — same failure recorded N times with no new information. Handle it (and log), or propagate it (and stay silent).
+- **Never log secrets, tokens, PII, or full request/response bodies.** Redact at emission; log an identifier, not the value.
+- **Propagate a trace/request id** through the call graph (Go: rides on `ctx`; elsewhere OpenTelemetry context).
+- **Logs = events; metrics = aggregates; traces = cross-service causality.** Keep metric label cardinality bounded — no user ids / request ids / raw URLs in labels. OpenTelemetry is the vendor-neutral default.
 
 | Language  | Structured logging           | Traces / metrics  |
 | --------- | ---------------------------- | ----------------- |
@@ -163,52 +128,36 @@ _Language-agnostic; these are the logging/instrumentation face of the error-hand
 
 ## Comments & Documentation
 
-_Governs committed, shared code; your local working tree is your own. Guiding ideas: an explanation rots with its distance from the code, a comment is unchecked by any compiler, and a caller must never need to read an implementation to use it._
+_Governs committed, shared code; the local working tree is your own._
 
-- **Comments carry _why_ and contract, never _what_.** If a comment explains what code does, prefer clearer code; keep it only for irreducible complexity (clever algorithm, workaround), and then say why the odd form is necessary.
-- **Doc comments are the contract, from the caller's view.** Signature + doc must suffice to use the thing without reading its body. State only what the signature can't: timezone/units, lifecycle/ownership, thread-safety, what it throws, side effects, how to cancel.
-- **Put each explanation in its closest home.** Symbol → doc comment; module rationale → module doc/ADR; architecture/runbooks → external docs. Prefer executable examples (doctest, Go `Example`, Rust doc-tests) over prose ones.
-- **A comment is a liability.** Change the code, change the comment in the same edit; if you can't keep it true, delete it.
-- **No commented-out code or inline changelogs in commits.** Git remembers better (`blame`, `log -L/-S`). Delete it; if the _absence_ is non-obvious, leave a `NOTE` with the why.
-- **Tag and link actionable debt.** Use the repo's TODO/FIXME/HACK/PERF/NOTE tags so debt stays queryable; give each an owner or ticket (`TODO(owner|#123)`). Cross-person or long-lived work goes in the tracker, not just a tag. "Fix later" is a tag, not buried prose.
-- **Defer format to the language's linter; scale doc effort to reach.** Public lib ≫ internal app ≫ throwaway. Match repo tone — keep it clean for public/customer-facing.
+- **Comments carry _why_ and contract, never _what_** — if a comment explains what code does, prefer clearer code; keep it only for irreducible complexity, and say why the odd form is necessary.
+- **Doc comments are the caller's contract**: signature + doc must suffice without reading the body — units/timezone, lifecycle, thread-safety, what it throws, side effects.
+- **Change the code → change the comment in the same edit**; a comment you can't keep true gets deleted.
+- **No commented-out code or inline changelogs** — git remembers (`blame`, `log -L/-S`). If the absence is non-obvious, leave a `NOTE` with the why.
+- **Actionable debt gets a tagged owner or ticket**: `TODO(owner|#123)`. Long-lived work goes in the tracker, not buried prose.
 
-## Code Search — ast-grep vs. ripgrep
+## Code Search & Navigation — ripgrep / ast-grep / LSP
 
-- **Default to the ripgrep-backed `Grep` tool** for text searches: a string, identifier, import, log line, or "where does this name appear".
-- **Reach for `ast-grep` (`sg`) when the match depends on syntax, not text:**
-  - Call sites of a function (`foo($$$)`) — without hitting its definition, comments, or same-named strings.
-  - Filtering by node type (only type annotations, only decorators, a specific `try/catch` shape).
-  - Multi-line structural shapes that defeat regex.
-  - Structural rewrites / codemods (`sg --rewrite`).
-- **An empty `ast-grep` result never proves absence.** A mistyped pattern or unsupported language silently yields zero matches. On a surprising miss, fall back to ripgrep and say so — never report "not found" on an ast-grep miss alone.
-- Use ripgrep when the language isn't in ast-grep's parsers.
+Route by what the question is about: **text → ripgrep; syntax shape → ast-grep; symbol identity → LSP.**
 
-## Subagent & Workflow Model Selection
+- Default to the ripgrep-backed `Grep` tool for text: identifiers, imports, log lines.
+- Reach for `ast-grep` (`sg`) when the match is syntactic: call sites (`foo($$$)`) without definitions/comments/strings, node-type filters, multi-line structural shapes, rewrites (`sg --rewrite`).
+- Reach for the `LSP` tool when the question is about symbol identity: find-references before changing a contract (grep hits same-named strings; LSP resolves imports/aliases), go-to-definition/implementation, call hierarchy (incoming/outgoing calls), hover for type info. Needs a configured language server — on error, fall back to ast-grep/ripgrep and say so.
+- **An empty ast-grep result never proves absence** — a mistyped pattern silently matches nothing. On a surprising miss, fall back to ripgrep and say so; never report "not found" from an ast-grep miss alone.
 
-**This rule is MANDATORY. You MUST follow it every single time you spawn a subagent, without exception.** "Spawning a subagent" covers BOTH mechanisms:
+## Subagents & Workflows
 
-1. **The Agent tool** — set its `model` parameter.
-2. **The Workflow tool's `agent()` calls** — set `opts.model` on every call.
+Try direct search first — most lookups resolve in one Grep/Glob/WebFetch. Spawn agents for genuine fan-out, not for things you could find in 30 seconds.
 
-Select the model based on task type:
+**Always set the model explicitly** — the Agent tool's `model` param, and `opts.model` on every Workflow `agent()` call. Workflow's `agent()` otherwise silently inherits the main-loop model, bypassing this table:
 
-| Task type                                              | Required model |
-| ------------------------------------------------------ | -------------- |
-| Web fetching, summarization, document retrieval        | `haiku`        |
-| File search, grep/glob aggregation, log scanning       | `haiku`        |
-| Code reasoning, architecture analysis, code generation | `sonnet`       |
-| Complex multi-file planning or refactoring             | `opus`         |
+| Task type                                               | Model    |
+| ------------------------------------------------------- | -------- |
+| Web fetching, summarization, file search, log scanning  | `haiku`  |
+| Code reasoning, architecture analysis, code generation  | `sonnet` |
+| Multi-file planning/refactoring, cross-file consistency | `opus`   |
 
-When a task straddles the `sonnet`/`opus` boundary (code generation that also spans files), tie-break to `opus` if it crosses multiple files or must preserve cross-file consistency; otherwise stay on `sonnet`.
-
-**Default to `haiku` for any subagent that does not require reasoning or code generation.** If you are unsure, ask yourself: "Does this task require judgment, or just retrieval and aggregation?" If the answer is retrieval/aggregation, use `haiku`.
-
-**`fable` is not a default for any row above — it is an explicit, deliberate opt-in.** Fable 5 sits above Opus but costs ~2× Opus ($10/$50 vs $5/$25 per MTok). Use it only when you have specifically judged that a subagent needs reasoning beyond Opus's ceiling (e.g. an exceptionally hard multi-file refactor where correctness justifies the 2× cost). It is on-demand escalation, never the standing choice for a task type. When in doubt, `opus` is the top of the routine table — do not reach past it.
-
-Never spawn a subagent without explicitly setting its model — the Agent tool's `model` parameter or `agent()`'s `opts.model`. Inheriting the parent model for lightweight tasks is **wasteful and forbidden**.
-
-**Workflow caveat — this is the trap to avoid.** Workflow's `agent()` defaults to _inheriting the main-loop model_ (often `opus`), which silently bypasses this table and makes every workflow agent run as Opus. The Workflow tool's own guidance ("when unsure, omit `model`") is OVERRIDDEN by this rule. In a workflow script, encode the table once and pass `opts.model` on every `agent()`:
+Unsure? Ask "judgment, or just retrieval/aggregation?" — retrieval means `haiku`. `sonnet`/`opus` boundary tie-breaks to `opus` when the change crosses files. `fable` is never a default: it is per-case escalation for reasoning beyond Opus's ceiling, at significantly higher cost — when in doubt, `opus` is the top of the table.
 
 ```js
 const M = {
@@ -222,11 +171,9 @@ const M = {
 await agent(`Fetch and summarize ${url}`, { model: M.fetch });
 ```
 
-Mirror the choice in `meta.phases[].model` for the progress UI if you like, but `opts.model` is what actually selects the model.
-
 ## Interface & API Design
 
-- AIP (https://google.aip.dev) is the source of truth for API design. Distinguish two layers:
-  - Its **principles / philosophy** — consistency, predictability, standard verbs, resource naming, pagination thinking — generalize broadly. Let them inform REST, gRPC, CLI, and program-internal interfaces alike.
-  - Its **concrete rules** — HTTP mapping, field masks, long-running operations, the `:customVerb` syntax, standard methods — are written for resource-oriented network APIs, primarily gRPC/protobuf and Google-style REST. Apply them there; do not force RPC/streaming/GraphQL/CLI/internal interfaces into them.
-- Whenever a specific AIP rule bears on what you are designing or modifying, you MUST fetch and read that rule before proceeding. NEVER assume you know what an AIP rule says from memory — always verify against the actual documentation.
+- AIP (https://google.aip.dev) is the source of truth. Two layers:
+  - Its **principles** — consistency, standard verbs, resource naming, pagination thinking — generalize to REST, gRPC, CLI, and internal interfaces alike.
+  - Its **concrete rules** — HTTP mapping, field masks, LROs, `:customVerb` — are for resource-oriented network APIs (gRPC/protobuf, Google-style REST). Don't force RPC/streaming/GraphQL/CLI into them.
+- When citing or applying a **specific AIP rule** to a resource-oriented API, fetch and read it first — don't work from memory of AIP numbers. General interface design needs only the principles layer.
