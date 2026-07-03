@@ -1,48 +1,56 @@
 #!/usr/bin/env bash
-# Post-apply hook: Ensure Claude Code settings.json has correct hook paths
-# This ensures hooks point to the right location regardless of $HOME
-# Only updates if missing or incorrect; preserves other settings
+# Post-apply: converge Claude Code enforcement config in ~/.claude/settings.json.
+#
+# settings.json is machine-local and mutated by Claude Code itself, so chezmoi
+# does not manage the file. This script converges only the entries we own —
+# PreToolUse hook entries (keyed by script basename) and permissions.ask rules —
+# and preserves everything else. Idempotent: silent no-op when already converged.
 
 set -euo pipefail
 
 SETTINGS_FILE="${HOME}/.claude/settings.json"
-EXPECTED_COMMAND="${HOME}/.claude/hooks/block-npm.sh"
+HOOKS_DIR="${HOME}/.claude/hooks"
 
+mkdir -p "${HOME}/.claude"
 if [[ ! -f "$SETTINGS_FILE" ]]; then
-  exit 0
+  echo '{}' > "$SETTINGS_FILE"
 fi
 
-# Check if PreToolUse hook already has the correct command
-CURRENT_COMMAND=$(jq -r '.hooks.PreToolUse[0].hooks[0].command // "missing"' "$SETTINGS_FILE" 2>/dev/null || echo "missing")
+merged=$(jq \
+  --arg hooks_dir "$HOOKS_DIR" \
+  '
+  # PreToolUse entries owned by this script: script basename -> matcher.
+  # Scripts are deployed by chezmoi to ~/.claude/hooks/.
+  def managed: {
+    "block-npm.sh":                "Bash",
+    "require-agent-model.sh":      "^(Agent|Task)$",
+    "require-workflow-routing.sh": "^Workflow$"
+  };
 
-if [[ "$CURRENT_COMMAND" == "$EXPECTED_COMMAND" ]]; then
-  exit 0
-fi
+  # Basenames whose entries we drop without re-adding (retired layouts).
+  def legacy: ["claude-block-npm"];
 
-# Need to update: either missing or wrong path
-if [[ "$CURRENT_COMMAND" == "missing" ]]; then
-  # PreToolUse section doesn't exist or is incomplete — add it
-  jq \
-    --arg home "$HOME" \
-    '.hooks.PreToolUse = [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ($home + "/.local/bin/claude-block-npm"),
-            "timeout": 5
-          }
-        ]
-      }
-    ]' \
-    "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
-  echo "✓ Added PreToolUse hook to settings.json"
-else
-  # PreToolUse exists but path is wrong — update it
-  jq \
-    --arg home "$HOME" \
-    '.hooks.PreToolUse[0].hooks[0].command = ($home + "/.local/bin/claude-block-npm")' \
-    "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
-  echo "✓ Updated PreToolUse hook path in settings.json"
+  def basename: sub(".*/"; "");
+
+  .hooks.PreToolUse = (
+    ((.hooks.PreToolUse // [])
+      | map(select(
+          any(.hooks[]?;
+            ((.command // "") | basename) as $b
+            | (managed | has($b)) or (legacy | index($b) != null))
+          | not)))
+    + (managed | to_entries | map({
+        matcher: .value,
+        hooks: [{type: "command", command: ($hooks_dir + "/" + .key), timeout: 5}]
+      }))
+  )
+  | .permissions.ask = (
+      ((.permissions.ask // []) + ["Workflow", "Agent(model:*fable*)"]) | unique
+    )
+  ' "$SETTINGS_FILE")
+
+if [[ "$merged" != "$(cat "$SETTINGS_FILE")" ]]; then
+  printf '%s\n' "$merged" > "${SETTINGS_FILE}.tmp"
+  mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
+  echo "✓ Converged Claude Code hook entries and ask rules in settings.json"
 fi
