@@ -34,3 +34,6 @@ mouse-hide-while-typing = true
 
 link-url = true
 
+macos-icon = custom
+macos-custom-icon = ~/.config/ghostty/ghostty-catppuccin-macchiato.icns
+
