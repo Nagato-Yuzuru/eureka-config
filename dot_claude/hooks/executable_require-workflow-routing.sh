@@ -1,8 +1,10 @@
 #!/bin/bash
 # PreToolUse gate for Workflow: reject inline scripts that spawn agents with zero
 # model routing (no `model:` / `agentType:` token anywhere). This is a heuristic
-# textual screen, not a JS parse — it catches total omission (the observed
-# failure mode); per-call semantic review happens at the Workflow ask-rule prompt.
+# textual screen, not a JS parse — it catches only total omission (the observed
+# failure mode). Whether the model picked for each agent is the *right* one can't
+# be decided mechanically, so this hook doesn't try; the deny message below carries
+# the routing table so the choice at least gets made deliberately.
 
 input=$(cat)
 
