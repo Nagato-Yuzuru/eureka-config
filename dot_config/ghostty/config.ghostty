@@ -11,7 +11,7 @@ cursor-text = #FFFFFF
 cursor-style = block
 cursor-style-blink = false
 
-cursor-click-to-move = false
+cursor-click-to-move = true
 
 background-opacity = 0.95
 
