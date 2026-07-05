@@ -28,7 +28,7 @@ packages:
       - grep
       - gnu-sed
       - coreutils
-      - daipeihust/tap/im-select
+      - laishulu/homebrew/macism
       - imagemagick-full
       - docker
     casks:
