@@ -1,5 +1,6 @@
 {{- if eq .chezmoi.os "linux" -}}
 #!/bin/bash
+set -euo pipefail
 
 # Install antidote plugin manager for zsh on Linux
 ANTIDOTE_DIR="${ZDOTDIR:-$HOME}/.antidote"
