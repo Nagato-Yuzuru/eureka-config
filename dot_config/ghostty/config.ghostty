@@ -11,12 +11,19 @@ cursor-text = #FFFFFF
 cursor-style = block
 cursor-style-blink = false
 
+cursor-click-to-move = false
+
 background-opacity = 0.95
 
 macos-titlebar-style = hidden
 
-window-padding-x = 5
-window-padding-y = 5
+
+# 让底部内边距/余数像素用相邻单元格背景色填充,消除 tmux 状态栏下方的空隙
+window-padding-color = extend
+window-padding-y = 5,1
+window-padding-x = 5,5
+window-padding-balance = true
+window-step-resize = true
 
 window-width = 120
 window-height = 30
@@ -37,3 +44,7 @@ link-url = true
 macos-icon = custom
 macos-custom-icon = ~/.config/ghostty/ghostty-catppuccin-macchiato.icns
 
+working-directory = home
+window-inherit-working-directory = false
+tab-inherit-working-directory    = false
+split-inherit-working-directory  = true
