@@ -29,7 +29,7 @@ packages:
       - gnu-sed
       - coreutils
       - laishulu/homebrew/macism
-      - imagemagick-full
+      - imagemagick
       - docker
     casks:
       # - wezterm@nightly
@@ -38,6 +38,5 @@ packages:
       - 1password-cli
       - orbstack
       - istat-menus
-      - copilot-cli
       - karabiner-elements
       - iina
