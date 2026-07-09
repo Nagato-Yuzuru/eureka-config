@@ -175,12 +175,14 @@ tmux_conf_theme_pane_active_indicator="$tmux_conf_theme_colour_4"
 # 消息/命令模式 (Cyan/Blue 风格)
 tmux_conf_theme_message_bg="$tmux_conf_theme_colour_4"
 tmux_conf_theme_message_fg="$tmux_conf_theme_colour_1"
-tmux_conf_theme_message_attr="bold"
-tmux_conf_theme_mode_bg="$tmux_conf_theme_colour_4"   # 复制模式选中色
+tmux_conf_theme_message_attr="fill=$tmux_conf_theme_message_bg,bold"
+tmux_conf_theme_mode_bg="$tmux_conf_theme_colour_4"   # 复制模式选中色(窗格内,无需 fill)
 tmux_conf_theme_mode_fg="$tmux_conf_theme_colour_1"
 tmux_conf_theme_mode_attr="bold"
-tmux_conf_theme_message_command_bg="$tmux_conf_theme_colour_4"
+# message-command = 提示符里按 Esc 进入 vi normal 模式(status-keys vi)时的样式:用红区分于输入态的蓝
+tmux_conf_theme_message_command_bg="$tmux_conf_theme_colour_10"  # 红 #f7768e
 tmux_conf_theme_message_command_fg="$tmux_conf_theme_colour_1"
+tmux_conf_theme_message_command_attr="fill=$tmux_conf_theme_message_command_bg,bold"
 
 # 4. 状态栏内容配置
 tmux_conf_theme_terminal_title="#h ❐ #S ● #I #W"
