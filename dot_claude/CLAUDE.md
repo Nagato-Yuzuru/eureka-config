@@ -138,12 +138,14 @@ _Governs committed, shared code; the local working tree is your own._
 
 ## Code Search & Navigation — ripgrep / ast-grep / LSP
 
-Route by what the question is about: **text → ripgrep; syntax shape → ast-grep; symbol identity → LSP.**
+**ripgrep (the `Grep` tool) is the default for all code search** — identifiers, imports, log lines, exploration. Its false positives (comments, strings) are cheap to skim; don't pay pattern-syntax friction for precision the task doesn't need. Two exceptions:
 
-- Default to the ripgrep-backed `Grep` tool for text: identifiers, imports, log lines.
-- Reach for `ast-grep` (`sg`) when the match is syntactic: call sites (`foo($$$)`) without definitions/comments/strings, node-type filters, multi-line structural shapes, rewrites (`sg --rewrite`).
-- Reach for the `LSP` tool when the question is about symbol identity: find-references before changing a contract (grep hits same-named strings; LSP resolves imports/aliases), go-to-definition/implementation, call hierarchy (incoming/outgoing calls), hover for type info. Needs a configured language server — on error, fall back to ast-grep/ripgrep and say so.
-- **An empty ast-grep result never proves absence** — a mistyped pattern silently matches nothing. On a surprising miss, fall back to ripgrep and say so; never report "not found" from an ast-grep miss alone.
+- **Structural rewrite / codemod → `sg --rewrite`.** No text tool substitutes.
+- **Enumerating call sites before a contract change → LSP `findReferences` first** (resolves imports/aliases; text search hits same-named strings), then `sg 'foo($$$)'` when no language server covers the language, then ripgrep + manual filtering as the last resort.
+
+LSP is also the tool for other symbol-identity questions: go-to-definition/implementation, call hierarchy, hover for type info. On LSP error, fall back down the chain and say so.
+
+**An empty ast-grep result never proves absence** — a mistyped pattern silently matches nothing. On a surprising miss, fall back to ripgrep and say so; never report "not found" from an ast-grep miss alone.
 
 ## Subagents & Workflows
 
