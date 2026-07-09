@@ -39,6 +39,8 @@ auto-update-channel = stable
 
 mouse-hide-while-typing = true
 
+mouse-scroll-multiplier = precision:0.7,discrete:1.5
+
 link-url = true
 
 macos-icon = custom
