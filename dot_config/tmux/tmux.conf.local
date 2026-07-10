@@ -108,6 +108,12 @@ set -g focus-events on
 # distinguishable from <C-a> (increment). Outer terminal must also support it
 # (WezTerm: enable_kitty_keyboard = true). After changing, run `tmux kill-server`.
 set -s  extended-keys on
+# Report modified keys to inner apps in CSI-u form, NOT xterm modifyOtherKeys.
+# tmux's default is `xterm` (^[[27;5;48~), which Neovim cannot decode into <C-0>
+# — Ctrl+<digit> collapses to a bare `0`. nvim speaks the kitty/CSI-u form
+# (^[[48;5u), so csi-u is required for <C-x><C-0> etc. Takes effect live (no
+# kill-server needed; unlike terminal-features it is read at keypress time).
+set -s  extended-keys-format csi-u
 set -as terminal-features '*:extkeys'
 
 # Forward SGR 4:3 (undercurl) + 4:58 (colored underline) to outer terminal.
