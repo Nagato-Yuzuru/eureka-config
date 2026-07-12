@@ -1,0 +1,85 @@
+#!/usr/bin/env -S uv run --script
+# ruff: noqa: T201
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Advance the three-way-merge base once the settings merge has converged.
+
+Counterpart of ``dot_claude/modify_settings.json`` (which it imports for the
+merge engine and path resolution). ``run_onchange_after_``: re-runs exactly when
+this rendered file changes, and the fragment hash below ties that to fragment
+content — so the base advances on the same apply that changed the fragment,
+after all targets (including the settings merge) have been written.
+
+The base is only advanced after VERIFYING that live settings == merge result
+with zero conflicts. If the merge target failed or was skipped, the base stays
+put — a stale base can only produce fail-safe conflicts, never silent
+overwrites, and it can never run ahead of settings and manufacture false ones.
+"""
+
+# fragment-hash: {{ include "dot_claude/claude-managed.json.tmpl" | sha256sum }}
+
+from __future__ import annotations
+
+import importlib.machinery
+import importlib.util
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def load_engine():
+    # Never write __pycache__ next to the engine: bytecode inside the chezmoi
+    # source tree would itself be picked up as a source-state entry on the next
+    # apply (dot_claude/__pycache__/modify_*.pyc parses as a modify_ script).
+    sys.dont_write_bytecode = True
+    engine_path = Path(
+        os.environ.get("CLAUDE_ENGINE_FILE")
+        or Path(os.environ["CHEZMOI_SOURCE_DIR"]) / "dot_claude" / "modify_settings.json"
+    )
+    loader = importlib.machinery.SourceFileLoader("modify_settings", str(engine_path))
+    spec = importlib.util.spec_from_loader("modify_settings", loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["modify_settings"] = module
+    loader.exec_module(module)
+    return module
+
+
+def main() -> int:
+    engine = load_engine()
+
+    fragment_path = engine.fragment_file()
+    if not fragment_path.exists():
+        return 0
+    fragment = json.loads(fragment_path.read_text())
+
+    settings_path = engine.settings_file()
+    try:
+        current = json.loads(settings_path.read_text())
+    except FileNotFoundError:
+        current = {}
+
+    base_path = engine.base_file()
+    merged, conflicts = engine.merge_fragment(current, fragment, engine.load_base(base_path))
+    if conflicts or merged != current:
+        print(
+            "claude-managed: settings not converged; base snapshot left untouched",
+            file=sys.stderr,
+        )
+        return 0  # the modify target already reported the real problem
+
+    text = json.dumps(engine.strip_reserved(fragment), indent=2, ensure_ascii=False) + "\n"
+    try:
+        if base_path.read_text() == text:
+            return 0
+    except FileNotFoundError:
+        pass
+    base_path.write_text(text)
+    print("✓ claude-managed: base snapshot advanced")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -7,3 +7,11 @@ lazy-lock.json
 README.md
 .git/
 .config/wezterm/wezterm-gui-sock-*
+
+# Repo-only: pytest suite for modify_/run_ scripts, never deployed
+tests/
+pyproject.toml
+uv.lock
+.venv/
+**/__pycache__
+.pytest_cache/

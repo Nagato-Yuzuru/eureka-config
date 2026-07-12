@@ -1,0 +1,60 @@
+{
+  "$legacyHooks": [
+    "claude-block-npm"
+  ],
+  "permissions": {
+    "ask": [
+      "Agent(model:*fable*)"
+    ]
+  },
+  "autoMode": {
+    "soft_deny": [
+      "$defaults",
+      "Any shell command that creates, modifies, or deletes files outside the current project directory and its configured additional directories — especially system or application configuration (dotfiles, shell rc files, /etc, ~/Library, LaunchAgents, global git config, ~/.claude settings). Redirection, tee, cp/mv, sed -i, defaults write, git config --global etc. all count."
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Read|Edit|Write|NotebookEdit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/path-gate.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/block-npm.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "^(Agent|Task)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/require-agent-model.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "^Workflow$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/require-workflow-routing.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

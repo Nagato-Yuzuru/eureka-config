@@ -1,0 +1,20 @@
+# Dev-only tooling env for the pytest suite in tests/ — never deployed
+# (pyproject.toml, uv.lock, .venv are in .chezmoiignore).
+[project]
+name = "chezmoi-dev"
+version = "0.0.0"
+requires-python = ">=3.12"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ty",
+    "ruff",
+]
+
+[tool.ruff]
+line-length = 100
+extend-include = ["dot_claude/modify_settings.json", "run_onchange_after_snapshot-claude-managed.py.tmpl"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "PTH", "C4", "SIM", "T20"]

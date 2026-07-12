@@ -1,0 +1,286 @@
+#!/usr/bin/env -S uv run --script
+# ruff: noqa: T201
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Merge the chezmoi-managed fragment into Claude Code's settings.json.
+
+chezmoi ``modify_`` filter: receives the current contents of
+``~/.claude/settings.json`` on stdin and writes the merged contents to stdout.
+chezmoi runs this on every ``diff``/``status``/``apply``/``--dry-run``, so it
+must stay a pure filter — stdout is the only side effect.
+
+Data / state / command:
+    data     ``~/.claude/claude-managed.json`` — the fragment we want present, a
+             pure mirror of the settings subset we own. A chezmoi target itself,
+             applied before this filter (targets apply in name order and
+             ``claude-managed.json`` < ``settings.json``). Reserved keys start
+             with ``$`` (currently ``$legacyHooks``: retired hook-script
+             basenames to purge) and are never merged.
+    state    ``~/.claude/.claude-managed.applied.json`` — the fragment as of the
+             last converged apply, advanced by
+             ``run_onchange_after_snapshot-claude-managed.py.tmpl`` only after
+             verifying settings == merge result, so it can never run ahead of
+             the target. The base is what distinguishes "our own value evolved
+             -> converge" from "someone else changed it -> conflict".
+    command  this filter.
+
+Merge semantics per fragment node:
+    dict                  recurse
+    ``hooks.<Event>``     keyed by basename of the entry's first hook command:
+    list                  keys in the fragment are replaced with the fragment
+                          version; keys in base or ``$legacyHooks`` but gone from
+                          the fragment are removed; foreign entries pass through
+                          untouched. Never conflicts.
+    list of strings       three-way set merge: foreign elements kept, elements
+                          in base but gone from the fragment removed, missing
+                          fragment elements appended. Never conflicts.
+    anything else         leaf: absent / == fragment / == base -> fragment
+                          value; any other current value -> conflict.
+
+Conflicts are collected across the whole tree and reported together on stderr;
+exit 1 makes chezmoi leave the target untouched. When the merge is a no-op the
+original stdin bytes are passed through verbatim, so formatting differences
+never show up as drift in ``chezmoi diff``.
+"""
+
+from __future__ import annotations
+
+import enum
+import json
+import os
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+
+type Json = None | bool | int | float | str | list[Json] | dict[str, Json]
+
+
+class _Absent(enum.Enum):
+    """Sentinel distinguishing "key missing" from an explicit null in the target.
+
+    An enum (not a bare ``object()``) so ``x is _ABSENT`` narrows
+    ``Json | _Absent`` back to ``Json`` under static type checking.
+    """
+
+    ABSENT = enum.auto()
+
+
+_ABSENT = _Absent.ABSENT
+
+
+@dataclass(slots=True)
+class Conflict:
+    path: str
+    current: Json
+    desired: Json
+
+
+def _hook_key(entry: Json) -> str:
+    """Ownership key of a hooks.<Event> entry: basename of its first command.
+
+    Malformed or non-command entries key to "" which never matches one of our
+    basenames, so they are treated as foreign and preserved. rsplit rather than
+    PurePath: the command may be a whole shell line, not a path.
+    """
+    match entry:
+        case {"hooks": [{"command": str(command)}, *_]}:
+            return command.rsplit("/", 1)[-1]
+        case _:
+            return ""
+
+
+@dataclass(slots=True)
+class _Merger:
+    """One merge pass over the fragment tree.
+
+    Holds the cross-cutting context (``legacy``, collected ``conflicts``) so the
+    per-node strategies don't thread it through every recursive call. A conflict
+    leaves the current value in place; the caller discards the whole result when
+    ``conflicts`` is non-empty.
+    """
+
+    legacy: tuple[str, ...]
+    conflicts: list[Conflict] = field(default_factory=list)
+
+    def merge(
+        self,
+        current: Json | _Absent,
+        desired: Json,
+        base: Json | _Absent,
+        path: tuple[str, ...],
+    ) -> Json:
+        match desired:
+            case dict():
+                return self._object(current, desired, base, path)
+            case list() if path[:1] == ("hooks",) and len(path) == 2:
+                return self._hooks_event(current, desired, base)
+            case list() if all(isinstance(x, str) for x in desired):
+                return self._string_set(current, desired, base, path)
+            case _:
+                return self._leaf(current, desired, base, path)
+
+    def _conflict(self, path: tuple[str, ...], current: Json, desired: Json) -> Json:
+        self.conflicts.append(Conflict(".".join(path), current, desired))
+        return current
+
+    def _object(
+        self,
+        current: Json | _Absent,
+        desired: dict[str, Json],
+        base: Json | _Absent,
+        path: tuple[str, ...],
+    ) -> Json:
+        if not isinstance(current, dict) and current is not _ABSENT:
+            return self._conflict(path, current, desired)
+        cur = current if isinstance(current, dict) else {}
+        sub = base if isinstance(base, dict) else {}
+        return cur | {
+            key: self.merge(cur.get(key, _ABSENT), want, sub.get(key, _ABSENT), (*path, key))
+            for key, want in desired.items()
+        }
+
+    def _hooks_event(
+        self, current: Json | _Absent, desired: list[Json], base: Json | _Absent
+    ) -> list[Json]:
+        base_entries = base if isinstance(base, list) else []
+        ours = {_hook_key(entry) for entry in (*desired, *base_entries)} | set(self.legacy)
+        ours.discard("")
+        existing = current if isinstance(current, list) else []
+        return [entry for entry in existing if _hook_key(entry) not in ours] + desired
+
+    def _string_set(
+        self,
+        current: Json | _Absent,
+        desired: list[Json],
+        base: Json | _Absent,
+        path: tuple[str, ...],
+    ) -> Json:
+        if not isinstance(current, list) and current is not _ABSENT:
+            return self._conflict(path, current, desired)
+        retired = [x for x in base if x not in desired] if isinstance(base, list) else []
+        existing = current if isinstance(current, list) else []
+        kept = [x for x in existing if x not in retired]
+        return kept + [x for x in desired if x not in kept]
+
+    def _leaf(
+        self,
+        current: Json | _Absent,
+        desired: Json,
+        base: Json | _Absent,
+        path: tuple[str, ...],
+    ) -> Json:
+        if current is _ABSENT or current in (desired, base):
+            return desired
+        return self._conflict(path, current, desired)
+
+
+def strip_reserved(fragment: dict[str, Json]) -> dict[str, Json]:
+    """Fragment minus reserved $-prefixed keys — what actually gets merged."""
+    return {k: v for k, v in fragment.items() if not k.startswith("$")}
+
+
+def merge_fragment(
+    current: dict[str, Json], fragment: dict[str, Json], base: dict[str, Json]
+) -> tuple[dict[str, Json], list[Conflict]]:
+    """Merge the fragment into current settings. Returns (merged, conflicts)."""
+    match fragment.get("$legacyHooks"):
+        case list() as entries:
+            legacy = tuple(x for x in entries if isinstance(x, str))
+        case _:
+            legacy = ()
+    merger = _Merger(legacy)
+    merged = merger.merge(current, strip_reserved(fragment), base, ())
+    assert isinstance(merged, dict)  # invariant: merging two objects yields an object
+    return merged, merger.conflicts
+
+
+# Path resolution — env overrides exist for tests and manual runs. The snapshot
+# script (run_onchange_after_snapshot-claude-managed.py.tmpl) imports these so
+# both sides always agree on locations.
+
+
+def _env_path(var: str, default: Path) -> Path:
+    return Path(os.environ.get(var, str(default)))
+
+
+def settings_file() -> Path:
+    return _env_path("CLAUDE_SETTINGS_FILE", Path.home() / ".claude/settings.json")
+
+
+def fragment_file() -> Path:
+    return _env_path("CLAUDE_FRAGMENT_FILE", Path.home() / ".claude/claude-managed.json")
+
+
+def base_file() -> Path:
+    return _env_path("CLAUDE_BASE_FILE", Path.home() / ".claude/.claude-managed.applied.json")
+
+
+def load_base(path: Path) -> dict[str, Json]:
+    """Last-applied fragment snapshot; {} (fail-safe) when missing or malformed.
+
+    Fail-safe direction: without a base, our own updates surface as conflicts
+    instead of silently overwriting foreign changes.
+    """
+    try:
+        base = json.loads(path.read_text())
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as exc:
+        print(f"claude-managed: ignoring corrupt base {path}: {exc}", file=sys.stderr)
+        return {}
+    if not isinstance(base, dict):
+        print(f"claude-managed: ignoring non-object base {path}", file=sys.stderr)
+        return {}
+    return base
+
+
+def main() -> int:
+    raw = sys.stdin.read()
+    has_input = bool(raw.strip())
+    current: Json = json.loads(raw) if has_input else {}
+    if not isinstance(current, dict):
+        print(
+            f"claude-managed: settings.json is not a JSON object: {current!r}",
+            file=sys.stderr,
+        )
+        return 1
+
+    fragment_path = fragment_file()
+    if not fragment_path.exists():
+        # Nothing to merge; pass the target through untouched.
+        print(f"claude-managed: fragment {fragment_path} missing; passthrough", file=sys.stderr)
+        sys.stdout.write(raw if has_input else "{}\n")
+        return 0
+
+    # A corrupt fragment is a hard error (it is chezmoi-managed; fail loudly).
+    fragment = json.loads(fragment_path.read_text())
+
+    merged, conflicts = merge_fragment(current, fragment, load_base(base_file()))
+
+    if conflicts:
+        for c in conflicts:
+            print(
+                f"⚠ claude-managed: conflict at `{c.path}`\n"
+                f"    current: {json.dumps(c.current, ensure_ascii=False)}\n"
+                f"    desired: {json.dumps(c.desired, ensure_ascii=False)}",
+                file=sys.stderr,
+            )
+        print(
+            "  settings.json left untouched. Align the fragment"
+            f" (chezmoi edit {fragment_path}) or the live settings, then re-run.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if merged == current and has_input:
+        # Byte-stable no-op: never let formatting differences show up as drift.
+        sys.stdout.write(raw)
+    else:
+        json.dump(merged, sys.stdout, indent=2, ensure_ascii=False)
+        sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
