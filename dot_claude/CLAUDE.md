@@ -1,5 +1,16 @@
 # Global Preferences
 
+## File Access Boundary — HARD RULE
+
+**Never read or modify anything outside the current project directory and explicitly added workspace directories (`/add-dir` / `permissions.additionalDirectories`) without my explicit authorization for that specific path in this conversation.** This especially covers system and software configuration: dotfiles and shell rc files, `~/.config`, `~/Library`, `/etc`, `/usr`, LaunchAgents/launchd, global git config, Homebrew-managed files, `~/.claude/settings.json` and hooks, and other projects' trees.
+
+- Applies to **every access path equally**: Read/Edit/Write/NotebookEdit tools AND Bash (`cat`, `tee`, `cp`/`mv`, `sed -i`, `>` redirection, `defaults write`, `git config --global`, `sudo` — all of it). Never route around a blocked file tool by doing the same thing in Bash.
+- "Explicit authorization" = I named that path/directory as a target in this conversation, or I approved the permission prompt. A general "fix it" / "make it work" never authorizes touching files outside the workspace.
+- Authorization is a **grant**: (scope = project or global, path root, mode `r`/`w`/`rw`, optional TTL), stored in `~/.claude/hooks/path-gate-grants.json`. Only I can issue grants — `~/.claude/hooks/path-gate.sh grant <path> <mode> [--global] [--ttl 2h]` run in my own terminal (TTY-enforced; Claude's shell has no TTY and must never try to run `grant`/`revoke` or edit grants.json, which is tool-owned). You may run the read-only verbs `list` and `check <path> <r|w>` to see what's covered.
+- Standing exceptions (no grant needed): the session scratchpad directory and `~/.claude/projects/*/memory/` (auto-memory).
+- If a task appears to require an outside change, **stop and report the blocker with a proposal** — name the path and the mode (r/w) you need, so I can approve the prompt or issue a grant.
+- Enforcement (mechanization ladder, not just prose): PreToolUse hook `~/.claude/hooks/path-gate.sh` forces an "ask" prompt on any file-tool call not covered by workspace, exceptions, or a grant (Read needs `r`; Edit/Write/NotebookEdit need `w`), and the auto-mode classifier soft-blocks out-of-workspace Bash writes. Being stopped by these gates is intended behavior — never disable the hook or use `dangerouslyDisableSandbox` to get past them.
+
 ## Shell / Bash Tool — Active Aliases
 
 The Bash tool runs through my interactive zsh config (shell snapshot), so these aliases/functions are **live — it is not a vanilla shell**. Bypass any with `command <cmd>` (works for aliases and functions; `\cmd` escapes aliases only).
