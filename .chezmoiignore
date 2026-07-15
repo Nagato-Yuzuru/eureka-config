@@ -10,6 +10,7 @@ README.md
 
 # Repo-only: pytest suite for modify_/run_ scripts, never deployed
 tests/
+docs/
 pyproject.toml
 uv.lock
 .venv/

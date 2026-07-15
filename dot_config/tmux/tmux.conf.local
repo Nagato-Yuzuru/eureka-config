@@ -121,6 +121,7 @@ set -as terminal-features '*:extkeys'
 # Smulx and nvim falls back to plain underline for DiagnosticUnderline*。
 # 改完需要 `tmux kill-server` 才生效（live source 不重算 terminal-features）。
 set -as terminal-features '*:usstyle'
+set-option -g default-command "reattach-to-user-namespace -l $SHELL"
 
 # OSC 52：让 tmux 把 set-buffer -w 的内容转发给宿主终端剪贴板（WezTerm 原生支持）。
 # 默认值 external 已够用；显式置 on 同时允许内层程序（如 nvim）通过 OSC 52 写剪贴板。
