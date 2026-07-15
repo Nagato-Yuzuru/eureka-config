@@ -4,7 +4,9 @@
   ],
   "permissions": {
     "ask": [
-      "Agent(model:*fable*)"
+      "Agent(model:*fable*)",
+      "Bash(*path-gate.sh grant *)",
+      "Bash(*path-gate.sh revoke *)"
     ]
   },
   "autoMode": {
@@ -16,7 +18,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^(Read|Edit|Write|NotebookEdit)$",
+        "matcher": "^(Read|Grep|Glob|Edit|Write|NotebookEdit)$",
         "hooks": [
           {
             "type": "command",
@@ -51,6 +53,30 @@
           {
             "type": "command",
             "command": "{{ .chezmoi.homeDir }}/.claude/hooks/require-workflow-routing.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(Read|Grep|Glob|Edit|Write|NotebookEdit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/path-gate.sh record",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "^(Read|Grep|Glob|Edit|Write|NotebookEdit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/path-gate.sh record",
             "timeout": 5
           }
         ]

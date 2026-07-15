@@ -1,39 +1,39 @@
 #!/usr/bin/env bash
-# path-gate: protocol-ized file-access gate for Claude Code.
+# path-gate v2 — whitelist file-access gate for Claude Code.
+# Spec: docs/superpowers/specs/2026-07-15-path-gate-v2-design.md (repo-only).
 #
-# Access model: a GRANT is (scope, path, mode[, expires]).
-#   scope   — project root the grant applies to, or "*" for all projects
-#   path    — root being granted; covers everything under it
-#   mode    — r, w, or rw
-#   expires — optional epoch seconds (from --ttl); expired grants are inert
+# Modes:
+#   (no args)  PreToolUse gate. Read/Grep/Glob need r; Edit/Write/NotebookEdit
+#              need w. Decision chain (first match): store carve-out (w->deny,
+#              r->grants only) -> /dev/null -> workspace (project +
+#              permissions.additionalDirectories) -> /private/tmp -> current
+#              project auto-memory -> structural whitelist (r-only) -> session
+#              grants -> durable grants -> ask (+ pending marker). Allow steps
+#              judge the RESOLVED path (realpath); the carve-out judges both
+#              the lexical and resolved spellings.
+#   record     PostToolUse/PostToolUseFailure: promote pending->granted.
+#   grant <path> <r|w|rw> [--global|--project DIR] [--ttl 30m|2h|7d] [--note T]
+#   revoke <path> [--global|--project DIR]
+#   list
+#   check <path> <r|w> [--project DIR] [--session SID]   # exit 0/1/2 = allow/ask/deny
 #
-# Hook mode (PreToolUse, JSON on stdin): Read needs r; Edit/Write/NotebookEdit
-# need w. Targets inside the project workspace, built-in exceptions (session
-# scratchpad, auto-memory, /dev/null), or a matching grant pass; everything
-# else => permissionDecision "ask" (explicit per-call user authorization).
-#
-# CLI:
-#   path-gate.sh grant  <path> <r|w|rw> [--global | --project DIR] [--ttl 30m|2h|7d] [--note TEXT]
-#   path-gate.sh revoke <path> [--global | --project DIR]
-#   path-gate.sh list
-#   path-gate.sh check  <path> <r|w> [--project DIR]     # dry-run, no side effects
-#
-# grant/revoke require a TTY: Claude's Bash tool has none, so only the human
-# operator can mutate grants. grants.json is tool-owned — never hand-edit it.
+# grant/revoke prompt via native permissions.ask rules (not a TTY). Stores are
+# tool-owned: path-gate-grants.json (durable) and path-gate-sessions/ (per
+# session). Never hand-edit either.
 
 set -euo pipefail
 
 GRANTS="$HOME/.claude/hooks/path-gate-grants.json"
+SESSIONS_DIR="$HOME/.claude/hooks/path-gate-sessions"
 CWD="$PWD"
 
 # --- path helpers -----------------------------------------------------------
 
 # Lexically normalize: collapse //, ., .. and expand ~ so prefix checks can't
-# be dodged with traversal. Symlinks deliberately unresolved (targets may not
-# exist yet for Write).
+# be dodged with traversal. Symlinks are handled by resolve(), not here.
 normalize() {
     local path="$1"
-    # shellcheck disable=SC2088  # literal ~ match is intended: grant entries may contain unexpanded ~/
+    # shellcheck disable=SC2088
     [[ "$path" == "~" || "$path" == "~/"* ]] && path="$HOME${path#\~}"
     [[ "$path" != /* ]] && path="${CWD:-/}/$path"
     local -a out=() segs
@@ -54,6 +54,36 @@ normalize() {
     fi
 }
 
+# Like normalize() but keeps '..' segments — for feeding realpath, which must
+# see the pre-collapse path so a symlink component is followed before '..'.
+normalize_raw() {
+    local path="$1"
+    # shellcheck disable=SC2088
+    [[ "$path" == "~" || "$path" == "~/"* ]] && path="$HOME${path#\~}"
+    [[ "$path" != /* ]] && path="${CWD:-/}/$path"
+    local -a out=() segs
+    IFS='/' read -ra segs <<< "$path"
+    local seg
+    for seg in "${segs[@]}"; do
+        case "$seg" in
+            '' | '.') ;;
+            *) out+=("$seg") ;;
+        esac
+    done
+    if ((${#out[@]} == 0)); then echo /; else printf '/%s' "${out[@]}"; echo; fi
+}
+
+# macOS: /tmp and /var are symlinks into /private — compare in canonical form.
+canon() {
+    case "$1" in
+        /tmp | /tmp/*) echo "/private$1" ;;
+        /var | /var/*) echo "/private$1" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+lex() { canon "$(normalize "$1")"; }
+
 # under PATH ROOT — true if PATH is ROOT or inside it
 under() {
     [[ -z "$2" ]] && return 1
@@ -63,114 +93,296 @@ under() {
     esac
 }
 
-# --- decision core ----------------------------------------------------------
-
-# covered_by_grant TARGET NEEDED(r|w) PROJECT
-# Malformed entries are inert (skipped), never fatal — a corrupt grants file
-# must degrade to "ask", not crash the hook into fail-open.
-covered_by_grant() {
-    local target="$1" needed="$2" project="$3"
-    [[ -r "$GRANTS" ]] || return 1
-    local now entry scope gpath mode expires
-    now=$(date +%s)
-    while IFS= read -r entry; do
-        expires=$(jq -r '.expires // empty' <<< "$entry")
-        if [[ -n "$expires" ]]; then
-            [[ "$expires" =~ ^[0-9]+$ ]] || continue
-            ((expires < now)) && continue
+# resolve RAWPATH -> real path (R). Input comes from normalize_raw(): '..'
+# segments are intact so realpath/the kernel follows a symlink component
+# BEFORE applying '..' — collapsing first would let 'link/../x' escape
+# unresolved. Existing targets: realpath. Dangling symlink chains: bounded
+# manual readlink walk (a Write through a link creates the target).
+# Non-existent: realpath of the nearest existing ancestor plus the remaining
+# suffix ('..' collapsed lexically only there — no symlink left to follow),
+# so a symlinked parent cannot smuggle a create elsewhere.
+resolve() {
+    local p="$1" hops=0 t
+    while [[ -L "$p" && ! -e "$p" && $hops -lt 8 ]]; do
+        t=$(/usr/bin/readlink "$p") || break # macOS: readlink is /usr/bin, realpath /bin
+        [[ "$t" != /* ]] && t="${p%/*}/$t"
+        p=$(normalize_raw "$t")
+        hops=$((hops + 1))
+    done
+    if [[ -e "$p" ]]; then
+        if t=$(/bin/realpath "$p" 2> /dev/null); then
+            canon "$t"
+            return
         fi
-        mode=$(jq -r '.mode // empty' <<< "$entry")
-        # exact-set match, NOT substring: junk like "true" contains "r"
-        [[ "$mode" =~ ^(r|w|rw)$ ]] || continue
-        [[ "$mode" == *"$needed"* ]] || continue
-        scope=$(jq -r '.scope // empty' <<< "$entry")
-        [[ "$scope" == "*" || "$scope" == /* ]] || continue
-        if [[ "$scope" != "*" ]]; then
-            under "$project" "$(normalize "$scope")" || continue
-        fi
-        gpath=$(jq -r '.path // empty' <<< "$entry")
-        [[ "$gpath" == /* ]] || continue
-        under "$target" "$(normalize "$gpath")" && return 0
-    done < <(jq -c '.grants[]?' "$GRANTS" 2> /dev/null)
-    return 1
+    fi
+    local cur="$p" suffix=""
+    while [[ "$cur" != "/" && ! -e "$cur" ]]; do
+        suffix="/${cur##*/}$suffix"
+        cur="${cur%/*}"
+        [[ -z "$cur" ]] && cur=/
+    done
+    if [[ "$cur" == "/" ]]; then
+        canon "$(normalize "$p")"
+        return
+    fi
+    t=$(/bin/realpath "$cur" 2> /dev/null || echo "$cur")
+    [[ "$t" == "/" ]] && t=""
+    canon "$(normalize "$t$suffix")"
 }
 
-# allowed TARGET NEEDED(r|w) PROJECT
+# Claude Code's project-dir slug: every non-[A-Za-z0-9] character -> '-'.
+# ASCII-only regardless of locale (LC_ALL=C — [[:alnum:]] would keep non-ASCII
+# letters and diverge). printf, not echo: the slug always starts with '-'.
+# Undocumented upstream; pinned by tests against real ~/.claude/projects names.
+slug_of() {
+    local s
+    s=$(LC_ALL=C; printf '%s' "${1//[^A-Za-z0-9]/-}")
+    printf '%s\n' "$s"
+}
+
+# Timestamps: all expiry math uses jq's builtin `now` (fractional-second)
+# inside each jq program — never `date +%s`, whose whole-second floor on both
+# the write and read side lets a just-expired short TTL read as valid for up
+# to ~2s. (BSD `date` on macOS has no `%N`; jq is already a hard dependency.)
+
+# --- decision core ----------------------------------------------------------
+
+# permissions.additionalDirectories from user/project/local settings scopes.
+addl_dirs() {
+    local project="$1" f
+    local -a files=()
+    for f in "$HOME/.claude/settings.json" "$project/.claude/settings.json" \
+        "$project/.claude/settings.local.json"; do
+        [[ -f "$f" ]] && files+=("$f")
+    done
+    ((${#files[@]})) || return 0
+    jq -r '(.permissions.additionalDirectories // [])[]' "${files[@]}" 2> /dev/null || true
+}
+
+# One jq pass over the durable store. Entries are written normalized by the
+# CLI; malformed entries fail the selects and are inert. A corrupt file makes
+# jq fail -> return 1 -> the chain falls through to ask (fail-closed).
+grant_covers() { # TARGET NEEDED PROJECT
+    [[ -r "$GRANTS" ]] || return 1
+    jq -e --arg t "$1" --arg m "$2" --arg proj "$3" '
+        [.grants[]? | select(
+            ((.expires // null) == null or ((.expires | type) == "number" and .expires >= now))
+            and ((.mode // "") | IN("r", "w", "rw"))
+            and (.mode | contains($m))
+            and ((.scope // "") as $s
+                 | ($s == "*") or (($s | startswith("/"))
+                    and ($proj == $s or ($proj | startswith($s + "/")))))
+            and ((.path // "") as $p
+                 | ($p | startswith("/"))
+                   and ($t == $p or ($t | startswith($p + "/"))))
+        )] | length > 0' "$GRANTS" > /dev/null 2>&1
+}
+
+session_covers() { # TARGET NEEDED SID
+    [[ -n "$3" ]] || return 1
+    local f="$SESSIONS_DIR/$3.json"
+    [[ -s "$f" ]] || return 1
+    jq -e --arg t "$1" --arg m "$2" '
+        [.granted[]? | select(
+            ((.mode // "") | contains($m))
+            and ((.path // "") as $p
+                 | ($p | startswith("/"))
+                   and ($t == $p or ($t | startswith($p + "/"))))
+        )] | length > 0' "$f" > /dev/null 2>&1
+}
+
+# allowed L R NEEDED PROJECT SID -> 0 allow | 1 ask | 2 deny
 allowed() {
-    local target="$1" needed="$2" project="$3"
-    [[ "$target" == /dev/null ]] && return 0
-    under "$target" "$(normalize "${project:-/nonexistent}")" && return 0
-    # Session scratchpad / task-output dirs — this user's only ($UID pinned)
-    under "$target" "/private/tmp/claude-${UID}" && return 0
-    # Auto-memory: ~/.claude/projects/<one slug component>/memory/**
-    # Decomposed by hand because [[ == pattern ]] lets * cross slashes.
-    local rel="${target#"$HOME"/.claude/projects/}"
-    if [[ "$rel" != "$target" && "$rel" == */* ]]; then
-        local slug="${rel%%/*}" rest="${rel#*/}"
-        [[ -n "$slug" && "$rest" == memory/* ]] && return 0
+    local L="$1" R="$2" needed="$3" project="$4" sid="$5" store d
+    # step 0: tool-owned stores, checked against BOTH spellings
+    for store in "$GRANTS" "$SESSIONS_DIR"; do
+        if under "$L" "$store" || under "$R" "$store"; then
+            [[ "$needed" == w ]] && return 2
+            grant_covers "$R" "$needed" "$project" && return 0
+            return 1
+        fi
+    done
+    [[ "$R" == /dev/null ]] && return 0
+    under "$R" "$project" && return 0
+    while IFS= read -r d; do
+        [[ -n "$d" ]] || continue
+        under "$R" "$(lex "$d")" && return 0
+    done < <(addl_dirs "$project")
+    under "$R" /private/tmp && return 0
+    local slug
+    slug=$(slug_of "$project")
+    under "$R" "$HOME/.claude/projects/$slug/memory" && return 0
+    if [[ "$needed" == r ]]; then
+        under "$R" "$HOME/.claude/projects/$slug" && return 0
+        for d in plugins skills agents commands rules output-styles; do
+            under "$R" "$HOME/.claude/$d" && return 0
+        done
+        [[ "$R" == "$HOME/.claude/CLAUDE.md" || "$R" == "$HOME/.claude/keybindings.json" ]] && return 0
     fi
-    covered_by_grant "$target" "$needed" "$project"
+    session_covers "$R" "$needed" "$sid" && return 0
+    grant_covers "$R" "$needed" "$project" && return 0
+    return 1
 }
 
 # --- hook mode --------------------------------------------------------------
 
-# Fail-ask backstop: any unexpected crash in hook mode (unbound variable,
-# missing jq, ...) would otherwise exit non-zero with no decision, which
-# Claude Code treats as a non-blocking error — i.e. fail-OPEN. The EXIT trap
-# converts every path that didn't reach an explicit decision into "ask".
-# Static printf, no jq: it must work even when jq itself is the failure.
+# Fail-ask backstop: any unexpected crash in gate mode would otherwise exit
+# non-zero with no decision, which Claude Code treats as non-blocking — i.e.
+# fail-OPEN. Static printf, no jq: must work when jq itself is the failure.
 HOOK_DECIDED=0
 hook_exit_backstop() {
     if [[ "${HOOK_DECIDED:-0}" != 1 ]]; then
-        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"path-gate hook crashed before reaching a decision; failing closed to ask. Debug: run ~/.claude/hooks/path-gate.sh manually and check path-gate-grants.json for malformed entries."}}'
+        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"path-gate crashed before reaching a decision; failing closed to ask. Debug: run ~/.claude/hooks/path-gate.sh manually and check the stores for malformed entries."}}'
     fi
     exit 0
 }
 
+emit_ask() { # TOOL NEEDED R
+    jq -n --arg tool "$1" --arg needed "$2" --arg path "$3" '{
+        hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "ask",
+            permissionDecisionReason: "\($tool) needs \(if $needed == "r" then "read" else "write" end) access to \($path) — outside the workspace and whitelist. Approve = allowed for the rest of this session (auto-recorded). Durable: ask Claude to run ~/.claude/hooks/path-gate.sh grant \"\($path)\" \($needed) [--ttl 7d] — it always confirms with you first."
+        }
+    }'
+}
+
+emit_deny() { # TOOL R
+    jq -n --arg tool "$1" --arg path "$2" '{
+        hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason: "\($path) is a tool-owned path-gate store. File tools may never write it; grants are issued only via ~/.claude/hooks/path-gate.sh grant."
+        }
+    }'
+}
+
+needed_for() { # TOOL -> r | w | "" (not gated)
+    case "$1" in
+        Read | Grep | Glob) echo r ;;
+        Edit | Write | NotebookEdit) echo w ;;
+        *) echo "" ;;
+    esac
+}
+
 hook_mode() {
     trap hook_exit_backstop EXIT
-    local input tool file_path needed project target
+    local input fields tool fpath cwd sid pmode
     input=$(cat)
-    tool=$(jq -r '.tool_name // empty' <<< "$input")
-
-    case "$tool" in
-        Read) needed=r ;;
-        Edit | Write | NotebookEdit) needed=w ;;
-        *)
+    fields=$(jq -r '[.tool_name // "",
+                     (.tool_input.file_path // .tool_input.notebook_path // .tool_input.path // ""),
+                     .cwd // "", .session_id // "", .permission_mode // ""] | @tsv' <<< "$input")
+    # NOT `IFS=$'\t' read -r ... <<< "$fields"`: bash classifies tab as
+    # "IFS whitespace" regardless of what IFS is set to, so consecutive tabs
+    # collapse instead of yielding an empty field — a real Grep/Glob call
+    # with no path param (empty fpath) would silently shift every later
+    # field left by one. Literal substring splitting can't collapse.
+    local rest
+    tool="${fields%%$'\t'*}"; rest="${fields#*$'\t'}"
+    fpath="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+    cwd="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+    sid="${rest%%$'\t'*}"; pmode="${rest#*$'\t'}"
+    local needed
+    needed=$(needed_for "$tool")
+    if [[ -z "$needed" || -z "$fpath" ]]; then
+        HOOK_DECIDED=1
+        exit 0
+    fi
+    CWD="$cwd"
+    local project L R rc=0
+    project=$(lex "${CLAUDE_PROJECT_DIR:-${cwd:-/nonexistent}}")
+    L=$(lex "$fpath")
+    R=$(resolve "$(normalize_raw "$fpath")")
+    allowed "$L" "$R" "$needed" "$project" "$sid" || rc=$?
+    case "$rc" in
+        0)
+            HOOK_DECIDED=1
+            exit 0
+            ;;
+        2)
+            emit_deny "$tool" "$R"
             HOOK_DECIDED=1
             exit 0
             ;;
     esac
-
-    file_path=$(jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' <<< "$input")
-    if [[ -z "$file_path" ]]; then
-        HOOK_DECIDED=1
-        exit 0
-    fi
-
-    CWD=$(jq -r '.cwd // empty' <<< "$input")
-    project="${CLAUDE_PROJECT_DIR:-$CWD}"
-
-    target=$(normalize "$file_path")
-    # macOS: /tmp is a symlink to /private/tmp — compare in canonical form
-    [[ "$target" == /tmp/* ]] && target="/private$target"
-
-    if allowed "$target" "$needed" "$project"; then
-        HOOK_DECIDED=1
-        exit 0
-    fi
-
-    # HOOK_DECIDED is set only after jq succeeds: if this emission fails,
-    # set -e aborts and the EXIT backstop prints the static ask JSON instead.
-    jq -n --arg tool "$tool" --arg path "$target" --arg needed "$needed" \
-        --arg proj "${project:-unknown}" '{
-        hookSpecificOutput: {
-            hookEventName: "PreToolUse",
-            permissionDecision: "ask",
-            permissionDecisionReason: "\($tool) needs \(if $needed == "r" then "read" else "write" end) access to \($path) — outside the project workspace (\($proj)) and not covered by any grant. Approving allows this call only. For a durable grant, run in YOUR terminal: ~/.claude/hooks/path-gate.sh grant \($path) \($needed) [--global] [--ttl 2h]"
-        }
-    }'
+    [[ "$pmode" != "bypassPermissions" ]] && pending_add "$sid" "$R" "$needed"
+    emit_ask "$tool" "$needed" "$R"
     HOOK_DECIDED=1
+    exit 0
+}
+
+# Record a pending marker before emitting ask. Best-effort: a failure here
+# costs one extra prompt later, never an escalation — so errors are swallowed.
+# Session ids become filenames: refuse anything but a safe charset.
+pending_add() { # SID PATH MODE
+    [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] || return 0
+    mkdir -p "$SESSIONS_DIR" 2> /dev/null || return 0
+    local f="$SESSIONS_DIR/$1.json" tmp
+    [[ -s "$f" ]] || printf '{"pending":[],"granted":[]}\n' > "$f" 2> /dev/null || return 0
+    tmp=$(mktemp "$SESSIONS_DIR/.pg.XXXXXX") || return 0
+    if jq --arg p "$2" --arg m "$3" '
+        .pending |= (map(select(.path != $p or .mode != $m)) + [{path: $p, mode: $m}])
+    ' "$f" > "$tmp" 2> /dev/null; then
+        mv "$tmp" "$f" 2> /dev/null || command rm -f "$tmp"
+    else
+        command rm -f "$tmp"
+    fi
+    return 0
+}
+
+# PostToolUse/PostToolUseFailure: the tool executed. For a gated call that
+# means a human approved the prompt — promote pending -> granted, but only if
+# (1) the exact (path, mode) is pending, (2) we are not in bypassPermissions
+# (no prompt was shown there and no pending was written; a stale pending from
+# a denied prompt must not be promotable), and (3) allowed() still says ask -
+# execution under a durable grant proves nothing, and recording would let a
+# later revoke be outlived. record must NEVER block a tool: exit 0 always.
+cmd_record() {
+    trap 'exit 0' EXIT
+    local input sid
+    input=$(cat)
+    # pure-bash early exit: no jq unless a session file with content exists
+    [[ "$input" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9._-]+)\" ]] || exit 0
+    sid="${BASH_REMATCH[1]}"
+    local f="$SESSIONS_DIR/$sid.json"
+    [[ -s "$f" ]] || exit 0
+
+    local fields tool fpath cwd _sid pmode rest
+    fields=$(jq -r '[.tool_name // "",
+                     (.tool_input.file_path // .tool_input.notebook_path // .tool_input.path // ""),
+                     .cwd // "", .session_id // "", .permission_mode // ""] | @tsv' <<< "$input") || exit 0
+    # substring split (not `IFS=$'\t' read`: bash collapses consecutive tabs)
+    tool="${fields%%$'\t'*}"; rest="${fields#*$'\t'}"
+    fpath="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+    cwd="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+    _sid="${rest%%$'\t'*}"; pmode="${rest#*$'\t'}"
+    [[ "$pmode" == "bypassPermissions" ]] && exit 0
+    local needed
+    needed=$(needed_for "$tool")
+    [[ -n "$needed" && -n "$fpath" ]] || exit 0
+
+    CWD="$cwd"
+    local project L R rc=0
+    project=$(lex "${CLAUDE_PROJECT_DIR:-${cwd:-/nonexistent}}")
+    L=$(lex "$fpath")
+    R=$(resolve "$(normalize_raw "$fpath")")
+
+    jq -e --arg p "$R" --arg m "$needed" \
+        '.pending[]? | select(.path == $p and .mode == $m)' "$f" > /dev/null 2>&1 || exit 0
+    allowed "$L" "$R" "$needed" "$project" "$sid" || rc=$?
+    [[ "$rc" == 1 ]] || exit 0
+
+    local tmp
+    tmp=$(mktemp "$SESSIONS_DIR/.pg.XXXXXX") || exit 0
+    if jq --arg p "$R" --arg m "$needed" '
+        .pending |= map(select(.path != $p or .mode != $m))
+        | .granted |= (map(select(.path != $p or .mode != $m)) + [{path: $p, mode: $m}])
+    ' "$f" > "$tmp" 2> /dev/null; then
+        mv "$tmp" "$f" 2> /dev/null || command rm -f "$tmp"
+    else
+        command rm -f "$tmp"
+    fi
+    find "$SESSIONS_DIR" -type f -name '*.json' -mtime +7 -delete 2> /dev/null || true
     exit 0
 }
 
@@ -179,10 +391,6 @@ hook_mode() {
 die() {
     echo "path-gate: $*" >&2
     exit 3
-}
-
-require_tty() {
-    [[ -t 0 && -t 1 ]] || die "grant/revoke must be run by a human in a terminal (no TTY — Claude cannot self-authorize)"
 }
 
 ensure_store() {
@@ -200,9 +408,7 @@ ttl_to_seconds() {
     esac
 }
 
-# parse_scope_args VAR_NAME remaining-args... — sets scope, echoes leftover count consumed handled inline instead
 cmd_grant() {
-    require_tty
     local path="" mode="" scope="$PWD" ttl="" note=""
     while (($# > 0)); do
         case "$1" in
@@ -229,20 +435,21 @@ cmd_grant() {
     [[ -n "$path" && -n "$mode" ]] || die "usage: grant <path> <r|w|rw> [--global | --project DIR] [--ttl 2h] [--note TEXT]"
     [[ "$mode" =~ ^(r|w|rw)$ ]] || die "mode must be r, w, or rw"
 
-    path=$(normalize "$path")
-    [[ "$scope" != "*" ]] && scope=$(normalize "$scope")
+    path=$(lex "$path")
+    [[ "$scope" != "*" ]] && scope=$(lex "$scope")
 
     local expires=null
-    [[ -n "$ttl" ]] && expires=$(($(date +%s) + $(ttl_to_seconds "$ttl")))
+    [[ -n "$ttl" ]] && expires=$(jq -n --argjson ttl "$(ttl_to_seconds "$ttl")" '(now + $ttl)')
 
     ensure_store
     local tmp
-    tmp=$(mktemp)
-    # prune expired entries, drop any older grant for the same (scope, path), append
+    # tmp in the store's own dir: mv is then a same-filesystem rename (atomic);
+    # $TMPDIR may be another volume, where mv degrades to copy+unlink.
+    tmp=$(mktemp "$(dirname "$GRANTS")/.pg.XXXXXX")
     jq --arg scope "$scope" --arg path "$path" --arg mode "$mode" \
-        --argjson expires "$expires" --arg note "$note" --argjson now "$(date +%s)" '
+        --argjson expires "$expires" --arg note "$note" '
         .grants |= (
-            map(select((.expires == null or .expires >= $now)
+            map(select((.expires == null or .expires >= now)
                        and (.scope != $scope or .path != $path)))
             + [{scope: $scope, path: $path, mode: $mode, expires: $expires}
                + (if $note != "" then {note: $note} else {} end)]
@@ -251,7 +458,6 @@ cmd_grant() {
 }
 
 cmd_revoke() {
-    require_tty
     local path="" scope="$PWD"
     while (($# > 0)); do
         case "$1" in
@@ -269,13 +475,13 @@ cmd_revoke() {
         shift
     done
     [[ -n "$path" ]] || die "usage: revoke <path> [--global | --project DIR]"
-    path=$(normalize "$path")
-    [[ "$scope" != "*" ]] && scope=$(normalize "$scope")
+    path=$(lex "$path")
+    [[ "$scope" != "*" ]] && scope=$(lex "$scope")
 
     [[ -f "$GRANTS" ]] || die "no grants file"
     local tmp before after
     before=$(jq '.grants | length' "$GRANTS")
-    tmp=$(mktemp)
+    tmp=$(mktemp "$(dirname "$GRANTS")/.pg.XXXXXX") # same-dir: atomic rename
     jq --arg scope "$scope" --arg path "$path" \
         '.grants |= map(select(.scope != $scope or .path != $path))' \
         "$GRANTS" > "$tmp" && mv "$tmp" "$GRANTS"
@@ -288,23 +494,27 @@ cmd_list() {
         echo "no grants"
         return
     }
-    jq -r --argjson now "$(date +%s)" '
+    jq -r '
         .grants[]
         | [ .scope, .path, .mode,
             (if .expires == null then "never"
-             elif .expires < $now then "EXPIRED"
-             else ((.expires - $now) / 60 | floor | tostring) + "m left" end),
+             elif .expires < now then "EXPIRED"
+             else ((.expires - now) / 60 | floor | tostring) + "m left" end),
             (.note // "") ]
         | @tsv' "$GRANTS" \
         | column -t -s $'\t' || echo "no grants"
 }
 
 cmd_check() {
-    local path="" needed="" project="$PWD"
+    local path="" needed="" project="$PWD" sid=""
     while (($# > 0)); do
         case "$1" in
             --project)
                 project="$2"
+                shift
+                ;;
+            --session)
+                sid="$2"
                 shift
                 ;;
             -*) die "unknown flag $1" ;;
@@ -314,16 +524,23 @@ cmd_check() {
         esac
         shift
     done
-    [[ -n "$path" && "$needed" =~ ^(r|w)$ ]] || die "usage: check <path> <r|w> [--project DIR]"
-    local target
-    target=$(normalize "$path")
-    [[ "$target" == /tmp/* ]] && target="/private$target"
-    if allowed "$target" "$needed" "$(normalize "$project")"; then
-        echo "allow: $needed on $target (project $(normalize "$project"))"
-    else
-        echo "ask: $needed on $target (project $(normalize "$project")) — no covering grant"
-        exit 1
-    fi
+    [[ -n "$path" && "$needed" =~ ^(r|w)$ ]] || die "usage: check <path> <r|w> [--project DIR] [--session SID]"
+    local L R rc=0
+    project=$(lex "$project")
+    L=$(lex "$path")
+    R=$(resolve "$(normalize_raw "$path")")
+    allowed "$L" "$R" "$needed" "$project" "$sid" || rc=$?
+    case "$rc" in
+        0) echo "allow: $needed on $R (project $project)" ;;
+        2)
+            echo "deny: $needed on $R — tool-owned path-gate store"
+            exit 2
+            ;;
+        *)
+            echo "ask: $needed on $R (project $project) — no covering grant"
+            exit 1
+            ;;
+    esac
 }
 
 # --- dispatch ---------------------------------------------------------------
@@ -335,9 +552,10 @@ fi
 cmd="$1"
 shift
 case "$cmd" in
+    record) cmd_record ;;
     grant) cmd_grant "$@" ;;
     revoke) cmd_revoke "$@" ;;
     list) cmd_list ;;
     check) cmd_check "$@" ;;
-    *) die "unknown command '$cmd' (grant | revoke | list | check, or no args for hook mode)" ;;
+    *) die "unknown command '$cmd' (record | grant | revoke | list | check, or no args for hook mode)" ;;
 esac
