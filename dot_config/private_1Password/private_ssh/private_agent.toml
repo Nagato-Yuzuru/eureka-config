@@ -31,16 +31,16 @@
 
 [[ssh-keys]]
 item = "Machina-Arcus-Yuzurii Self"
-vault = "Personal"
-
-[[ssh-keys]]
-item = "yuzuru.me GitHub"
 vault = "Dev"
 
 [[ssh-keys]]
-item = "Github"
-vault = 'Dev'
+item = "Github yuzuru.me"
+vault = "Dev"
 
 [[ssh-keys]]
-item = "Terraqt"
-vault = "Work"
+item = "GitHub (SSH)"
+vault = "Dev"
+
+[[ssh-keys]]
+item = "Terraqt (SSH)"
+vault = "Terraqt"
