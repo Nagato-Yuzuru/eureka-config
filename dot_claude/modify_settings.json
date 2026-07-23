@@ -201,13 +201,15 @@ class Composed:
     legacy: tuple[str, ...]
 
 
-def compose(fragments: list[tuple[str, dict[str, Json]]]) -> tuple[Composed, list[str]]:
+def compose(fragments: list[tuple[str, dict[str, Json]]]) -> Composed:
     """Compose (name, fragment) pairs, in order, into one effective fragment.
 
-    Returns (composed, errors); on any error the composed value must not be
-    merged. All errors across all fragments are collected, not just the first.
+    Raises:
+        ExceptionGroup: of ValueError (semantic contradictions) and TypeError
+        (shape violations); on any error nothing must be merged. All errors
+        across all fragments are collected, not just the first.
     """
-    errors: list[str] = []
+    errors: list[Exception] = []
     policy: dict[tuple[str, ...], Strategy] = {}
     policy_src: dict[tuple[str, ...], str] = {}
     legacy: list[str] = []
@@ -215,18 +217,20 @@ def compose(fragments: list[tuple[str, dict[str, Json]]]) -> tuple[Composed, lis
     for name, fragment in fragments:
         for key in fragment:
             if key.startswith("$") and key not in _RESERVED:
-                errors.append(f"{name}: unknown reserved key `{key}`")
+                errors.append(ValueError(f"{name}: unknown reserved key `{key}`"))
         _collect_policy(name, fragment.get("$merge"), policy, policy_src, errors)
         match fragment.get("$legacyHooks"):
             case None:
                 pass
-            case list() as entries:
+            case list(entries):
                 strings = [x for x in entries if isinstance(x, str)]
                 if len(strings) != len(entries):
-                    errors.append(f"{name}: $legacyHooks entries must all be strings")
+                    errors.append(TypeError(f"{name}: $legacyHooks entries must all be strings"))
                 legacy += [x for x in strings if x not in legacy]
             case other:
-                errors.append(f"{name}: $legacyHooks must be a list of strings, got {other!r}")
+                errors.append(
+                    TypeError(f"{name}: $legacyHooks must be a list of strings, got {other!r}")
+                )
 
     data: dict[str, Json] = {}
     origin: dict[tuple[str, ...], str] = {}
@@ -235,7 +239,9 @@ def compose(fragments: list[tuple[str, dict[str, Json]]]) -> tuple[Composed, lis
 
     for key, value in data.items():
         _validate(value, (key,), policy, errors)
-    return Composed(data, policy, tuple(legacy)), errors
+    if errors:
+        raise ExceptionGroup("fragments do not compose", errors)
+    return Composed(data, policy, tuple(legacy))
 
 
 def _collect_policy(
@@ -243,17 +249,17 @@ def _collect_policy(
     raw: Json,
     policy: dict[tuple[str, ...], Strategy],
     policy_src: dict[tuple[str, ...], str],
-    errors: list[str],
+    errors: list[Exception],
 ) -> None:
     if raw is None:
         return
     if not isinstance(raw, dict):
-        errors.append(f"{name}: $merge must be an object")
+        errors.append(TypeError(f"{name}: $merge must be an object"))
         return
     for dotted, value in raw.items():
         strategy = _STRATEGIES.get(value) if isinstance(value, str) else None
         if strategy is None:
-            errors.append(f"{name}: unknown merge strategy {value!r} for `{dotted}`")
+            errors.append(ValueError(f"{name}: unknown merge strategy {value!r} for `{dotted}`"))
             continue
         pattern = tuple(dotted.split("."))
         for existing, existing_strategy in policy.items():
@@ -262,8 +268,10 @@ def _collect_policy(
             if len(existing) == len(pattern):
                 if existing_strategy != strategy:
                     errors.append(
-                        f"merge-strategy conflict on `{dotted}`: {policy_src[existing]} says"
-                        f" {existing_strategy}, {name} says {strategy}"
+                        ValueError(
+                            f"merge-strategy conflict on `{dotted}`: {policy_src[existing]} says"
+                            f" {existing_strategy}, {name} says {strategy}"
+                        )
                     )
             else:
                 if len(existing) < len(pattern):
@@ -273,9 +281,11 @@ def _collect_policy(
                     ancestor, ancestor_src = pattern, name
                     nested, nested_src = existing, policy_src[existing]
                 errors.append(
-                    f"merge-strategy conflict: `{'.'.join(nested)}` ({nested_src}) is nested"
-                    f" under declared `{'.'.join(ancestor)}` ({ancestor_src}) and can never"
-                    " apply — no strategy recurses"
+                    ValueError(
+                        f"merge-strategy conflict: `{'.'.join(nested)}` ({nested_src}) is nested"
+                        f" under declared `{'.'.join(ancestor)}` ({ancestor_src}) and can never"
+                        " apply — no strategy recurses"
+                    )
                 )
         policy.setdefault(pattern, strategy)
         policy_src.setdefault(pattern, name)
@@ -288,7 +298,7 @@ def _compose_into(
     name: str,
     origin: dict[tuple[str, ...], str],
     policy: dict[tuple[str, ...], Strategy],
-    errors: list[str],
+    errors: list[Exception],
 ) -> None:
     for key, value in incoming.items():
         sub = (*path, key)
@@ -308,7 +318,9 @@ def _compose_into(
             existing.extend(copy.deepcopy(value))
         elif not _same(existing, value):
             errors.append(
-                f"compose conflict at `{'.'.join(sub)}`: {_origin_of(origin, sub)} vs {name}"
+                ValueError(
+                    f"compose conflict at `{'.'.join(sub)}`: {_origin_of(origin, sub)} vs {name}"
+                )
             )
 
 
@@ -324,23 +336,27 @@ def _validate(
     value: Json,
     path: tuple[str, ...],
     policy: dict[tuple[str, ...], Strategy],
-    errors: list[str],
+    errors: list[Exception],
 ) -> None:
     """Composed data must satisfy its own declarations — violations are bugs."""
     dotted = ".".join(path)
     match strategy_for(policy, path):
         case ("ensure" | "keyed") as strategy if not isinstance(value, list):
             errors.append(
-                f"`{dotted}`: strategy {strategy} requires a list, got {type(value).__name__}"
+                TypeError(
+                    f"`{dotted}`: strategy {strategy} requires a list, got {type(value).__name__}"
+                )
             )
         case "keyed":
             assert isinstance(value, list)
             keys = [_hook_key(entry) for entry in value]
             for i, key in enumerate(keys):
                 if not key:
-                    errors.append(f"`{dotted}[{i}]`: keyed entry has no derivable claim key")
+                    errors.append(
+                        ValueError(f"`{dotted}[{i}]`: keyed entry has no derivable claim key")
+                    )
             for key in sorted({k for k in keys if k and keys.count(k) > 1}):
-                errors.append(f"`{dotted}`: claim key `{key}` declared more than once")
+                errors.append(ValueError(f"`{dotted}`: claim key `{key}` declared more than once"))
         case "ensure":
             assert isinstance(value, list)
             reported: list[Json] = []
@@ -350,8 +366,10 @@ def _validate(
                 if sum(1 for x in value if _same(x, item)) > 1:
                     reported.append(item)
                     errors.append(
-                        f"`{dotted}`: ensure element {json.dumps(item, ensure_ascii=False)}"
-                        " declared more than once"
+                        ValueError(
+                            f"`{dotted}`: ensure element {json.dumps(item, ensure_ascii=False)}"
+                            " declared more than once"
+                        )
                     )
         case None if isinstance(value, dict):
             for key, item in value.items():
@@ -363,18 +381,21 @@ def _validate(
 # --- three-way merge ----------------------------------------------------------
 
 
-@dataclass(slots=True)
-class _Merger:
+@dataclass(slots=True, kw_only=True)
+class Merger:
     """One merge pass of the composed fragment against current settings.
 
-    Holds the cross-cutting context (``policy``, ``legacy``, collected
-    ``conflicts`` and ``warnings``) so the per-node strategies don't thread it
-    through every recursive call. A conflict leaves the current value in place;
-    the caller discards the whole result when ``conflicts`` is non-empty.
+    Inputs ``policy`` and ``legacy`` are the cross-cutting context the per-node
+    strategies read without threading it through every recursive call. Outputs
+    accumulate on the instance: ``merged`` is the result tree (populated by
+    ``merge_composed``; discard it when ``conflicts`` is non-empty — a conflict
+    leaves the current value in place), and ``warnings`` report
+    retired-but-modified paths left as-is.
     """
 
     policy: dict[tuple[str, ...], Strategy]
     legacy: tuple[str, ...]
+    merged: dict[str, Json] = field(default_factory=dict)
     conflicts: list[Conflict] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -497,18 +518,17 @@ class _Merger:
         return self._conflict(path, current, desired)
 
 
-def merge_composed(
-    current: dict[str, Json], composed: Composed, base: dict[str, Json]
-) -> tuple[dict[str, Json], list[Conflict], list[str]]:
+def merge_composed(current: dict[str, Json], composed: Composed, base: dict[str, Json]) -> Merger:
     """Merge the composed fragment into current settings.
 
-    Returns (merged, conflicts, warnings); discard merged when conflicts is
-    non-empty. Warnings report retired-but-modified paths left in place.
+    Returns the completed Merger: read ``.merged`` (discard it when
+    ``.conflicts`` is non-empty) and ``.warnings``.
     """
-    merger = _Merger(composed.policy, composed.legacy)
+    merger = Merger(policy=composed.policy, legacy=composed.legacy)
     merged = merger.merge(current, composed.data, base, ())
     assert isinstance(merged, dict)  # invariant: merging two objects yields an object
-    return merged, merger.conflicts, merger.warnings
+    merger.merged = merged
+    return merger
 
 
 # Path resolution — env overrides exist for tests and manual runs. The snapshot
@@ -551,24 +571,36 @@ def load_base(path: Path) -> dict[str, Json]:
     return base
 
 
-def load_fragments(directory: Path) -> tuple[list[tuple[str, dict[str, Json]]], list[str]]:
-    """Parse every *.json fragment in filename order. Returns (fragments, errors).
+def load_fragments(directory: Path) -> list[tuple[str, dict[str, Json]]]:
+    """Parse every *.json fragment in filename order.
 
     A corrupt fragment is a hard error (they are chezmoi-managed; fail loudly).
+
+    Raises:
+        ExceptionGroup: of json.JSONDecodeError (file context via ``add_note``)
+        and TypeError, collected across the whole directory, not just the first.
     """
     fragments: list[tuple[str, dict[str, Json]]] = []
-    errors: list[str] = []
+    errors: list[Exception] = []
     for path in sorted(directory.glob("*.json")):
         try:
             parsed = json.loads(path.read_text())
         except json.JSONDecodeError as exc:
-            errors.append(f"{path.name}: invalid JSON: {exc}")
+            exc.add_note(f"{path.name}: invalid JSON")
+            errors.append(exc)
             continue
         if not isinstance(parsed, dict):
-            errors.append(f"{path.name}: fragment must be a JSON object")
+            errors.append(TypeError(f"{path.name}: fragment must be a JSON object"))
             continue
         fragments.append((path.name, parsed))
-    return fragments, errors
+    if errors:
+        raise ExceptionGroup("invalid fragments", errors)
+    return fragments
+
+
+def _describe(exc: BaseException) -> str:
+    """One-line rendering, ``add_note`` context first: `name.json: invalid JSON: …`."""
+    return ": ".join((*getattr(exc, "__notes__", ()), str(exc)))
 
 
 def main() -> int:
@@ -589,21 +621,21 @@ def main() -> int:
         sys.stdout.write(raw if has_input else "{}\n")
         return 0
 
-    fragments, errors = load_fragments(directory)
-    composed, compose_errors = compose(fragments)
-    if errors or compose_errors:
-        for message in (*errors, *compose_errors):
-            print(f"⚠ claude-managed: {message}", file=sys.stderr)
+    try:
+        composed = compose(load_fragments(directory))
+    except ExceptionGroup as eg:
+        for exc in eg.exceptions:
+            print(f"⚠ claude-managed: {_describe(exc)}", file=sys.stderr)
         print(
             f"  settings.json left untouched. Fix the fragments in {directory}, then re-run.",
             file=sys.stderr,
         )
         return 1
 
-    merged, conflicts, warnings = merge_composed(current, composed, load_base(base_file()))
+    result = merge_composed(current, composed, load_base(base_file()))
 
-    if conflicts:
-        for c in conflicts:
+    if result.conflicts:
+        for c in result.conflicts:
             print(
                 f"⚠ claude-managed: conflict at `{c.path}`\n"
                 f"    current: {json.dumps(c.current, ensure_ascii=False)}\n"
@@ -617,14 +649,14 @@ def main() -> int:
         )
         return 1
 
-    for message in warnings:
+    for message in result.warnings:
         print(f"claude-managed: {message}", file=sys.stderr)
 
-    if merged == current and has_input:
+    if result.merged == current and has_input:
         # Byte-stable no-op: never let formatting differences show up as drift.
         sys.stdout.write(raw)
     else:
-        json.dump(merged, sys.stdout, indent=2, ensure_ascii=False)
+        json.dump(result.merged, sys.stdout, indent=2, ensure_ascii=False)
         sys.stdout.write("\n")
     return 0
 

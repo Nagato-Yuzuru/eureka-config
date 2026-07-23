@@ -58,9 +58,9 @@ def main() -> int:
     directory = engine.fragment_dir()
     if not directory.is_dir():
         return 0
-    fragments, errors = engine.load_fragments(directory)
-    composed, compose_errors = engine.compose(fragments)
-    if errors or compose_errors:
+    try:
+        composed = engine.compose(engine.load_fragments(directory))
+    except ExceptionGroup:
         print(
             "claude-managed: fragments not composable; base snapshot left untouched",
             file=sys.stderr,
@@ -74,10 +74,8 @@ def main() -> int:
         current = {}
 
     base_path = engine.base_file()
-    merged, conflicts, _warnings = engine.merge_composed(
-        current, composed, engine.load_base(base_path)
-    )
-    if conflicts or merged != current:
+    result = engine.merge_composed(current, composed, engine.load_base(base_path))
+    if result.conflicts or result.merged != current:
         print(
             "claude-managed: settings not converged; base snapshot left untouched",
             file=sys.stderr,
