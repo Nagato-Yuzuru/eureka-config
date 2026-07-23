@@ -1,0 +1,3 @@
+# Retired by the claude-managed.d migration: the single fragment became
+# per-feature fragments in ~/.claude/claude-managed.d/.
+.claude/claude-managed.json

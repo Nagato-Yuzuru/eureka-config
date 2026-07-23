@@ -1,0 +1,22 @@
+{
+  "$merge": {
+    "hooks.*": "keyed"
+  },
+  "$legacyHooks": [
+    "claude-block-npm"
+  ],
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/block-npm.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

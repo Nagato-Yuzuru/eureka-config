@@ -1,0 +1,35 @@
+{
+  "$merge": {
+    "permissions.ask": "ensure",
+    "hooks.*": "keyed"
+  },
+  "permissions": {
+    "ask": [
+      "Agent(model:*fable*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Agent|Task)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/require-agent-model.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "^Workflow$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/require-workflow-routing.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

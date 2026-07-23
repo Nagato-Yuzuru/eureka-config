@@ -6,18 +6,23 @@
 """Advance the three-way-merge base once the settings merge has converged.
 
 Counterpart of ``dot_claude/modify_settings.json`` (which it imports for the
-merge engine and path resolution). ``run_onchange_after_``: re-runs exactly when
-this rendered file changes, and the fragment hash below ties that to fragment
-content — so the base advances on the same apply that changed the fragment,
-after all targets (including the settings merge) have been written.
+compose + merge engine and path resolution). ``run_onchange_after_``: re-runs
+exactly when this rendered file changes, and the fragment-hash line below ties
+that to the content of ``dot_claude/exact_claude-managed.d/`` — adding,
+editing, and deleting a fragment all change the rendered hash list — so the
+base advances on the same apply that changed the fragments, after all targets
+(including the settings merge) have been written.
 
 The base is only advanced after VERIFYING that live settings == merge result
-with zero conflicts. If the merge target failed or was skipped, the base stays
-put — a stale base can only produce fail-safe conflicts, never silent
-overwrites, and it can never run ahead of settings and manufacture false ones.
+with zero conflicts. If the fragments don't compose, or the merge target
+failed or was skipped, the base stays put — a stale base can only produce
+fail-safe conflicts, never silent overwrites, and it can never run ahead of
+settings and manufacture false ones.
 """
 
-# fragment-hash: {{ include "dot_claude/claude-managed.json.tmpl" | sha256sum }}
+# chezmoi's glob resolves relative patterns against the DESTINATION dir, so the
+# source dir must be joined explicitly or the list is silently empty.
+# fragment-hash: {{ range glob (joinPath .chezmoi.sourceDir "dot_claude/exact_claude-managed.d/*") }}{{ base . }}={{ include . | sha256sum }} {{ end }}
 
 from __future__ import annotations
 
@@ -50,10 +55,17 @@ def load_engine():
 def main() -> int:
     engine = load_engine()
 
-    fragment_path = engine.fragment_file()
-    if not fragment_path.exists():
+    directory = engine.fragment_dir()
+    if not directory.is_dir():
         return 0
-    fragment = json.loads(fragment_path.read_text())
+    fragments, errors = engine.load_fragments(directory)
+    composed, compose_errors = engine.compose(fragments)
+    if errors or compose_errors:
+        print(
+            "claude-managed: fragments not composable; base snapshot left untouched",
+            file=sys.stderr,
+        )
+        return 0  # the modify target already reported the real problem
 
     settings_path = engine.settings_file()
     try:
@@ -62,7 +74,9 @@ def main() -> int:
         current = {}
 
     base_path = engine.base_file()
-    merged, conflicts = engine.merge_fragment(current, fragment, engine.load_base(base_path))
+    merged, conflicts, _warnings = engine.merge_composed(
+        current, composed, engine.load_base(base_path)
+    )
     if conflicts or merged != current:
         print(
             "claude-managed: settings not converged; base snapshot left untouched",
@@ -70,7 +84,7 @@ def main() -> int:
         )
         return 0  # the modify target already reported the real problem
 
-    text = json.dumps(engine.strip_reserved(fragment), indent=2, ensure_ascii=False) + "\n"
+    text = json.dumps(composed.data, indent=2, ensure_ascii=False) + "\n"
     try:
         if base_path.read_text() == text:
             return 0

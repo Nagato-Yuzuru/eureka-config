@@ -99,7 +99,8 @@ class TestWorkspace:
     def test_additional_directories_from_project_and_local(self, home, project, tmp_path):
         e1 = Path(os.path.realpath(tmp_path)) / "e1"
         e2 = Path(os.path.realpath(tmp_path)) / "e2"
-        e1.mkdir(); e2.mkdir()
+        e1.mkdir()
+        e2.mkdir()
         cfg = project / ".claude"
         cfg.mkdir()
         (cfg / "settings.json").write_text(

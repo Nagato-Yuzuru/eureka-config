@@ -1,10 +1,11 @@
 {
-  "$legacyHooks": [
-    "claude-block-npm"
-  ],
+  "$merge": {
+    "permissions.ask": "ensure",
+    "autoMode.soft_deny": "ensure",
+    "hooks.*": "keyed"
+  },
   "permissions": {
     "ask": [
-      "Agent(model:*fable*)",
       "Bash(*path-gate.sh grant *)",
       "Bash(*path-gate.sh revoke *)"
     ]
@@ -23,36 +24,6 @@
           {
             "type": "command",
             "command": "{{ .chezmoi.homeDir }}/.claude/hooks/path-gate.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/block-npm.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "^(Agent|Task)$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/require-agent-model.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "^Workflow$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/require-workflow-routing.sh",
             "timeout": 5
           }
         ]

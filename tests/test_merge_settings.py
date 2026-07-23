@@ -2,7 +2,8 @@
 
 Scenarios mirror the behaviors established while the engine lived in bash+jq,
 including one test per bug found there (fail-open on malformed data, formatter
-crash on engine errors, first-conflict-only reporting).
+crash on engine errors, first-conflict-only reporting), plus the declared
+merge-strategy semantics (exact / ensure / keyed) and ownership retirement.
 """
 
 from __future__ import annotations
@@ -24,6 +25,11 @@ def hook_entry(command: str, matcher: str = "Bash", timeout: int = 5) -> dict:
 
 
 FRAGMENT = {
+    "$merge": {
+        "permissions.ask": "ensure",
+        "autoMode.soft_deny": "ensure",
+        "hooks.*": "keyed",
+    },
     "$legacyHooks": ["old-legacy.sh"],
     "permissions": {"ask": ["Agent(model:*fable*)"]},
     "autoMode": {"soft_deny": ["$defaults", "RULE-V2"]},
@@ -36,13 +42,21 @@ FRAGMENT = {
 }
 
 
+def merge(engine, current, fragment=FRAGMENT, base=None):
+    """Compose a single fragment (asserting it composes cleanly) and merge it."""
+    composed, errors = engine.compose([("test.json", fragment)])
+    assert errors == []
+    return engine.merge_composed(current, composed, base if base is not None else {})
+
+
 # --- merge semantics ---------------------------------------------------------
 
 
 class TestFreshInstall:
     def test_empty_settings_gains_all_managed_slices(self, engine):
-        merged, conflicts = engine.merge_fragment({}, FRAGMENT, {})
+        merged, conflicts, warnings = merge(engine, {})
         assert conflicts == []
+        assert warnings == []
         assert merged["permissions"]["ask"] == ["Agent(model:*fable*)"]
         assert merged["autoMode"]["soft_deny"] == ["$defaults", "RULE-V2"]
         assert [e["hooks"][0]["command"] for e in merged["hooks"]["PreToolUse"]] == [
@@ -51,13 +65,12 @@ class TestFreshInstall:
         ]
 
     def test_reserved_dollar_keys_never_merged(self, engine):
-        merged, _ = engine.merge_fragment({}, FRAGMENT, {})
+        merged, _, _ = merge(engine, {})
         assert "$legacyHooks" not in merged
+        assert "$merge" not in merged
 
     def test_unmanaged_keys_pass_through(self, engine):
-        merged, conflicts = engine.merge_fragment(
-            {"model": "opus[1m]", "tui": "fullscreen"}, FRAGMENT, {}
-        )
+        merged, conflicts, _ = merge(engine, {"model": "opus[1m]", "tui": "fullscreen"})
         assert conflicts == []
         assert merged["model"] == "opus[1m]"
         assert merged["tui"] == "fullscreen"
@@ -65,23 +78,23 @@ class TestFreshInstall:
 
 class TestIdempotence:
     def test_merging_twice_is_stable(self, engine):
-        once, _ = engine.merge_fragment({}, FRAGMENT, {})
-        twice, conflicts = engine.merge_fragment(once, FRAGMENT, {})
+        once, _, _ = merge(engine, {})
+        twice, conflicts, _ = merge(engine, once)
         assert conflicts == []
         assert twice == once
 
 
-class TestHookArrays:
+class TestKeyedLists:
     def test_foreign_entry_preserved(self, engine):
         current = {"hooks": {"PreToolUse": [hook_entry("/other/peon.sh", timeout=9)]}}
-        merged, conflicts = engine.merge_fragment(current, FRAGMENT, {})
+        merged, conflicts, _ = merge(engine, current)
         assert conflicts == []
         commands = [e["hooks"][0]["command"] for e in merged["hooks"]["PreToolUse"]]
         assert commands == ["/other/peon.sh", "/h/block-npm.sh", "/h/path-gate.sh"]
 
     def test_drifted_own_entry_replaced(self, engine):
         current = {"hooks": {"PreToolUse": [hook_entry("/h/block-npm.sh", timeout=99)]}}
-        merged, _ = engine.merge_fragment(current, FRAGMENT, {})
+        merged, _, _ = merge(engine, current)
         (block_npm,) = [
             e
             for e in merged["hooks"]["PreToolUse"]
@@ -92,30 +105,38 @@ class TestHookArrays:
     def test_retired_entry_removed_via_base(self, engine):
         base = {"hooks": {"PreToolUse": [hook_entry("/h/retired.sh")]}}
         current = {"hooks": {"PreToolUse": [hook_entry("/h/retired.sh")]}}
-        merged, conflicts = engine.merge_fragment(current, FRAGMENT, base)
+        merged, conflicts, _ = merge(engine, current, base=base)
         assert conflicts == []
         commands = [e["hooks"][0]["command"] for e in merged["hooks"]["PreToolUse"]]
         assert "/h/retired.sh" not in commands
 
     def test_legacy_entry_purged_without_base(self, engine):
         current = {"hooks": {"PreToolUse": [hook_entry("/x/old-legacy.sh")]}}
-        merged, _ = engine.merge_fragment(current, FRAGMENT, {})
+        merged, _, _ = merge(engine, current)
         commands = [e["hooks"][0]["command"] for e in merged["hooks"]["PreToolUse"]]
         assert "/x/old-legacy.sh" not in commands
 
     def test_malformed_foreign_entry_kept_without_crash(self, engine):
         weird: dict = {"matcher": "Bash", "hooks": [{"type": "prompt", "prompt": "hi"}]}
         current = {"hooks": {"PreToolUse": [weird, "not-even-a-dict"]}}
-        merged, conflicts = engine.merge_fragment(current, FRAGMENT, {})
+        merged, conflicts, _ = merge(engine, current)
         assert conflicts == []
         assert weird in merged["hooks"]["PreToolUse"]
         assert "not-even-a-dict" in merged["hooks"]["PreToolUse"]
 
+    def test_non_list_in_keyed_position_conflicts(self, engine):
+        # regression: a foreign non-list here used to be silently destroyed
+        current = {"hooks": {"PreToolUse": {"oops": "user set a dict here"}}}
+        merged, conflicts, _ = merge(engine, current)
+        assert [c.path for c in conflicts] == ["hooks.PreToolUse"]
+        # conflicting subtree is left as-is in the (discarded) merge result
+        assert merged["hooks"]["PreToolUse"] == {"oops": "user set a dict here"}
 
-class TestStringArrays:
+
+class TestEnsureLists:
     def test_user_added_element_kept(self, engine):
         current = {"autoMode": {"soft_deny": ["$defaults", "RULE-V2", "user-added"]}}
-        merged, conflicts = engine.merge_fragment(current, FRAGMENT, {})
+        merged, conflicts, _ = merge(engine, current)
         assert conflicts == []
         assert merged["autoMode"]["soft_deny"] == ["$defaults", "RULE-V2", "user-added"]
 
@@ -123,7 +144,7 @@ class TestStringArrays:
         # base still has RULE-V1; fragment moved on to RULE-V2
         base = {"autoMode": {"soft_deny": ["$defaults", "RULE-V1"]}}
         current = {"autoMode": {"soft_deny": ["$defaults", "RULE-V1", "user-added"]}}
-        merged, conflicts = engine.merge_fragment(current, FRAGMENT, base)
+        merged, conflicts, _ = merge(engine, current, base=base)
         assert conflicts == []
         assert merged["autoMode"]["soft_deny"] == ["$defaults", "user-added", "RULE-V2"]
 
@@ -131,76 +152,210 @@ class TestStringArrays:
         # regression: in the bash engine a wrong-typed base crashed jq and the
         # crash was mis-rendered by the conflict formatter
         base = {"autoMode": {"soft_deny": {"not": "a list"}}}
-        merged, conflicts = engine.merge_fragment({}, FRAGMENT, base)
+        merged, conflicts, _ = merge(engine, {}, base=base)
         assert conflicts == []
         assert merged["autoMode"]["soft_deny"] == ["$defaults", "RULE-V2"]
 
     def test_scalar_in_list_position_conflicts(self, engine):
         current = {"permissions": {"ask": "oops-a-string"}}
-        merged, conflicts = engine.merge_fragment(current, FRAGMENT, {})
+        merged, conflicts, _ = merge(engine, current)
         assert [c.path for c in conflicts] == ["permissions.ask"]
         # conflicting subtree is left as-is in the (discarded) merge result
         assert merged["permissions"]["ask"] == "oops-a-string"
+
+    def test_non_string_elements_supported(self, engine):
+        # ensure is not string-only: any JSON element merges by deep equality
+        fragment = {"$merge": {"servers.pool": "ensure"}, "servers": {"pool": [{"host": "a"}]}}
+        current = {"servers": {"pool": [{"host": "user"}]}}
+        merged, conflicts, _ = merge(engine, current, fragment=fragment)
+        assert conflicts == []
+        assert merged["servers"]["pool"] == [{"host": "user"}, {"host": "a"}]
 
 
 class TestScalarLeaves:
     FRAG = {"effortLevel": "xhigh"}
 
     def test_absent_is_set(self, engine):
-        merged, conflicts = engine.merge_fragment({}, self.FRAG, {})
+        merged, conflicts, _ = merge(engine, {}, fragment=self.FRAG)
         assert conflicts == []
         assert merged["effortLevel"] == "xhigh"
 
     def test_equal_is_noop(self, engine):
-        merged, conflicts = engine.merge_fragment({"effortLevel": "xhigh"}, self.FRAG, {})
+        merged, conflicts, _ = merge(engine, {"effortLevel": "xhigh"}, fragment=self.FRAG)
         assert conflicts == []
         assert merged["effortLevel"] == "xhigh"
 
     def test_ours_evolved_converges(self, engine):
-        merged, conflicts = engine.merge_fragment(
-            {"effortLevel": "high"}, self.FRAG, {"effortLevel": "high"}
+        merged, conflicts, _ = merge(
+            engine, {"effortLevel": "high"}, fragment=self.FRAG, base={"effortLevel": "high"}
         )
         assert conflicts == []
         assert merged["effortLevel"] == "xhigh"
 
     def test_foreign_change_conflicts(self, engine):
-        _, conflicts = engine.merge_fragment({"effortLevel": "low"}, self.FRAG, {})
+        _, conflicts, _ = merge(engine, {"effortLevel": "low"}, fragment=self.FRAG)
         assert [(c.path, c.current, c.desired) for c in conflicts] == [
             ("effortLevel", "low", "xhigh")
         ]
 
     def test_explicit_null_is_not_absent(self, engine):
-        _, conflicts = engine.merge_fragment({"effortLevel": None}, self.FRAG, {})
+        _, conflicts, _ = merge(engine, {"effortLevel": None}, fragment=self.FRAG)
         assert [c.path for c in conflicts] == ["effortLevel"]
+
+
+class TestJsonTypedEquality:
+    """Python's True == 1 must never let a bool/number drift converge."""
+
+    def test_bool_does_not_converge_with_number_leaf(self, engine):
+        # regression: `current in (desired, base)` accepted True for 1
+        _, conflicts, _ = merge(engine, {"x": True}, fragment={"x": 1})
+        assert [(c.path, c.current, c.desired) for c in conflicts] == [("x", True, 1)]
+
+    def test_number_does_not_converge_with_bool_leaf(self, engine):
+        _, conflicts, _ = merge(engine, {"x": 1}, fragment={"x": True})
+        assert [(c.path, c.current, c.desired) for c in conflicts] == [("x", 1, True)]
+
+    def test_ensure_appends_number_alongside_bool(self, engine):
+        # regression: the declared 1 was considered "present" because of True
+        fragment = {"$merge": {"s.ask": "ensure"}, "s": {"ask": [1]}}
+        merged, conflicts, _ = merge(engine, {"s": {"ask": [True]}}, fragment=fragment)
+        assert conflicts == []
+        assert merged["s"]["ask"] == [True, 1]
+
+    def test_retirement_distinguishes_bool_from_number(self, engine):
+        # base recorded 1; the live true is a foreign modification, not ours
+        merged, conflicts, warnings = merge(engine, {"x": True}, fragment={}, base={"x": 1})
+        assert conflicts == []
+        assert merged == {"x": True}
+        assert any("retired `x`" in w for w in warnings)
+
+
+class TestUndeclaredListsAreExact:
+    """A list with no $merge declaration is one atomic leaf, not a set merge."""
+
+    FRAG = {"statusLine": ["a", "b"]}
+
+    def test_foreign_element_conflicts_instead_of_set_merging(self, engine):
+        _, conflicts, _ = merge(engine, {"statusLine": ["a", "b", "user"]}, fragment=self.FRAG)
+        assert [c.path for c in conflicts] == ["statusLine"]
+
+    def test_ours_evolved_replaced_wholesale(self, engine):
+        merged, conflicts, _ = merge(
+            engine, {"statusLine": ["old"]}, fragment=self.FRAG, base={"statusLine": ["old"]}
+        )
+        assert conflicts == []
+        assert merged["statusLine"] == ["a", "b"]
+
+
+class TestExactSubtrees:
+    """`exact` declared on an object owns the whole subtree atomically."""
+
+    FRAG = {"$merge": {"env": "exact"}, "env": {"A": "1"}}
+
+    def test_absent_is_set(self, engine):
+        merged, conflicts, _ = merge(engine, {}, fragment=self.FRAG)
+        assert conflicts == []
+        assert merged["env"] == {"A": "1"}
+
+    def test_foreign_key_inside_subtree_conflicts(self, engine):
+        _, conflicts, _ = merge(engine, {"env": {"A": "1", "B": "2"}}, fragment=self.FRAG)
+        assert [c.path for c in conflicts] == ["env"]
+
+    def test_ours_evolved_replaced_wholesale(self, engine):
+        merged, conflicts, _ = merge(
+            engine,
+            {"env": {"A": "0", "B": "old"}},
+            fragment=self.FRAG,
+            base={"env": {"A": "0", "B": "old"}},
+        )
+        assert conflicts == []
+        assert merged["env"] == {"A": "1"}
+
+
+class TestRetirement:
+    """Paths in base but gone from the fragment are withdrawn declaratively."""
+
+    def test_unmodified_scalar_removed(self, engine):
+        merged, conflicts, warnings = merge(
+            engine, {"effortLevel": "xhigh", "keep": 1}, fragment={}, base={"effortLevel": "xhigh"}
+        )
+        assert (conflicts, warnings) == ([], [])
+        assert merged == {"keep": 1}
+
+    def test_modified_scalar_kept_with_warning(self, engine):
+        merged, conflicts, warnings = merge(
+            engine, {"effortLevel": "low"}, fragment={}, base={"effortLevel": "xhigh"}
+        )
+        assert conflicts == []
+        assert merged == {"effortLevel": "low"}
+        assert any("retired `effortLevel`" in w for w in warnings)
+
+    def test_dict_retires_per_key_keeping_foreign(self, engine):
+        base = {"autoMode": {"soft_deny": ["$defaults"]}}
+        current = {"autoMode": {"soft_deny": ["$defaults"], "mine": True}}
+        merged, conflicts, warnings = merge(engine, current, fragment={}, base=base)
+        assert (conflicts, warnings) == ([], [])
+        assert merged == {"autoMode": {"mine": True}}
+
+    def test_wholly_ours_dict_removed_entirely(self, engine):
+        base = {"autoMode": {"soft_deny": ["$defaults"]}}
+        current = {"autoMode": {"soft_deny": ["$defaults"]}}
+        merged, conflicts, warnings = merge(engine, current, fragment={}, base=base)
+        assert (conflicts, warnings) == ([], [])
+        assert merged == {}
+
+    def test_modified_list_kept_with_warning(self, engine):
+        base = {"autoMode": {"soft_deny": ["$defaults"]}}
+        current = {"autoMode": {"soft_deny": ["$defaults", "user-added"]}}
+        merged, conflicts, warnings = merge(engine, current, fragment={}, base=base)
+        assert conflicts == []
+        assert merged == current
+        assert any("retired `autoMode.soft_deny`" in w for w in warnings)
+
+    def test_key_still_declared_is_not_retired(self, engine):
+        merged, conflicts, warnings = merge(
+            engine,
+            {"effortLevel": "high"},
+            fragment={"effortLevel": "xhigh"},
+            base={"effortLevel": "high"},
+        )
+        assert (conflicts, warnings) == ([], [])
+        assert merged == {"effortLevel": "xhigh"}
 
 
 class TestConflicts:
     def test_all_conflicts_reported_not_just_first(self, engine):
         # regression: the bash engine aborted at the first conflict
-        frag = {"a": 1, "b": {"c": 2}}
+        fragment = {"a": 1, "b": {"c": 2}}
         current = {"a": 9, "b": {"c": 9}}
-        _, conflicts = engine.merge_fragment(current, frag, {})
+        _, conflicts, _ = merge(engine, current, fragment=fragment)
         assert sorted(c.path for c in conflicts) == ["a", "b.c"]
 
     def test_scalar_in_object_position_conflicts(self, engine):
         current = {"autoMode": "oops-a-string"}
-        _, conflicts = engine.merge_fragment(current, FRAGMENT, {})
+        _, conflicts, _ = merge(engine, current)
         assert [c.path for c in conflicts] == ["autoMode"]
 
 
 # --- filter I/O (main) -------------------------------------------------------
 
 
-def run_filter(stdin: str, tmp_path: Path, fragment=None, base=None) -> subprocess.CompletedProcess:
+def run_filter(
+    stdin: str,
+    tmp_path: Path,
+    fragments: dict[str, dict] | None = None,
+    base: dict | None = None,
+) -> subprocess.CompletedProcess:
     env = dict(os.environ)
-    fragment_file = tmp_path / "fragment.json"
-    base_file = tmp_path / "base.json"
-    if fragment is not None:
-        fragment_file.write_text(json.dumps(fragment))
+    fragment_dir = tmp_path / "claude-managed.d"
+    if fragments is not None:
+        fragment_dir.mkdir(exist_ok=True)
+        for name, fragment in fragments.items():
+            (fragment_dir / name).write_text(json.dumps(fragment))
     if base is not None:
-        base_file.write_text(json.dumps(base))
-    env["CLAUDE_FRAGMENT_FILE"] = str(fragment_file)
-    env["CLAUDE_BASE_FILE"] = str(base_file)
+        (tmp_path / "base.json").write_text(json.dumps(base))
+    env["CLAUDE_FRAGMENT_DIR"] = str(fragment_dir)
+    env["CLAUDE_BASE_FILE"] = str(tmp_path / "base.json")
     return subprocess.run(
         [sys.executable, str(ENGINE_PATH)],
         input=stdin,
@@ -215,56 +370,97 @@ class TestFilterIO:
         # regression: textual (not semantic) change detection caused format churn
         merged_obj = {"permissions": {"ask": ["Agent(model:*fable*)"]}}
         quirky = '{\n      "permissions": {"ask":["Agent(model:*fable*)"]}}'  # odd formatting
-        result = run_filter(quirky, tmp_path, fragment=merged_obj)
+        result = run_filter(quirky, tmp_path, fragments={"core.json": merged_obj})
         assert result.returncode == 0
         assert result.stdout == quirky
 
     def test_empty_stdin_produces_complete_file(self, tmp_path):
-        result = run_filter("", tmp_path, fragment={"a": 1})
+        result = run_filter("", tmp_path, fragments={"core.json": {"a": 1}})
         assert result.returncode == 0
         assert json.loads(result.stdout) == {"a": 1}
         assert result.stdout.endswith("\n")
 
+    def test_fragments_compose_across_files(self, tmp_path):
+        result = run_filter(
+            "",
+            tmp_path,
+            fragments={
+                "one.json": {"$merge": {"p.ask": "ensure"}, "p": {"ask": ["A"]}},
+                "two.json": {"$merge": {"p.ask": "ensure"}, "p": {"ask": ["B"]}},
+            },
+        )
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == {"p": {"ask": ["A", "B"]}}
+
     def test_conflict_exits_1_with_report_and_no_stdout(self, tmp_path):
-        result = run_filter('{"a": 9}', tmp_path, fragment={"a": 1})
+        result = run_filter('{"a": 9}', tmp_path, fragments={"core.json": {"a": 1}})
         assert result.returncode == 1
         assert result.stdout == ""
         assert "conflict at `a`" in result.stderr
         assert "current: 9" in result.stderr
         assert "desired: 1" in result.stderr
 
-    def test_missing_fragment_passes_through(self, tmp_path):
+    def test_compose_conflict_exits_1_naming_both_files(self, tmp_path):
+        result = run_filter("{}", tmp_path, fragments={"one.json": {"a": 1}, "two.json": {"a": 2}})
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert "compose conflict at `a`" in result.stderr
+        assert "one.json" in result.stderr
+        assert "two.json" in result.stderr
+
+    def test_corrupt_fragment_exits_1_naming_file(self, tmp_path):
+        fragment_dir = tmp_path / "claude-managed.d"
+        fragment_dir.mkdir()
+        (fragment_dir / "bad.json").write_text("not json")
+        env = dict(os.environ)
+        env["CLAUDE_FRAGMENT_DIR"] = str(fragment_dir)
+        env["CLAUDE_BASE_FILE"] = str(tmp_path / "base.json")
+        result = subprocess.run(
+            [sys.executable, str(ENGINE_PATH)],
+            input="{}",
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert result.returncode == 1
+        assert "bad.json" in result.stderr
+        assert "invalid JSON" in result.stderr
+
+    def test_missing_dir_passes_through(self, tmp_path):
         result = run_filter('{"keep": true}', tmp_path)
         assert result.returncode == 0
         assert result.stdout == '{"keep": true}'
         assert "passthrough" in result.stderr
 
+    def test_empty_dir_retires_everything_we_managed(self, tmp_path):
+        result = run_filter('{"a": 1, "keep": true}', tmp_path, fragments={}, base={"a": 1})
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == {"keep": True}
+
+    def test_retired_but_modified_warns_and_still_applies(self, tmp_path):
+        result = run_filter('{"a": 2}', tmp_path, fragments={}, base={"a": 1})
+        assert result.returncode == 0
+        assert result.stdout == '{"a": 2}'
+        assert "retired `a`" in result.stderr
+
     def test_corrupt_base_is_failsafe_not_fatal(self, tmp_path):
         (tmp_path / "base.json").write_text("not json at all")
-        env = dict(os.environ)
-        fragment_file = tmp_path / "fragment.json"
-        fragment_file.write_text(json.dumps({"a": 1}))
-        env["CLAUDE_FRAGMENT_FILE"] = str(fragment_file)
-        env["CLAUDE_BASE_FILE"] = str(tmp_path / "base.json")
-        result = subprocess.run(
-            [sys.executable, str(ENGINE_PATH)],
-            input='{"a": 9}',
-            capture_output=True,
-            text=True,
-            env=env,
-        )
+        result = run_filter('{"a": 9}', tmp_path, fragments={"core.json": {"a": 1}})
         # without a base, the foreign-looking value must surface as a conflict
         assert result.returncode == 1
         assert "ignoring corrupt base" in result.stderr
         assert "conflict at `a`" in result.stderr
 
     def test_non_object_settings_is_hard_error(self, tmp_path):
-        result = run_filter("[1, 2, 3]", tmp_path, fragment={"a": 1})
+        result = run_filter("[1, 2, 3]", tmp_path, fragments={"core.json": {"a": 1}})
         assert result.returncode == 1
         assert "not a JSON object" in result.stderr
 
     def test_unicode_survives_round_trip(self, tmp_path):
-        fragment = {"autoMode": {"soft_deny": ["规则 — em dash"]}}
-        result = run_filter("{}", tmp_path, fragment=fragment)
+        fragment = {
+            "$merge": {"autoMode.soft_deny": "ensure"},
+            "autoMode": {"soft_deny": ["规则 — em dash"]},
+        }
+        result = run_filter("{}", tmp_path, fragments={"core.json": fragment})
         assert result.returncode == 0
         assert "规则 — em dash" in result.stdout
