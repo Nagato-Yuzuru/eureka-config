@@ -172,6 +172,14 @@ LSP is also the tool for other symbol-identity questions: go-to-definition/imple
 
 Try direct search first — most lookups resolve in one Grep/Glob/WebFetch. Spawn agents for genuine fan-out, not for things you could find in 30 seconds.
 
+**Conversely, delegate without waiting to be asked when the work compresses.** A subagent is a lossy compressor: it reads a large volume and returns only the conclusion. Judge by compression ratio — tokens read ÷ tokens kept — not by task size. All three conditions must hold:
+
+- **Ratio ≥ ~10:1.** Tracing an unfamiliar subsystem, enumerating call sites across a large tree, comparing candidate approaches. A doc lookup is ~1:1 — you need the page you read; nothing compresses.
+- **Above the overhead floor.** Under ~5 files, spawn cost and the agent's own orientation reading dominate whatever you save.
+- **The reads are discardable.** You can only compress what you are about to throw away. Work that needs the raw material downstream — a refactor that will edit those 20 files — stays in the main context; delegating it just means reading everything twice.
+
+This paragraph is a standing request to use subagents for that shape of work — do not wait for a per-task instruction.
+
 **Always set the model explicitly** — the Agent tool's `model` param, and `opts.model` on every Workflow `agent()` call. Workflow's `agent()` otherwise silently inherits the main-loop model, bypassing this table:
 
 | Task type                                               | Model    |
