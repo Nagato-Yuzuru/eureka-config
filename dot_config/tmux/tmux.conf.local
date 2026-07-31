@@ -1,4 +1,5 @@
 
+# : << 'EOF'
 # https://github.com/gpakosz/.tmux
 # (‑●‑●)> dual licensed under the WTFPL v2 license and the MIT license,
 #         without any warranty.
@@ -215,9 +216,9 @@ tmux_conf_theme_status_left_attr="bold"
 # 1. 动态颜色：CPU/RAM/Swap 正常显示蓝色(#7aa2f7)，高负载变红(#f7768e)
 # 2. 区分用户：User 使用洋红背景(Magenta)，Host 使用蓝色背景(Blue)
 
-tmux_conf_theme_status_right=" #{prefix}#{mouse}#{pairing}#{synchronized} \
-#[fg=$tmux_conf_theme_separator_fg]| #{cpu_fg_color} #{cpu_percentage} \
-#[fg=$tmux_conf_theme_separator_fg]| #{ram_fg_color} #{ram_percentage} \
+tmux_conf_theme_status_right="#{sysmon #{TMUX_PLUGIN_MANAGER_PATH}} #{prefix}#{mouse}#{pairing}#{synchronized} \
+#[fg=$tmux_conf_theme_separator_fg]| #{?#{>=:#{@cpu_n},080},#[fg=$tmux_conf_theme_colour_10],#{?#{>=:#{@cpu_n},030},#[fg=$tmux_conf_theme_colour_5],#[fg=$tmux_conf_theme_colour_4]}} #{@cpu} \
+#[fg=$tmux_conf_theme_separator_fg]| #{?#{>=:#{@ram_n},080},#[fg=$tmux_conf_theme_colour_10],#{?#{>=:#{@ram_n},030},#[fg=$tmux_conf_theme_colour_5],#[fg=$tmux_conf_theme_colour_4]}} #{@ram} \
 #[fg=$tmux_conf_theme_separator_fg]| #[fg=$tmux_conf_theme_colour_4]󰓡 #[fg=$tmux_conf_theme_colour_12]#{swap_percentage} \
 #[fg=$tmux_conf_theme_separator_fg]| #{battery_color_charge_fg}#[bg=$tmux_conf_theme_colour_2]#{battery_icon} #[bg=$tmux_conf_theme_colour_2]#{battery_percentage} \
 #[fg=$tmux_conf_theme_separator_fg]| #[fg=$tmux_conf_theme_colour_9,bold]#{username}#[fg=$tmux_conf_theme_colour_12,nobold] @ #[fg=$tmux_conf_theme_colour_4,bold]#{hostname} "
@@ -283,18 +284,10 @@ set -g @plugin 'tmux-plugins/tmux-cpu'
 set -g @plugin 'tmux-plugins/tmux-battery'
 
 # 2.1 监控颜色阈值 (Tokyo Night)
-# 正常: Blue(#7aa2f7), 警告: Yellow(#e0af68), 严重: Red(#f7768e)
-set -g @cpu_low_fg_color "#[fg=#7aa2f7]"
-set -g @cpu_medium_fg_color "#[fg=#e0af68]"
-set -g @cpu_high_fg_color "#[fg=#f7768e]"
-
-set -g @ram_low_fg_color "#[fg=#7aa2f7]"
-set -g @ram_medium_fg_color "#[fg=#e0af68]"
-set -g @ram_high_fg_color "#[fg=#f7768e]"
-
-set -g @swap_low_fg_color "#[fg=#7aa2f7]"
-set -g @swap_medium_fg_color "#[fg=#e0af68]"
-set -g @swap_high_fg_color "#[fg=#f7768e]"
+# CPU/RAM 的三档配色已改为 tmux 原生格式，直接写在 tmux_conf_theme_status_right
+# 里（阈值 30/80，与 tmux-cpu 默认一致），不再经过插件的 *_fg_color 脚本 —— 那
+# 些脚本会把 *_percentage.sh 当子进程整个再跑一遍，是原先开销的主要来源。
+# 调色请改上面的 tmux_conf_theme_colour_4/5/10，此处不再有可调项。
 
 # 2.2 电池图标与颜色
 set -g @batt_icon_charge_tier8 ' '
@@ -383,6 +376,26 @@ bind -N "Popup prompt" ';' command-prompt -p "popup>" \
 # EOF
 #
 # # /!\ do not "uncomment" the functions: the leading "# " characters are needed
+#
+# # usage: #{sysmon #{TMUX_PLUGIN_MANAGER_PATH}}
+# # 每 10s 采样一次 CPU/RAM，结果写进 user option；状态栏只读 #{@cpu} / #{@ram}，
+# # 渲染期零 fork。采样仍复用 tmux-cpu 的脚本，不重复实现跨平台逻辑。
+# #
+# # @cpu_n / @ram_n 是补零到 3 位的整数，供 status_right 里 #{>=:...} 判阈值。
+# # 必须补零：tmux 的比较是字符串比较，"7%" >= "30" 会因 '7'>'3' 误判为真；
+# # 定宽补零后 strcmp 才等价于数值比较（已在 000-999 范围内验证）。
+# #
+# # 末尾 sleep 是节流阀：tmux 在 job 退出前不会重新 fork 它，所以 sleep 时长
+# # 决定采样周期，与 status-interval 无关。退出后由下次重绘拉起，因此改完这个
+# # 函数最多 10s 后自动生效，无需 kill-server。
+# sysmon() {
+#   scripts="$1/tmux-cpu/scripts"
+#   cpu=$("$scripts/cpu_percentage.sh"); ram=$("$scripts/ram_percentage.sh")
+#   cpu_n=${cpu%%.*}; cpu_n=${cpu_n%\%}
+#   ram_n=${ram%%.*}; ram_n=${ram_n%\%}
+#   tmux set -g @cpu "$cpu" \; set -g @cpu_n "$(printf '%03d' "${cpu_n:-0}")" \; set -g @ram "$ram" \; set -g @ram_n "$(printf '%03d' "${ram_n:-0}")"
+#   sleep 10
+# }
 #
 # # usage: #{weather}
 # weather() {                                         # see https://github.com/chubin/wttr.in#one-line-output
