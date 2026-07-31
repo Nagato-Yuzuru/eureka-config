@@ -216,11 +216,11 @@ tmux_conf_theme_status_left_attr="bold"
 # 1. 动态颜色：CPU/RAM/Swap 正常显示蓝色(#7aa2f7)，高负载变红(#f7768e)
 # 2. 区分用户：User 使用洋红背景(Magenta)，Host 使用蓝色背景(Blue)
 
-tmux_conf_theme_status_right="#{sysmon #{TMUX_PLUGIN_MANAGER_PATH}} #{prefix}#{mouse}#{pairing}#{synchronized} \
+tmux_conf_theme_status_right="#{sysmon #{TMUX_PLUGIN_MANAGER_PATH}}#{battinfo #{TMUX_PLUGIN_MANAGER_PATH}} #{prefix}#{mouse}#{pairing}#{synchronized} \
 #[fg=$tmux_conf_theme_separator_fg]| #{?#{>=:#{@cpu_n},080},#[fg=$tmux_conf_theme_colour_10],#{?#{>=:#{@cpu_n},030},#[fg=$tmux_conf_theme_colour_5],#[fg=$tmux_conf_theme_colour_4]}} #{@cpu} \
 #[fg=$tmux_conf_theme_separator_fg]| #{?#{>=:#{@ram_n},080},#[fg=$tmux_conf_theme_colour_10],#{?#{>=:#{@ram_n},030},#[fg=$tmux_conf_theme_colour_5],#[fg=$tmux_conf_theme_colour_4]}} #{@ram} \
-#[fg=$tmux_conf_theme_separator_fg]| #[fg=$tmux_conf_theme_colour_4]󰓡 #[fg=$tmux_conf_theme_colour_12]#{swap_percentage} \
-#[fg=$tmux_conf_theme_separator_fg]| #{battery_color_charge_fg}#[bg=$tmux_conf_theme_colour_2]#{battery_icon} #[bg=$tmux_conf_theme_colour_2]#{battery_percentage} \
+#[fg=$tmux_conf_theme_separator_fg]| #[fg=$tmux_conf_theme_colour_4]󰓡 #[fg=$tmux_conf_theme_colour_12]#{@swap} \
+#[fg=$tmux_conf_theme_separator_fg]| #{@batt_fg}#[bg=$tmux_conf_theme_colour_2]#{@batt_icon} #[bg=$tmux_conf_theme_colour_2]#{@batt_pct} \
 #[fg=$tmux_conf_theme_separator_fg]| #[fg=$tmux_conf_theme_colour_9,bold]#{username}#[fg=$tmux_conf_theme_colour_12,nobold] @ #[fg=$tmux_conf_theme_colour_4,bold]#{hostname} "
 
 # 兜底样式 (深灰背景)
@@ -389,12 +389,34 @@ bind -N "Popup prompt" ';' command-prompt -p "popup>" \
 # # 决定采样周期，与 status-interval 无关。退出后由下次重绘拉起，因此改完这个
 # # 函数最多 10s 后自动生效，无需 kill-server。
 # sysmon() {
+#   echo   # 立刻吐一个空行：job 在产出第一行之前，tmux 会把命令串本身渲染成
+#          # <cut ... | sh ... not ready> 占位符。oh-my-tmux 的 _battery_status
+#          # 用 "#(echo; ...)" 达到同样目的。
 #   scripts="$1/tmux-cpu/scripts"
 #   cpu=$("$scripts/cpu_percentage.sh"); ram=$("$scripts/ram_percentage.sh")
 #   cpu_n=${cpu%%.*}; cpu_n=${cpu_n%\%}
 #   ram_n=${ram%%.*}; ram_n=${ram_n%\%}
-#   tmux set -g @cpu "$cpu" \; set -g @cpu_n "$(printf '%03d' "${cpu_n:-0}")" \; set -g @ram "$ram" \; set -g @ram_n "$(printf '%03d' "${ram_n:-0}")"
+#   if [ -r /proc/meminfo ]; then
+#     swap=$(awk '/^SwapTotal:/{t=$2} /^SwapFree:/{f=$2} END{ if(t>0) printf "%d%%",(t-f)*100/t; else printf "0%%" }' /proc/meminfo)
+#   else
+#     swap=$(sysctl -n vm.swapusage 2>/dev/null | awk '{ if ($3+0 > 0) printf "%d%%", ($6+0)*100/($3+0); else printf "0%%" }')
+#   fi
+#   tmux set -g @cpu "$cpu" \; set -g @cpu_n "$(printf '%03d' "${cpu_n:-0}")" \; set -g @ram "$ram" \; set -g @ram_n "$(printf '%03d' "${ram_n:-0}")" \; set -g @swap "${swap:-n/a}"
 #   sleep 10
+# }
+#
+# # usage: #{battinfo #{TMUX_PLUGIN_MANAGER_PATH}}
+# # 电池独立成一个 60s 周期的 job。三个 tmux-battery 脚本合计 0.39s，原先是每次
+# # 重绘各跑一遍（0.35s/轮），现在摊到 60 秒。
+# #
+# # 状态栏里必须不残留任何 #{battery_*} 字样：oh-my-tmux 只要匹配到该前缀，就会
+# # 无条件在 status-right 最前面插入一个 _battery_status job（实测 0.26s/轮，是
+# # 原先最贵的单个 job），而它设置的 @battery_status 本配置从未使用。
+# battinfo() {
+#   echo
+#   scripts="$1/tmux-battery/scripts"
+#   tmux set -g @batt_pct "$("$scripts/battery_percentage.sh")" \; set -g @batt_icon "$("$scripts/battery_icon.sh")" \; set -g @batt_fg "$("$scripts/battery_color_charge.sh" fg)"
+#   sleep 60
 # }
 #
 # # usage: #{weather}
@@ -428,17 +450,6 @@ bind -N "Popup prompt" ';' command-prompt -p "popup>" \
 #   url="https://api.github.com/repos/${repository:-gpakosz/.tmux}"
 #   curl -s "$url" | perl -MJSON::PP=decode_json -CO -0777 -E '$response = decode_json(readline *STDIN); say ($response->{stargazers_count})'
 #   sleep 300                                         # sleep for 5 minutes, throttle network requests whatever the value of status-interval
-# }
-#
-# # usage: #{swap_percentage}  — portable swap %, Linux + macOS
-# swap_percentage() {
-#   if [ -r /proc/meminfo ]; then
-#     awk '/^SwapTotal:/{t=$2} /^SwapFree:/{f=$2} END{ if(t>0) printf "%d%%",(t-f)*100/t; else printf "0%%" }' /proc/meminfo
-#   elif command -v sysctl >/dev/null 2>&1; then
-#     sysctl -n vm.swapusage 2>/dev/null | awk '{ if ($3+0 > 0) printf "%d%%", ($6+0)*100/($3+0); else printf "0%%" }'
-#   else
-#     printf 'n/a'
-#   fi
 # }
 #
 # "$@"
