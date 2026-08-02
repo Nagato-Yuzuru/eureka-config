@@ -27,24 +27,25 @@ export PATH="$PATH:${HOME}/Library/Application Support/JetBrains/Toolbox/scripts
 {{- end }}
 
 export EDITOR=nvim
-# ------------
-#
-{{- if eq .chezmoi.os "darwin" }}
-ANTIDOTE_HOME="$(brew --prefix)/share/antidote"
-{{- else if eq .chezmoi.os "linux" }}
-# Antidote installation path for Linux
-# Install antidote: git clone --depth=1 https://github.com/mattmc3/antidote.git ${ZDOTDIR:-~}/.antidote
-ANTIDOTE_HOME="${ZDOTDIR:-${HOME}}/.antidote/"
-{{- end }}
+
+ANTIDOTE_HOME="${XDG_CACHE_HOME}/antidote"
 
 zsh_plugins_txt=${ZDOTDIR:-$HOME}/.zsh_plugins.txt
 zsh_plugins_zsh=${ZDOTDIR:-$HOME}/.zsh_plugins.zsh
 
-source $ANTIDOTE_HOME/antidote.zsh
 
-if [[ ! -s $zsh_plugins_zsh || ! $zsh_plugins_zsh -nt $zsh_plugins_txt ]]; then
+{{- if eq .chezmoi.os "darwin" }}
+source "${brew_prefix}/opt/antidote/share/antidote/antidote.zsh"
+{{- else if eq .chezmoi.os "linux" }}
+source "${ZDOTDIR:-${HOME}}/.antidote/antidote.zsh"  # see run_once_before_install-antidote.sh
+{{- end }}
+
+
+antidote_clones=($ANTIDOTE_HOME/*(N/))
+if [[ ! -s $zsh_plugins_zsh || ! $zsh_plugins_zsh -nt $zsh_plugins_txt || $#antidote_clones -eq 0 ]]; then
     antidote bundle <$zsh_plugins_txt >|$zsh_plugins_zsh
 fi
+unset antidote_clones
 
 fpath=(
     "${HOME}/.zsh/completions"
