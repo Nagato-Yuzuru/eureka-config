@@ -154,6 +154,9 @@ bindkey -e
 
 setopt auto_cd
 setopt autopushd
+setopt hist_ignore_all_dups
+setopt hist_ignore_space
+
 typeset -i DIRSTACKSIZE=127
 
 export WORDCHARS=${WORDCHARS/\//}
