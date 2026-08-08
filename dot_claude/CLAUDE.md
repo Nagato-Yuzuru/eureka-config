@@ -103,7 +103,7 @@ _Language-agnostic._
 
 **Build what was asked — no speculative generality.** No config options, plugin points, or abstraction layers for hypothetical future needs. Introduce an abstraction at the second concrete use, not the first.
 
-**A contract change isn't done until every caller is updated.** Enumerate call sites (LSP `findReferences` / `sg 'foo($$$)'`) — never patch just the ones you remember. Don't leave backwards-compat aliases or re-export shims unless asked.
+**A contract change isn't done until every caller is updated.** Enumerate call sites (LSP `findReferences` / `ast-grep 'foo($$$)'`) — never patch just the ones you remember. Don't leave backwards-compat aliases or re-export shims unless asked.
 
 **New dependencies clear a bar.** Prefer stdlib and already-declared deps. A new third-party package needs a reason: actively maintained, typed, and pulling in less than it saves.
 
@@ -161,8 +161,8 @@ _Governs committed, shared code; the local working tree is your own._
 
 **ripgrep (the `Grep` tool) is the default for all code search** — identifiers, imports, log lines, exploration. Its false positives (comments, strings) are cheap to skim; don't pay pattern-syntax friction for precision the task doesn't need. Two exceptions:
 
-- **Structural rewrite / codemod → `sg --rewrite`.** No text tool substitutes.
-- **Enumerating call sites before a contract change → LSP `findReferences` first** (resolves imports/aliases; text search hits same-named strings), then `sg 'foo($$$)'` when no language server covers the language, then ripgrep + manual filtering as the last resort.
+- **Structural rewrite / codemod → `ast-grep --rewrite`.** No text tool substitutes.
+- **Enumerating call sites before a contract change → LSP `findReferences` first** (resolves imports/aliases; text search hits same-named strings), then `ast-grep 'foo($$$)'` when no language server covers the language, then ripgrep + manual filtering as the last resort.
 
 LSP is also the tool for other symbol-identity questions: go-to-definition/implementation, call hierarchy, hover for type info. On LSP error, fall back down the chain and say so.
 
