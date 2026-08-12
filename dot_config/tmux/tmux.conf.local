@@ -82,6 +82,8 @@ bind S setw synchronize-panes \; display-message "Sync panes: #{?pane_synchroniz
 # if you don't want Oh my tmux! to alter a binding or a setting, use #!important
 # bind c new-window -c '#{pane_current_path}' #!important
 
+bind C-c new-session -c "$HOME" 
+
 # pane mark / unmark：恢复 tmux 默认含义（原来 `m` 被改成 mouse toggle，已去掉；
 # 临时开关 mouse 用 `prefix :` set mouse on/off 兜底）。
 # mark 后，`prefix @` 把它拉到当前 pane 旁边；swap-pane / move-pane 也默认用 marked pane。

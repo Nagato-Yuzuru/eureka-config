@@ -22,6 +22,7 @@ packages:
     - jd
     - carapace
     - ast-grep
+    - duckdb
   darwin:
     brews:
       - gawk
@@ -40,4 +41,4 @@ packages:
       - istat-menus
       - karabiner-elements
       - iina
-      - tailscale
+      - tailscale-app
