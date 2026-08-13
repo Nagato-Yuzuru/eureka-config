@@ -1,7 +1,6 @@
 ---
 name: style-go
-description: "Apply when writing or reviewing Go. Never silently ignore errors; errors.Is/As over string matching; ctx first param through I/O and concurrency; every goroutine has a managed lifecycle; native idioms over JS reflexes."
-disable-model-invocation: true
+description: "Code & delivery. Apply when writing or reviewing Go. Never silently ignore errors; errors.Is/As over string matching; ctx first param through I/O and concurrency; every goroutine has a managed lifecycle; native idioms over JS reflexes."
 ---
 
 # Go style

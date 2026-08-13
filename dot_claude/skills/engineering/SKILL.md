@@ -1,25 +1,20 @@
 ---
 name: engineering
-description: "MUST load at the start of any engineering task: writing, changing, reviewing, or designing code that will run or be kept — anything beyond a one-off throwaway. The index of engineering principles and operating procedures; read a principle's leaf skill in full when you apply it."
+description: "MUST load at the start of any engineering task: writing, changing, reviewing, or designing code that will run or be kept — anything beyond a one-off throwaway. The discipline and operating procedures for engineering work; each principle is its own `principle-*` skill, loaded when you apply it."
 ---
 
 # Engineering
 
-This is the index. Each principle lives in a leaf skill at `~/.claude/skills/<name>/SKILL.md`; the name is the compressed rule, the leaf is the full one.
+Each principle is its own skill, listed alongside this one and prefixed by area — Core, Architecture, Verification, Code & delivery. **Load a principle's skill with the Skill tool when you apply it**: the name is the compressed rule, the skill body is the full one.
 
 ## The discipline
 
-- **Read the leaf in full for any principle you apply.**
-- **Cite what changed a decision.** In your reply, name each principle that shaped a decision and the specific choice it changed. A citation with no decision behind it means you skipped its leaf; it must trace to a real choice the rule drove.
+- **Cite what changed a decision.** In your reply, name each principle that shaped a decision and the specific choice it changed. A citation with no decision behind it means you never loaded it; it must trace to a real choice the rule drove.
 - When work matches a principle and you deliberately deviate, say why in one line.
 
-## Principles
+## Dependencies clear a bar
 
-- **Core** — principle-laziness-protocol · principle-foundational-thinking · principle-redesign-from-first-principles · principle-subtract-before-you-add · principle-minimize-reader-load · principle-exhaust-the-design-space · principle-build-the-lever
-- **Architecture** — principle-model-the-domain · principle-boundary-discipline · principle-type-system-discipline · principle-make-operations-idempotent · principle-migrate-callers-then-delete-legacy-apis · principle-separate-before-serializing-shared-state · principle-single-source-of-truth · principle-interface-design
-- **Verification** — principle-prove-it-works · principle-fix-root-causes · principle-sequence-verifiable-units
-- **Code & delivery** — principle-testing · principle-observability · principle-comments-and-docs · principle-reproducible-state · style-python · style-go
-- **Dependencies clear a bar** (no leaf; this line is the rule) — prefer stdlib and already-declared deps. A new third-party package needs a reason: actively maintained, typed, and pulling in less than it saves.
+No skill of its own — this section is the rule. Prefer stdlib and already-declared deps. A new third-party package needs a reason: actively maintained, typed, and pulling in less than it saves.
 
 ## Operating procedures
 

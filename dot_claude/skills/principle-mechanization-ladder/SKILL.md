@@ -1,7 +1,6 @@
 ---
 name: principle-mechanization-ladder
-description: "Apply when you catch yourself writing the same instruction or correction a second time. Prose is the enforcement of last resort: encode the convention as types > linter/formatter > tests > hooks/CI > instructions, picking the strongest rung the situation allows."
-disable-model-invocation: true
+description: "Core. Apply when you catch yourself writing the same instruction or correction a second time. Prose is the enforcement of last resort: encode the convention as types > linter/formatter > tests > hooks/CI > instructions, picking the strongest rung the situation allows."
 ---
 
 # Mechanization ladder

@@ -1,7 +1,6 @@
 ---
 name: principle-exhaust-the-design-space
-description: "Apply when facing a novel interaction or architectural decision with no precedent in the codebase. Build 2-3 competing prototypes or sketches and compare side by side before committing."
-disable-model-invocation: true
+description: "Core. Apply when facing a novel interaction or architectural decision with no precedent in the codebase. Build 2-3 competing prototypes or sketches and compare side by side before committing."
 ---
 
 # Exhaust the design space

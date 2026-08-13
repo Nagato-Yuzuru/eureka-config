@@ -1,7 +1,6 @@
 ---
 name: principle-interface-design
-description: "Apply when designing REST/gRPC/CLI or internal interfaces. AIP (google.aip.dev) is the source of truth: its principles generalize everywhere; its concrete rules are for resource-oriented network APIs. Fetch and read a specific AIP before citing it."
-disable-model-invocation: true
+description: "Architecture. Apply when designing REST/gRPC/CLI or internal interfaces. AIP (google.aip.dev) is the source of truth: its principles generalize everywhere; its concrete rules are for resource-oriented network APIs. Fetch and read a specific AIP before citing it."
 ---
 
 # Interface & API design

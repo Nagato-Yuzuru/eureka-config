@@ -1,7 +1,6 @@
 ---
 name: principle-laziness-protocol
-description: "Apply when refactoring, sizing a diff, or tempted to add abstractions, layers, options, or signal threading. Bias toward deletion and the smallest change that solves the problem; build what was asked, abstraction at the second concrete use."
-disable-model-invocation: true
+description: "Core. Apply when refactoring, sizing a diff, or tempted to add abstractions, layers, options, or signal threading. Bias toward deletion and the smallest change that solves the problem; build what was asked, abstraction at the second concrete use."
 ---
 
 # Laziness protocol

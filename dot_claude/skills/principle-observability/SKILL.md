@@ -1,7 +1,6 @@
 ---
 name: principle-observability
-description: "Apply when adding logging, metrics, or traces. Structured events, never interpolated prose; levels carry meaning; log once at the boundary that handles; never log secrets/PII; propagate a trace id; logs=events, metrics=aggregates, traces=causality."
-disable-model-invocation: true
+description: "Code & delivery. Apply when adding logging, metrics, or traces. Structured events, never interpolated prose; levels carry meaning; log once at the boundary that handles; never log secrets/PII; propagate a trace id; logs=events, metrics=aggregates, traces=causality."
 ---
 
 # Observability

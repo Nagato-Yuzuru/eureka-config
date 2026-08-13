@@ -1,7 +1,6 @@
 ---
 name: style-python
-description: "Apply when writing or reviewing Python. Imports at module top, deps declared via uv in the same change, narrowest interface in / concrete types out, no print in app code, native idioms over JS reflexes. Env/package commands live in CLAUDE.md (uv table)."
-disable-model-invocation: true
+description: "Code & delivery. Apply when writing or reviewing Python. Imports at module top, deps declared via uv in the same change, narrowest interface in / concrete types out, no print in app code, native idioms over JS reflexes. Env/package commands live in CLAUDE.md (uv table)."
 ---
 
 # Python style

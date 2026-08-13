@@ -1,7 +1,6 @@
 ---
 name: principle-redesign-from-first-principles
-description: "Apply when integrating a new requirement into an existing design, or when implementation keeps producing the same shape of friction. Redesign as if the requirement had been a day-one assumption instead of bolting it on; scrap designs that fight back."
-disable-model-invocation: true
+description: "Core. Apply when integrating a new requirement into an existing design, or when implementation keeps producing the same shape of friction. Redesign as if the requirement had been a day-one assumption instead of bolting it on; scrap designs that fight back."
 ---
 
 # Redesign from first principles

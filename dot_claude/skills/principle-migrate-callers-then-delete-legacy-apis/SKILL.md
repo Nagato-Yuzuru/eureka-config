@@ -1,7 +1,6 @@
 ---
 name: principle-migrate-callers-then-delete-legacy-apis
-description: "Apply when changing an internal contract or introducing a new API while old callers exist. Enumerate every call site, migrate callers and delete the old API in the same wave, and converge on the end state instead of building throwaway compatibility code."
-disable-model-invocation: true
+description: "Architecture. Apply when changing an internal contract or introducing a new API while old callers exist. Enumerate every call site, migrate callers and delete the old API in the same wave, and converge on the end state instead of building throwaway compatibility code."
 ---
 
 # Migrate callers, then delete legacy APIs

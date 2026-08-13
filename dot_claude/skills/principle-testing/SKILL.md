@@ -1,7 +1,6 @@
 ---
 name: principle-testing
-description: "Apply when writing or reviewing tests. A behavior isn't tested until it has a positive case asserted on specific values, a negative case asserting the specific error, and boundaries (empty/one/many/max/off-by-one). Mock only at boundaries you don't own."
-disable-model-invocation: true
+description: "Code & delivery. Apply when writing or reviewing tests. A behavior isn't tested until it has a positive case asserted on specific values, a negative case asserting the specific error, and boundaries (empty/one/many/max/off-by-one). Mock only at boundaries you don't own."
 ---
 
 # Testing

@@ -1,7 +1,6 @@
 ---
 name: principle-reproducible-state
-description: "Apply when installing, patching, or working around a dependency, or editing generated/tool-owned files. Every change reproducible from committed state; mutate tool-owned files through the owning tool; escalate broken deps as pin → recorded patch mechanism → fork."
-disable-model-invocation: true
+description: "Code & delivery. Apply when installing, patching, or working around a dependency, or editing generated/tool-owned files. Every change reproducible from committed state; mutate tool-owned files through the owning tool; escalate broken deps as pin → recorded patch mechanism → fork."
 ---
 
 # Reproducible from committed state

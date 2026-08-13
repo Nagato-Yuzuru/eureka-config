@@ -1,7 +1,6 @@
 ---
 name: principle-single-source-of-truth
-description: "Apply when a constant, config value, schema, or explanation is about to exist in two places. Every fact has exactly one authoritative home; everything else references it. Code: import, don't copy. Config: derive. Docs: link to the closest home."
-disable-model-invocation: true
+description: "Architecture. Apply when a constant, config value, schema, or explanation is about to exist in two places. Every fact has exactly one authoritative home; everything else references it. Code: import, don't copy. Config: derive. Docs: link to the closest home."
 ---
 
 # Single source of truth

@@ -1,7 +1,6 @@
 ---
 name: principle-fix-root-causes
-description: "Apply when debugging or when blocked by third-party behavior. Reproduce first, ask why until you reach the root cause, fix it there; no expedient hacks (guards that silence, sleeps that mask, handlers that swallow); escalate third-party fixes as config → wrapper → fork."
-disable-model-invocation: true
+description: "Verification. Apply when debugging or when blocked by third-party behavior. Reproduce first, ask why until you reach the root cause, fix it there; no expedient hacks (guards that silence, sleeps that mask, handlers that swallow); escalate third-party fixes as config → wrapper → fork."
 ---
 
 # Fix root causes

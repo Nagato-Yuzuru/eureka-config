@@ -1,7 +1,6 @@
 ---
 name: principle-comments-and-docs
-description: "Apply when writing comments, doc comments, or committed docs. Comments carry why and contract, never what; doc comments are the caller's contract; change code and comment in the same edit; no commented-out code or phase-narrating comments."
-disable-model-invocation: true
+description: "Code & delivery. Apply when writing comments, doc comments, or committed docs. Comments carry why and contract, never what; doc comments are the caller's contract; change code and comment in the same edit; no commented-out code or phase-narrating comments."
 ---
 
 # Comments & documentation

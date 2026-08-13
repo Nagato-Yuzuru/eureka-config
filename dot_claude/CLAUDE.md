@@ -1,8 +1,8 @@
 # Global Preferences
 
-## Engineering — Load the Index
+## Engineering — Load the Skill
 
-**Any engineering task — writing, changing, reviewing, or designing code that will run or be kept (anything beyond a one-off throwaway) — load the `engineering` skill first.** It indexes the principles and operating procedures; read a principle's leaf skill in full when you apply it, and cite what changed a decision.
+**Any engineering task — writing, changing, reviewing, or designing code that will run or be kept (anything beyond a one-off throwaway) — load the `engineering` skill first.** It carries the discipline and operating procedures; each principle is its own `principle-*` skill — load it when you apply it, and cite what changed a decision.
 
 ## File Access Boundary — HARD RULE
 
