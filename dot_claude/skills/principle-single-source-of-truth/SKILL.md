@@ -13,4 +13,4 @@ Every fact — constant, config value, schema, explanation — has exactly one a
 
 When you need a fact where it doesn't live, the fix is a reference or a move, never a second copy.
 
-Related: **principle-laziness-protocol** (consolidate decisions behind one source), **principle-type-system-discipline** (derive types from authoritative schemas instead of hand-rolling parallels).
+Related: **principle-type-system-discipline** (derive types from authoritative schemas instead of hand-rolling parallels).
