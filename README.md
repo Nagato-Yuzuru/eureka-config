@@ -1,6 +1,107 @@
 # eureka-config
 
-dotfiles, Workflow and toolchain
+One chezmoi source for the machines I actually use: an Apple-silicon Mac, an
+Intel Mac, and a Fedora VM in OrbStack (`linux-lab`, for eBPF study). Shell
+(zsh, antidote, starship), tmux on top of oh-my-tmux, mise, Claude Code
+settings, and the list of tools each machine gets. Neovim lives in its own
+repo.
+
+Everything renders per machine from `.chezmoi.os` / `.chezmoi.arch`, so the
+same commit produces a Mac and a Fedora home directory. There is no machine
+identity beyond os and arch yet; the three machines happen to differ there.
+
+## Layout
+
+| Path                                | What                                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------ |
+| `.chezmoidata/packages.yaml`        | every tool, one line each, whatever installs it (see below)                                |
+| `.chezmoidata/xdg.yaml`             | XDG base dirs; `.zshenv` exports them, externals and symlinks derive their paths from them |
+| `.chezmoitemplates/`                | the package renderers and validator                                                        |
+| `.chezmoiexternal.toml.tmpl`        | oh-my-tmux and (linux) antidote as git clones under `$XDG_DATA_HOME`                       |
+| `.chezmoiignore`                    | what a non-Mac never gets: Brewfile, ghostty, wezterm, 1Password                           |
+| `run_onchange_before_install-*.sh`  | installs the system packages (brew bundle / dnf) whenever this machine's set changes       |
+| `run_once_after_setup-linux.sh`     | Fedora bootstrap: login shell, git include and identity                                    |
+| `dot_claude/`                       | Claude Code: CLAUDE.md, hooks, skills, and the managed-settings fragments (last section)    |
+| `tests/`                            | pytest for the package model and the settings merge engine; never deployed                 |
+
+## Packages
+
+`packages.yaml` is the inventory. One line per tool; the fields say where it
+goes and how it gets there.
+
+```yaml
+fd:      { on: [darwin, linux], dnf: fd-find }
+ghostty: { on: [darwin], cask: ghostty }
+rust:    { on: [darwin, linux], via: mise, version: stable }
+pnpm:    { on: [darwin, linux], via: mise, overrides: [{ $when: darwin/amd64, mise: "npm:pnpm" }] }
+```
+
+- `on` is a list of machine tags: `darwin`, `linux`, or `os/arch`.
+- `via` picks the backend. `system` (the default) means brew on a Mac and dnf
+  on Fedora; `mise` puts the tool in mise's `[tools]`. The rule I use: one
+  global version, system package; multiple versions, mise. uv is a system
+  package on both, it never needs more than one version and chezmoi's own
+  scripts need it before mise has installed anything.
+- `brew` / `dnf` / `mise` override the name on that backend when it differs
+  from the key. `copr` and `repofile` add the Fedora repo the package needs.
+- `overrides` is the only per-machine mechanism. Each entry whose `$when` tag
+  matches this machine is merged over the line, in order. Any field can differ
+  per machine that way; today only pnpm does.
+
+From that one file chezmoi renders `~/.Brewfile`, the `[tools]` block of
+`~/.config/mise/config.toml`, and the dnf half of the install script. Bad data
+fails the render with a message naming the entry. `tests/golden/<machine>/`
+holds the rendered lists per machine, so a diff there shows exactly which
+machine an edit touched.
+
+chezmoi installs the system packages but never runs `mise install`; that is a
+manual step and stays one.
+
+## New machine
+
+Mac (Homebrew and 1Password's SSH agent already set up):
+
+```sh
+brew install chezmoi
+chezmoi init --apply git@github.com:Nagato-Yuzuru/eureka-config.git
+mise install
+```
+
+Fedora VM in OrbStack (the SSH agent is forwarded from the Mac):
+
+```sh
+orb create fedora linux-lab
+orb -m linux-lab sudo dnf install -y chezmoi git zsh
+orb -m linux-lab chezmoi init --apply git@github.com:Nagato-Yuzuru/eureka-config.git
+```
+
+Accept github.com's host key when the first clone asks. Log out and back in
+for the login shell to become zsh, then `mise install` inside the VM. While
+iterating on the source from the Mac, apply the working tree straight into
+the VM without committing:
+
+```sh
+orb -m linux-lab chezmoi apply --source /mnt/mac/Users/yuzuru/.local/share/chezmoi
+```
+
+The VM runs OrbStack's kernel, not Fedora's, so `kernel-devel` never matches;
+eBPF work goes through BTF/CO-RE (bpftrace, libbpf, bpftool). That toolchain
+belongs to the study project, not to these dotfiles.
+
+## Development
+
+```sh
+uv run pytest                                          # everything, ~8 s
+UPDATE_GOLDEN=1 uv run pytest tests/test_packages.py   # after an intentional packages.yaml change
+prek install                                           # pre-commit hooks: format, whitespace, yaml/toml/json, shellcheck, pytest
+```
+
+To see what another machine would get without being on it:
+
+```sh
+printf '{{ includeTemplate "mise-tools" . }}' |
+  chezmoi execute-template --override-data '{"chezmoi": {"os": "darwin", "arch": "amd64"}}'
+```
 
 ## Claude Code managed settings — the fragment protocol
 
