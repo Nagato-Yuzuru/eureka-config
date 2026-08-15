@@ -37,6 +37,7 @@ packages:
   ripgrep: { on: [darwin, linux] }
   fd: { on: [darwin, linux], dnf: fd-find }
   jq: { on: [darwin, linux] }
+  yq: { on: [darwin, linux] }
   jd: { on: [darwin] } # Fedora's "jd" is JDim, a 2ch browser — not the JSON diff tool
   bat: { on: [darwin, linux] }
   delta: { on: [darwin, linux], dnf: git-delta }
