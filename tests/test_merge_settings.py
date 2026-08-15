@@ -188,9 +188,7 @@ class TestScalarLeaves:
         assert r.merged["effortLevel"] == "xhigh"
 
     def test_ours_evolved_converges(self, engine):
-        r = merge(
-            engine, {"effortLevel": "high"}, fragment=self.FRAG, base={"effortLevel": "high"}
-        )
+        r = merge(engine, {"effortLevel": "high"}, fragment=self.FRAG, base={"effortLevel": "high"})
         assert r.conflicts == []
         assert r.merged["effortLevel"] == "xhigh"
 
@@ -242,9 +240,7 @@ class TestUndeclaredListsAreExact:
         assert [c.path for c in conflicts] == ["statusLine"]
 
     def test_ours_evolved_replaced_wholesale(self, engine):
-        r = merge(
-            engine, {"statusLine": ["old"]}, fragment=self.FRAG, base={"statusLine": ["old"]}
-        )
+        r = merge(engine, {"statusLine": ["old"]}, fragment=self.FRAG, base={"statusLine": ["old"]})
         assert r.conflicts == []
         assert r.merged["statusLine"] == ["a", "b"]
 

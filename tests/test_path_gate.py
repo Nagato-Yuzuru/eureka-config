@@ -63,7 +63,9 @@ def check(home, path, mode, project, session=None) -> int:
 def cli(home, *args) -> subprocess.CompletedProcess:
     return subprocess.run(
         [str(GATE), *[str(a) for a in args]],
-        env=env_for(home), capture_output=True, text=True,
+        env=env_for(home),
+        capture_output=True,
+        text=True,
     )
 
 
@@ -71,6 +73,7 @@ ALLOW, ASK, DENY = 0, 1, 2
 
 
 # --- decision chain via check ------------------------------------------------
+
 
 class TestWorkspace:
     def test_project_file_allows_rw(self, home, project):
@@ -131,7 +134,9 @@ class TestTmp:
         d = tempfile.mkdtemp(dir="/private/tmp")
         f = Path(d) / "f.txt"
         f.write_text("x")
-        assert check(home, "/tmp/" + f.relative_to("/private/tmp").as_posix(), "r", project) == ALLOW
+        assert (
+            check(home, "/tmp/" + f.relative_to("/private/tmp").as_posix(), "r", project) == ALLOW
+        )
 
     def test_var_folders_asks(self, home, project, tmp_path):
         # tmp_path itself lives under /private/var/folders on macOS
@@ -251,15 +256,16 @@ class TestMemoryAndWhitelist:
         assert check(home, f, "r", project) == ALLOW
         assert check(home, f, "w", project) == ASK
 
-    @pytest.mark.parametrize(
-        "name", ["settings.json", ".credentials.json", "history.jsonl"]
-    )
+    @pytest.mark.parametrize("name", ["settings.json", ".credentials.json", "history.jsonl"])
     def test_excluded_claude_files_ask(self, home, project, name):
         assert check(home, home / ".claude" / name, "r", project) == ASK
 
     def test_slug_matches_real_layout(self, home, project):
         # pin the mapping against the observed rule: every non-alnum -> '-'
-        assert slug_of(Path("/Users/colas/.local/share/chezmoi")) == "-Users-colas--local-share-chezmoi"
+        assert (
+            slug_of(Path("/Users/colas/.local/share/chezmoi"))
+            == "-Users-colas--local-share-chezmoi"
+        )
 
 
 class TestGrantsCli:
@@ -296,9 +302,9 @@ class TestGrantsCli:
     def test_session_flag_consults_session_store(self, home, project):
         sdir = home / ".claude" / "hooks" / "path-gate-sessions"
         sdir.mkdir()
-        (sdir / f"{SID}.json").write_text(json.dumps(
-            {"pending": [], "granted": [{"path": str(home / "sess"), "mode": "r"}]}
-        ))
+        (sdir / f"{SID}.json").write_text(
+            json.dumps({"pending": [], "granted": [{"path": str(home / "sess"), "mode": "r"}]})
+        )
         assert check(home, home / "sess" / "f", "r", project, session=SID) == ALLOW
         assert check(home, home / "sess" / "f", "r", project) == ASK  # no --session
         assert check(home, home / "sess" / "f", "w", project, session=SID) == ASK
@@ -306,22 +312,37 @@ class TestGrantsCli:
 
 # --- hook mode (stdin JSON) ---------------------------------------------------
 
+
 def run_hook(home, *, tool, path, cwd, session=SID, mode="default", extra_env=None):
-    key = {"Read": "file_path", "Edit": "file_path", "Write": "file_path",
-           "NotebookEdit": "notebook_path", "Grep": "path", "Glob": "path"}[tool]
-    payload = {"tool_name": tool, "tool_input": {key: str(path)},
-               "cwd": str(cwd), "session_id": session, "permission_mode": mode}
+    key = {
+        "Read": "file_path",
+        "Edit": "file_path",
+        "Write": "file_path",
+        "NotebookEdit": "notebook_path",
+        "Grep": "path",
+        "Glob": "path",
+    }[tool]
+    payload = {
+        "tool_name": tool,
+        "tool_input": {key: str(path)},
+        "cwd": str(cwd),
+        "session_id": session,
+        "permission_mode": mode,
+    }
     e = env_for(home)
     if extra_env:
         e.update(extra_env)
-    r = subprocess.run([str(GATE)], input=json.dumps(payload), text=True,
-                       capture_output=True, env=e)
+    r = subprocess.run(
+        [str(GATE)], input=json.dumps(payload), text=True, capture_output=True, env=e
+    )
     assert r.returncode == 0, r.stderr
     if not r.stdout.strip():
         return {"decision": "allow"}
     out = json.loads(r.stdout)["hookSpecificOutput"]
-    return {"decision": out["permissionDecision"],
-            "reason": out.get("permissionDecisionReason", "")}
+    return {
+        "decision": out["permissionDecision"],
+        "reason": out.get("permissionDecisionReason", ""),
+    }
 
 
 def session_file(home) -> Path:
@@ -344,8 +365,9 @@ class TestHookMode:
         assert data["granted"] == []
 
     def test_bypass_mode_writes_no_pending(self, home, project):
-        out = run_hook(home, tool="Read", path=home / "f.txt", cwd=project,
-                       mode="bypassPermissions")
+        out = run_hook(
+            home, tool="Read", path=home / "f.txt", cwd=project, mode="bypassPermissions"
+        )
         assert out["decision"] == "ask"
         assert not session_file(home).exists()
 
@@ -361,22 +383,38 @@ class TestHookMode:
         assert {"path": str(home / "somewhere"), "mode": "r"} in data["pending"]
 
     def test_glob_without_path_is_untouched(self, home, project):
-        payload = {"tool_name": "Glob", "tool_input": {"pattern": "**/*.py"},
-                   "cwd": str(project), "session_id": SID, "permission_mode": "default"}
-        r = subprocess.run([str(GATE)], input=json.dumps(payload), text=True,
-                           capture_output=True, env=env_for(home))
+        payload = {
+            "tool_name": "Glob",
+            "tool_input": {"pattern": "**/*.py"},
+            "cwd": str(project),
+            "session_id": SID,
+            "permission_mode": "default",
+        }
+        r = subprocess.run(
+            [str(GATE)],
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            env=env_for(home),
+        )
         assert r.returncode == 0 and not r.stdout.strip()
 
     def test_claude_project_dir_env_wins_over_cwd(self, home, project, tmp_path):
         elsewhere = Path(os.path.realpath(tmp_path)) / "elsewhere"
         elsewhere.mkdir()
-        out = run_hook(home, tool="Read", path=project / "x.txt", cwd=elsewhere,
-                       extra_env={"CLAUDE_PROJECT_DIR": str(project)})
+        out = run_hook(
+            home,
+            tool="Read",
+            path=project / "x.txt",
+            cwd=elsewhere,
+            extra_env={"CLAUDE_PROJECT_DIR": str(project)},
+        )
         assert out["decision"] == "allow"
 
     def test_malicious_session_id_is_ignored(self, home, project):
-        out = run_hook(home, tool="Read", path=home / "f", cwd=project,
-                       session="../../../etc/pwned")
+        out = run_hook(
+            home, tool="Read", path=home / "f", cwd=project, session="../../../etc/pwned"
+        )
         assert out["decision"] == "ask"
         # nothing outside the sessions dir may be created
         assert not (home / ".claude" / "etc").exists()
@@ -391,13 +429,30 @@ class TestHookMode:
 
 # --- record verb (PostToolUse / PostToolUseFailure) ---------------------------
 
+
 def run_record(home, *, tool="Read", path, cwd, session=SID, mode="default"):
-    key = {"Read": "file_path", "Edit": "file_path", "Write": "file_path",
-           "NotebookEdit": "notebook_path", "Grep": "path", "Glob": "path"}[tool]
-    payload = {"tool_name": tool, "tool_input": {key: str(path)},
-               "cwd": str(cwd), "session_id": session, "permission_mode": mode}
-    r = subprocess.run([str(GATE), "record"], input=json.dumps(payload),
-                       text=True, capture_output=True, env=env_for(home))
+    key = {
+        "Read": "file_path",
+        "Edit": "file_path",
+        "Write": "file_path",
+        "NotebookEdit": "notebook_path",
+        "Grep": "path",
+        "Glob": "path",
+    }[tool]
+    payload = {
+        "tool_name": tool,
+        "tool_input": {key: str(path)},
+        "cwd": str(cwd),
+        "session_id": session,
+        "permission_mode": mode,
+    }
+    r = subprocess.run(
+        [str(GATE), "record"],
+        input=json.dumps(payload),
+        text=True,
+        capture_output=True,
+        env=env_for(home),
+    )
     assert r.returncode == 0, r.stderr
 
 
@@ -412,8 +467,8 @@ def seed_session(home, pending=(), granted=()):
 class TestRecord:
     def test_promote_happy_path(self, home, project):
         target = home / "foreign.txt"
-        run_hook(home, tool="Read", path=target, cwd=project)      # ask + pending
-        run_record(home, tool="Read", path=target, cwd=project)    # approval proven
+        run_hook(home, tool="Read", path=target, cwd=project)  # ask + pending
+        run_record(home, tool="Read", path=target, cwd=project)  # approval proven
         data = json.loads(session_file(home).read_text())
         assert {"path": str(target), "mode": "r"} in data["granted"]
         assert data["pending"] == []
@@ -484,9 +539,10 @@ class TestRecord:
 class TestConcurrency:
     def test_parallel_pendings_never_mint_grants(self, home, project):
         import concurrent.futures as cf
+
         paths = [home / f"c{i}.txt" for i in range(8)]
         with cf.ThreadPoolExecutor(8) as ex:
             list(ex.map(lambda p: run_hook(home, tool="Read", path=p, cwd=project), paths))
         data = json.loads(session_file(home).read_text())
-        assert data["granted"] == []          # racing pendings may drop; grants never appear
+        assert data["granted"] == []  # racing pendings may drop; grants never appear
         assert len(data["pending"]) >= 1

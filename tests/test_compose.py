@@ -102,9 +102,7 @@ class TestEnsureComposition:
     def test_duplicate_elements_within_one_fragment_error(self, engine):
         # cross-fragment union dedups; within-fragment duplicates must not
         # slip past validation into settings.json
-        errors = compose_errors(
-            engine, a={"$merge": {"s.ask": "ensure"}, "s": {"ask": ["A", "A"]}}
-        )
+        errors = compose_errors(engine, a={"$merge": {"s.ask": "ensure"}, "s": {"ask": ["A", "A"]}})
         assert any('ensure element "A" declared more than once' in e for e in errors)
 
     def test_union_distinguishes_bool_from_number(self, engine):
@@ -174,7 +172,9 @@ class TestPolicyComposition:
             a={"$merge": {"env": "exact"}},
             b={"$merge": {"env.PATH": "ensure"}},
         )
-        assert any("`env.PATH` (b.json) is nested under declared `env` (a.json)" in e for e in errors)
+        assert any(
+            "`env.PATH` (b.json) is nested under declared `env` (a.json)" in e for e in errors
+        )
 
     def test_nested_pattern_errors_even_with_same_strategy(self, engine):
         errors = compose_errors(engine, a={"$merge": {"env": "exact", "env.PATH": "exact"}})
