@@ -1,0 +1,32 @@
+# Local hooks only (run with prek); tools come from the repo's uv dev env so
+# versions match `uv run` in the shell. Never deployed: chezmoi skips source-dir
+# dotfiles that are not .chezmoi*.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        pass_filenames: false
+        files: ^(tests/.*\.py|dot_claude/modify_settings\.json|run_onchange_after_snapshot-claude-managed\.py\.tmpl|pyproject\.toml)$
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        pass_filenames: false
+        files: ^(tests/.*\.py|dot_claude/modify_settings\.json|run_onchange_after_snapshot-claude-managed\.py\.tmpl|pyproject\.toml)$
+
+      - id: shellcheck
+        name: shellcheck
+        entry: shellcheck
+        language: system
+        files: \.sh$
+
+      - id: pytest
+        name: pytest
+        entry: uv run pytest -q
+        language: system
+        pass_filenames: false
+        files: ^(tests/|\.chezmoitemplates/|\.chezmoidata/|run_onchange_before_install-packages\.sh\.tmpl|dot_claude/(modify_settings\.json|exact_claude-managed\.d/)|run_onchange_after_snapshot-claude-managed\.py\.tmpl|dot_config/mise/config\.toml\.tmpl|dot_Brewfile\.tmpl)
