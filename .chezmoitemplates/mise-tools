@@ -1,0 +1,8 @@
+{{- includeTemplate "packages-validate" . -}}
+[tools]
+{{- range $name, $item := .packages }}
+{{- $r := includeTemplate "install-of" (dict "item" $item "key" $name "os" $.chezmoi.os "arch" $.chezmoi.arch) | fromJson }}
+{{- if eq $r.backend "mise" }}
+"{{ $r.name }}" = "{{ get $r.item "version" | default "latest" }}"
+{{- end }}
+{{- end }}

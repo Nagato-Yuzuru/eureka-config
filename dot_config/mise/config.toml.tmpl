@@ -1,45 +1,6 @@
 #:schema https://mise.jdx.dev/schema/mise.json
-# 2026-01-01 23:09:56
-[tools]
-go = "latest"
-uv = "latest"
-rust = "stable"
-deno = "latest"
-{{- if and (eq .chezmoi.os "darwin") ( eq .chezmoi.arch "amd64" ) }}
-"npm:pnpm" = "latest"
-{{- else }}
-pnpm = "latest"
-{{- end }}
-node = "lts"
-
-golangci-lint = "latest"
-
-
-usage = "latest"
-terraform = "latest"
-opentofu = "latest"
-kubectl = "latest"
-k9s = "latest"
-cmake = "latest"
-
-just = "latest"
-
-buf = "latest"
-act = "latest"
-wrangler = "latest"
-hugo-extended = "latest"
-prek = "latest"
-vacuum = "latest"
-actionlint = "latest"
-trivy = "latest"
-"go:golang.org/x/tools/gopls" = "latest"
-"go:github.com/prometheus-community/promql-langserver/cmd/promql-langserver" = "latest"
-lua-language-server = "latest"
-"npm:typescript" = "latest"
-oxlint = "latest"
-oxfmt = "latest"
-hcloud = "latest"
-
+# [tools] is generated from .chezmoidata/packages.yaml (via: mise entries)
+{{ template "mise-tools" . }}
 [settings]
 experimental = true
 python.uv_venv_auto = "source" # use uv
@@ -62,7 +23,8 @@ function load_completion_from_cache() {
     local cmd="$1"
     local cache_file="${COMP_DIR}/_${cmd}"
 
-    if command -v ${cmd} &>/dev/null && ( [[ ! -f "$cache_file" ]] || [[ "$(mise which ${cmd})" -nt "$cache_file" ]] ); then
+    # `command -v`, not `mise which`: some of these are system packages (uv on linux)
+    if command -v ${cmd} &>/dev/null && ( [[ ! -f "$cache_file" ]] || [[ "$(command -v ${cmd})" -nt "$cache_file" ]] ); then
         echo "Generating completion for $cmd..."
         
         case "$cmd" in

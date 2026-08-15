@@ -1,0 +1,14 @@
+{{- /* Extra repos needed by the dnf packages installed here, one per line:
+       "copr owner/project" or "repofile <url>". */ -}}
+{{- includeTemplate "packages-validate" . -}}
+{{- range $name, $item := .packages -}}
+{{- $r := includeTemplate "install-of" (dict "item" $item "key" $name "os" $.chezmoi.os "arch" $.chezmoi.arch) | fromJson -}}
+{{- if and (eq $.chezmoi.os "linux") (eq $r.backend "system") }}
+{{- if hasKey $r.item "copr" }}
+copr {{ $r.item.copr }}
+{{- end }}
+{{- if hasKey $r.item "repofile" }}
+repofile {{ $r.item.repofile }}
+{{- end }}
+{{- end }}
+{{- end }}

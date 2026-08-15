@@ -1,31 +1,40 @@
 #!/bin/bash
-
-# packages.yaml hash: {{ include ".chezmoidata/packages.yaml" | sha256sum }}
+# System packages for this machine, rendered from .chezmoidata/packages.yaml.
+# chezmoi re-runs this whenever the rendered content changes, i.e. whenever
+# this machine's package set changes.
+set -euo pipefail
 
 {{ if eq .chezmoi.os "darwin" -}}
-if command -v brew >/dev/null 2>&1; then
-    echo "Detecting changes in packages.yaml, updating system packages via Stdin..."
+if ! command -v brew >/dev/null 2>&1; then
+    echo "Homebrew not found. Skipping installation." >&2
+    exit 0
+fi
 
-    # 使用管道从 Heredoc 读取渲染后的清单
-    brew bundle install --file=- <<EOF
-{{ range .packages.common -}}
-brew "{{ . }}"
-{{ end -}}
-{{ range .packages.darwin.brews -}}
-brew "{{ . }}"
-{{ end -}}
-{{ range .packages.darwin.casks -}}
-cask "{{ . }}"
-{{ end -}}
+brew bundle install --file=- <<'EOF'
+{{ template "brewfile" . }}
+EOF
+{{- end }}
+
+{{- if eq .chezmoi.os "linux" }}
+if ! command -v dnf >/dev/null 2>&1; then
+    echo "dnf not found (non-Fedora Linux?). Skipping package installation." >&2
+    exit 0
+fi
+
+# `config-manager` and `copr` are DNF5 plugin subcommands (Fedora 41+)
+rpm -q dnf5-plugins >/dev/null 2>&1 || sudo dnf -y install dnf5-plugins
+
+# Both commands are idempotent; re-running keeps disabled/rotated repos current.
+while read -r kind arg; do
+    case "$kind" in
+    copr) sudo dnf -y copr enable "$arg" ;;
+    repofile) sudo dnf -y config-manager addrepo --overwrite --from-repofile="$arg" ;;
+    esac
+done <<'EOF'
+{{ template "dnf-repos" . }}
 EOF
 
-else
-    echo "Homebrew not found. Skipping installation."
-fi
-{{ end -}}
-
-{{ if eq .chezmoi.os "linux" -}}
-# 预留 Linux/Pacman 逻辑，后续可按需扩展
-# echo "Linux environment detected. System package management not yet implemented."
-{{ end -}}
-
+xargs -r sudo dnf -y install <<'EOF'
+{{ template "dnf-list" . }}
+EOF
+{{- end }}
