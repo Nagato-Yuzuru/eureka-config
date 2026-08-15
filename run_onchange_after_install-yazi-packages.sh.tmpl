@@ -1,0 +1,14 @@
+#!/bin/bash
+# Install yazi plugins/flavors pinned in ~/.config/yazi/package.toml (rev+hash,
+# so this is deterministic). Re-runs whenever that file changes.
+# package.toml is owned by `ya pkg add|upgrade`; after running those on one
+# machine, `chezmoi re-add ~/.config/yazi/package.toml` and commit.
+# package.toml hash: {{ include "dot_config/yazi/package.toml" | sha256sum }}
+set -euo pipefail
+
+if ! command -v ya >/dev/null 2>&1; then
+    echo "ya (yazi) not found; skipping yazi packages." >&2
+    exit 0
+fi
+
+ya pkg install

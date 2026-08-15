@@ -21,6 +21,7 @@ identity beyond os and arch yet; the three machines happen to differ there.
 | `.chezmoiignore`                    | what a non-Mac never gets: Brewfile, ghostty, wezterm, 1Password                           |
 | `run_onchange_before_install-*.sh`  | installs the system packages (brew bundle / dnf) whenever this machine's set changes       |
 | `run_once_after_setup-linux.sh`     | Fedora bootstrap: login shell, git include and identity                                    |
+| `run_onchange_after_install-yazi-*` | `ya pkg install` whenever yazi's `package.toml` (a rev+hash lockfile) changes              |
 | `dot_claude/`                       | Claude Code: CLAUDE.md, hooks, skills, and the managed-settings fragments (last section)    |
 | `tests/`                            | pytest for the package model and the settings merge engine; never deployed                 |
 
