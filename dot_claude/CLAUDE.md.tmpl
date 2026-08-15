@@ -11,7 +11,7 @@
 Allowed without asking:
 
 - the workspace: project directory plus `permissions.additionalDirectories` (`/add-dir`)
-- `/private/tmp/**` — the OS's shared scratch; clone-and-inspect work goes here or in the session scratchpad
+- `{{ if eq .chezmoi.os "darwin" }}/private/tmp/**{{ else }}/tmp/**{{ end }}` — the OS's shared scratch; clone-and-inspect work goes here or in the session scratchpad
 - auto-memory for the current project (`~/.claude/projects/<current slug>/memory/`)
 - read-only, Claude Code's own layout: `~/.claude/projects/<current slug>/**`, `~/.claude/{plugins,skills,agents,commands,rules,output-styles}/**`, `~/.claude/CLAUDE.md`, `~/.claude/keybindings.json`
 
@@ -33,8 +33,10 @@ The Bash tool runs through my interactive zsh config (shell snapshot), so these 
 | ------ | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `rm`   | `rm -i`                       | no TTY → silently **skips** the delete (does not hang); use `command rm` when you mean it                                             |
 | `mv`   | `mv -i`                       | no TTY → silently **skips** overwrite when dest exists                                                                                |
+{{- if eq .chezmoi.os "darwin" }}
 | `sed`  | `gsed`                        | GNU syntax — do NOT use BSD `sed -i ''`                                                                                               |
 | `date` | `gdate`                       | GNU flags (`-d`, `+%s%N`), not BSD `-v`                                                                                               |
+{{- end }}
 | `grep` | ripgrep (Claude Code wrapper) | gitignore/VCS-aware, skips binaries — **not POSIX grep** (won't search ignored/.git files), not colored; `command grep` for real grep |
 
 (`ls`/`fd` are aliased to `--color=auto` but that is a no-op here — color is auto-suppressed when output isn't a TTY.)
