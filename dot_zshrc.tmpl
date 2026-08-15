@@ -232,7 +232,7 @@ alias cleanproxy='networksetup -setwebproxystate Wi-Fi off && networksetup -sets
 function wellcome() {
     if ! command -v cowsay &>/dev/null; then return; fi
 
-    local cows=(alpaca bud-frogs cheese cupcake daemon elephant eyes fox head-in llama milk moose mutilated stegosaurus sus turtle tux)
+    local cows=(alpaca bud-frogs cheese cupcake elephant eyes fox llama milk moose mutilated stegosaurus sus turtle tux)
     local cow=$(shuf -n 1 -e "${cows[@]}")
     local mood=$(shuf -n 1 -e -- -b -d -g -p -s -t -w)
 
