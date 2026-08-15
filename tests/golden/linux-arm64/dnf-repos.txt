@@ -1,0 +1,5 @@
+copr atim/bottom
+copr atim/lazygit
+repofile https://mise.jdx.dev/rpm/mise.repo
+copr atim/starship
+copr lihaohong/yazi
