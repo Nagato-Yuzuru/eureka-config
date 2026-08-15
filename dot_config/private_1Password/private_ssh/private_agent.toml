@@ -44,3 +44,7 @@ vault = "Dev"
 [[ssh-keys]]
 item = "Terraqt (SSH)"
 vault = "Terraqt"
+
+[[ssh-keys]]
+vault = "Homelab"
+item = "HETZNER_NODE0"
