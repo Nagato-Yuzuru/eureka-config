@@ -455,7 +455,7 @@ def test_install_script_renders_to_valid_shell(machine: str, tmp_path: Path):
 @pytest.mark.parametrize("renderer", RENDERERS)
 def test_golden_render(renderer: str, machine: str):
     """Regenerate after an intentional packages.yaml change: UPDATE_GOLDEN=1 uv run pytest tests/test_packages.py"""
-    got = "\n".join(render_lines(renderer, source=REPO_ROOT, machine=machine)) + "\n"
+    got = "".join(f"{ln}\n" for ln in render_lines(renderer, source=REPO_ROOT, machine=machine))
     path = GOLDEN / machine / f"{renderer}.txt"
     if os.environ.get("UPDATE_GOLDEN"):
         path.parent.mkdir(parents=True, exist_ok=True)

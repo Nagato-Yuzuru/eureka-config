@@ -26,7 +26,7 @@ function load_completion_from_cache() {
     # `command -v`, not `mise which`: some of these are system packages (uv on linux)
     if command -v ${cmd} &>/dev/null && ( [[ ! -f "$cache_file" ]] || [[ "$(command -v ${cmd})" -nt "$cache_file" ]] ); then
         echo "Generating completion for $cmd..."
-        
+
         case "$cmd" in
             kubectl) kubectl completion zsh > "$cache_file" ;;
             k9s)     k9s completion zsh > "$cache_file" ;;

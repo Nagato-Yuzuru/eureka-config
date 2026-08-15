@@ -1,7 +1,30 @@
-# Local hooks only (run with prek); tools come from the repo's uv dev env so
-# versions match `uv run` in the shell. Never deployed: chezmoi skips source-dir
-# dotfiles that are not .chezmoi*.
+# Run with prek. Never deployed: chezmoi skips source-dir dotfiles that are
+# not .chezmoi*.
 repos:
+  # prek's built-in reimplementations of pre-commit-hooks — offline, no setup.
+  # Not enabled on purpose: check-shebang-scripts-are-executable (chezmoi's
+  # run_/executable_ prefixes make scripts executable at apply time, not in
+  # the source tree), no-commit-to-branch (this repo commits to main).
+  - repo: builtin
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: fix-byte-order-marker
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+        exclude: ^dot_claude/modify_settings\.json$ # a Python script despite the name
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-symlinks
+      - id: destroyed-symlinks
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  # Local tools from the repo's uv dev env, so versions match `uv run` in the shell.
   - repo: local
     hooks:
       - id: ruff-check

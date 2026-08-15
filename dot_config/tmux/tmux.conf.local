@@ -82,7 +82,7 @@ bind S setw synchronize-panes \; display-message "Sync panes: #{?pane_synchroniz
 # if you don't want Oh my tmux! to alter a binding or a setting, use #!important
 # bind c new-window -c '#{pane_current_path}' #!important
 
-bind C-c new-session -c "$HOME" 
+bind C-c new-session -c "$HOME"
 
 # pane mark / unmark：恢复 tmux 默认含义（原来 `m` 被改成 mouse toggle，已去掉；
 # 临时开关 mouse 用 `prefix :` set mouse on/off 兜底）。
@@ -214,7 +214,7 @@ tmux_conf_theme_status_left_attr="bold"
 
 # --- 右侧状态栏 (Nerd Font 数值仪表盘) ---
 # 结构： Prefix | CPU | RAM | Swap | Battery | User | Host
-# 特性： 
+# 特性：
 # 1. 动态颜色：CPU/RAM/Swap 正常显示蓝色(#7aa2f7)，高负载变红(#f7768e)
 # 2. 区分用户：User 使用洋红背景(Magenta)，Host 使用蓝色背景(Blue)
 
@@ -457,4 +457,3 @@ bind -N "Popup prompt" ';' command-prompt -p "popup>" \
 # "$@"
 # # /!\ do not remove the previous line
 # #     do not write below this line
-

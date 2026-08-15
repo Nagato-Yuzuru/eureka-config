@@ -31,7 +31,7 @@ select = [
   "B",    # flake8-bugbear
   "SIM",  # flake8-simplify
   "C4",   # flake8-comprehensions
-  "RUF",  # ruff 
+  "RUF",  # ruff
   "A",    # flake8-builtins
   "T20",  # flake8-print
   "PIE",  # flake8-pie

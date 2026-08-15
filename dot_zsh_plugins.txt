@@ -17,4 +17,3 @@ zsh-users/zsh-syntax-highlighting
 
 ohmyzsh/ohmyzsh path:lib/key-bindings.zsh
 zsh-users/zsh-history-substring-search
-
