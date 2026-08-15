@@ -1,0 +1,19 @@
+# Upstream repos cloned under $XDG_DATA_HOME (see .chezmoidata/xdg.yaml).
+# Tracks upstream default branch; pulled at most once per refreshPeriod
+# (force with `chezmoi apply --refresh-externals`).
+
+# oh-my-tmux — symlinked into place by dot_config/tmux/symlink_tmux.conf.tmpl
+["{{ .xdg.dataHome }}/oh-my-tmux"]
+    type = "git-repo"
+    url = "git@github.com:gpakosz/.tmux.git"
+    refreshPeriod = "168h"
+
+{{ if eq .chezmoi.os "linux" -}}
+# antidote — sourced by .zshrc; macOS gets it from brew. Not
+# $XDG_DATA_HOME/antidote: antidote itself writes snapshots/ there (observed
+# on the lab VM), even though ANTIDOTE_HOME points at the cache dir.
+["{{ .xdg.dataHome }}/zsh/antidote"]
+    type = "git-repo"
+    url = "git@github.com:mattmc3/antidote.git"
+    refreshPeriod = "168h"
+{{ end -}}

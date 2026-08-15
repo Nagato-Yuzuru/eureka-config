@@ -1,3 +1,9 @@
 # Retired by the claude-managed.d migration: the single fragment became
 # per-feature fragments in ~/.claude/claude-managed.d/.
 .claude/claude-managed.json
+
+{{ if eq .chezmoi.os "linux" -}}
+# Retired: linux antidote moved from ~/.antidote to $XDG_DATA_HOME/zsh/antidote
+# (git-repo external). macOS never had it here.
+.antidote
+{{ end -}}

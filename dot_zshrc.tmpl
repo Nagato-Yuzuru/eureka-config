@@ -37,7 +37,7 @@ zsh_plugins_zsh=${ZDOTDIR:-$HOME}/.zsh_plugins.zsh
 {{- if eq .chezmoi.os "darwin" }}
 source "${brew_prefix}/opt/antidote/share/antidote/antidote.zsh"
 {{- else if eq .chezmoi.os "linux" }}
-source "${ZDOTDIR:-${HOME}}/.antidote/antidote.zsh"  # see run_once_before_install-antidote.sh
+source "${XDG_DATA_HOME}/zsh/antidote/antidote.zsh"  # cloned by .chezmoiexternal.toml.tmpl
 {{- end }}
 
 
@@ -109,7 +109,7 @@ eval "$(starship init zsh)"
 # 1password
 
 export SSH_AUTH_SOCK="${HOME}/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
-[ -f "$HOME/.config/op/plugins.sh" ] && source "${HOME}/.config/op/plugins.sh"
+[ -f "${XDG_CONFIG_HOME}/op/plugins.sh" ] && source "${XDG_CONFIG_HOME}/op/plugins.sh"
 {{- end }}
 
 # fzf
