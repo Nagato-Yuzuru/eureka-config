@@ -8,6 +8,14 @@ README.md
 .git/
 .config/wezterm/wezterm-gui-sock-*
 
+# macOS-only: GUI apps and mac-side services; the Brewfile is empty off-darwin
+{{ if ne .chezmoi.os "darwin" -}}
+.Brewfile
+.config/ghostty
+.config/wezterm
+.config/1Password
+{{ end -}}
+
 # Repo-only: pytest suite for modify_/run_ scripts, never deployed
 tests/
 docs/

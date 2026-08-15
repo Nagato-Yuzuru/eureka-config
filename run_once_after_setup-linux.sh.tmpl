@@ -1,0 +1,28 @@
+{{ if eq .chezmoi.os "linux" -}}
+#!/bin/bash
+set -euo pipefail
+
+user="${USER:-$(id -un)}"
+
+# Login shell -> zsh (Fedora defaults to bash)
+if zsh_path="$(command -v zsh)"; then
+    if [ "$(getent passwd "$user" | cut -d: -f7)" != "$zsh_path" ]; then
+        echo "Setting login shell to $zsh_path..."
+        sudo usermod -s "$zsh_path" "$user"
+    fi
+else
+    echo "zsh not installed; leaving login shell unchanged." >&2
+fi
+
+# Wire the chezmoi-managed git config into ~/.gitconfig; on macOS this
+# include was set up by hand long ago, here it is part of bootstrap.
+# include.path is multi-valued: add ours, never replace others. The literal
+# `~` is intended — git expands it itself, keeping ~/.gitconfig portable.
+# shellcheck disable=SC2088
+if ! git config --global --get-all include.path 2>/dev/null | grep -qxF '~/.gitconfig_managed'; then
+    git config --global --add include.path "~/.gitconfig_managed"
+fi
+
+git config --global user.name >/dev/null 2>&1 || git config --global user.name "Nagato Yuzuru"
+git config --global user.email >/dev/null 2>&1 || git config --global user.email "nagato@yuzuru.me"
+{{ end -}}
