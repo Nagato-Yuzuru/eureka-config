@@ -10,6 +10,7 @@ dev = [
     "pytest>=8",
     "ty",
     "ruff",
+    "yamllint>=1.38.0",
 ]
 
 [tool.ruff]

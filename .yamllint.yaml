@@ -1,0 +1,12 @@
+# Only rules a formatter cannot see. oxfmt owns layout, so a rule that fires on its
+# own output stays off; check a new rule against that output before enabling it.
+rules:
+  # A repeated key or anchor is not a parse error: the later one silently wins.
+  key-duplicates: { forbid-duplicated-merge-keys: true }
+  anchors: { forbid-duplicated-anchors: true }
+  empty-values: enable
+  # `0755` is 493 to a YAML 1.1 parser, the string "0755" to a 1.2 one.
+  octal-values: enable
+  # Same trap for `yes`/`on` as values. Keys are exempt: `on:` is packages.yaml's
+  # own key, and chezmoi's Go parser keeps it a string.
+  truthy: { check-keys: false }

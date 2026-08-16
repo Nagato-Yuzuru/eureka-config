@@ -47,6 +47,20 @@ repos:
         language: system
         files: \.sh$
 
+      # Scoped to the files that already conform; the rest of the tree (skills
+      # markdown, vendored configs) has never been oxfmt-formatted.
+      - id: oxfmt
+        name: oxfmt
+        entry: oxfmt --check
+        language: system
+        files: ^(\.chezmoidata/.*\.ya?ml|\.pre-commit-config\.yaml|\.yamllint\.yaml)$
+
+      - id: yamllint
+        name: yamllint
+        entry: uv run yamllint --strict
+        language: system
+        files: \.ya?ml$
+
       - id: pytest
         name: pytest
         entry: uv run pytest -q
