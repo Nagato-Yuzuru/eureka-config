@@ -19,33 +19,87 @@ mkdir -p "${COMP_DIR}"
 
 echo "Generating completions into $COMP_DIR..."
 
-function load_completion_from_cache() {
+function generate_completion() {
     local cmd="$1"
-    local cache_file="${COMP_DIR}/_${cmd}"
+    local out="${COMP_DIR}/_${cmd}"
 
-    # `command -v`, not `mise which`: some of these are system packages (uv on linux)
-    if command -v ${cmd} &>/dev/null && ( [[ ! -f "$cache_file" ]] || [[ "$(command -v ${cmd})" -nt "$cache_file" ]] ); then
+    # `command -v`, not `mise which`: some of these are system packages (uv on linux).
+    # Always regenerate: the output is a pure function of the installed binary and
+    # the recipe below, and this runs by hand after upgrades — no cache to go stale.
+    if command -v "${cmd}" &>/dev/null; then
         echo "Generating completion for $cmd..."
 
         case "$cmd" in
-            kubectl) kubectl completion zsh > "$cache_file" ;;
-            k9s)     k9s completion zsh > "$cache_file" ;;
-            uv)      uv generate-shell-completion zsh > "${cache_file}" ;;
-            buf)     buf completion zsh > "$cache_file" ;;
+            kubectl)   kubectl completion zsh > "$out" ;;
+            k9s)       k9s completion zsh > "$out" ;;
+            uv)        uv generate-shell-completion zsh > "$out" ;;
+            buf)       buf completion zsh > "$out" ;;
+            deno)      deno completions zsh > "$out" ;;
+            pnpm)      pnpm completion zsh > "$out" ;;
+            just)      just --completions zsh > "$out" ;;
+            act)       act completion zsh > "$out" ;;
+            trivy)     trivy completion zsh > "$out" ;;
+            hugo)      hugo completion zsh > "$out" ;;
+            wrangler)  wrangler complete zsh > "$out" ;;
+            vacuum)    vacuum completion zsh > "$out" ;;
+            chezmoi)   chezmoi completion zsh > "$out" ;;
+            rustup)    rustup completions zsh rustup > "$out" ;;
+            cargo)
+                # cargo's native engine (nightly-only, rust-lang/cargo#14520) is dynamic:
+                # completes -p/--bin/--features from the workspace. Its script is meant
+                # to be `source`d, so wrap it in a self-invoking stub (same shape as
+                # `just --completions zsh`). Without a nightly toolchain fall back to
+                # the static _cargo shipped with the toolchain.
+                if rustup toolchain list | grep -q '^nightly'; then
+                    cat > "$out" <<'ZSH'
+#compdef cargo
+source <(CARGO_COMPLETE=zsh cargo +nightly)
+if [ "$funcstack[1]" = "_cargo" ]; then
+  _clap_dynamic_completer_cargo "$@"
+fi
+ZSH
+                else
+                    rustup completions zsh cargo > "$out"
+                fi ;;
+            ruff)      ruff generate-shell-completion zsh > "$out" ;;
+            ty)        ty generate-shell-completion zsh > "$out" ;;
+            op)        op completion zsh > "$out" ;;
+            tailscale) tailscale completion zsh > "$out" ;;
+            *) echo "refresh-completions: no generator for $cmd" >&2; exit 1 ;;
         esac
     fi
 
 }
 
-# 按需加载
+# Tools whose zsh completion nobody else provides: mise-installed, uv-tool-installed,
+# or vendor installers. Not here on purpose: anything Homebrew ships in
+# $(brew --prefix)/share/zsh/site-functions (mise, uv, ast-grep, gcx, ...) and anything
+# zsh-users/zsh-completions covers (go, node, tsc, ...).
 cmds=(
     kubectl
     k9s
+{{- if eq .chezmoi.os "linux" }}
     uv
+{{- end }}
     buf
+    deno
+    pnpm
+    just
+    act
+    trivy
+    hugo
+    wrangler
+    vacuum
+    chezmoi
+    rustup
+    cargo
+    ruff
+    ty
+    op
+    tailscale
     )
 
 for cmd in "${cmds[@]}"; do
-    load_completion_from_cache "$cmd"
+    generate_completion "$cmd"
 done
 """

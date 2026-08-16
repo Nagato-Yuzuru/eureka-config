@@ -7,3 +7,16 @@
 # (git-repo external). macOS never had it here.
 .antidote
 {{ end -}}
+
+{{ if eq .chezmoi.os "darwin" -}}
+# Retired: hand-copied completions for tools Homebrew already ships (and keeps
+# current) in $(brew --prefix)/share/zsh/site-functions; the copies here came
+# earlier on fpath and shadowed them with stale versions.
+.local/share/zsh/site-functions/_ast-grep
+.local/share/zsh/site-functions/_gcx
+.local/share/zsh/site-functions/_mise
+.local/share/zsh/site-functions/_uv
+# Retired: pre-`mise run refresh-completions` location; _kubectl is generated
+# into .local/share/zsh/site-functions and ~/.zsh/completions left fpath.
+.zsh/completions/_kubectl
+{{ end -}}

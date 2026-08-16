@@ -18,8 +18,8 @@
 #             This is the only per-machine mechanism — any field can differ per
 #             machine this way (backend, name, version).
 #
-# Not on linux on purpose (lab VM is a curated subset): git-cliff, carapace,
-# ast-grep, duckdb, antidote (git-repo external, see .chezmoiexternal.toml.tmpl).
+# Not on linux on purpose (lab VM is a curated subset): git-cliff, ast-grep,
+# duckdb, antidote (git-repo external, see .chezmoiexternal.toml.tmpl).
 
 packages:
   # -- shell & core -----------------------------------------------------------
@@ -51,7 +51,6 @@ packages:
   gh: { on: [darwin, linux] }
   shellcheck: { on: [darwin, linux], dnf: ShellCheck }
   git-cliff: { on: [darwin] }
-  carapace: { on: [darwin] }
   ast-grep: { on: [darwin] }
   duckdb: { on: [darwin] }
   cowsay: { on: [darwin, linux] }

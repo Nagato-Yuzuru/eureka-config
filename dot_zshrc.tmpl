@@ -47,10 +47,11 @@ if [[ ! -s $zsh_plugins_zsh || ! $zsh_plugins_zsh -nt $zsh_plugins_txt || $#anti
 fi
 unset antidote_clones
 
+# zsh-completions is `kind:clone` in .zsh_plugins.txt: antidote only clones it;
+# it goes on fpath here, before compinit, so its #compdef lines get registered.
 fpath=(
-    "${HOME}/.zsh/completions"
     "${XDG_DATA_HOME}/zsh/site-functions"
-    $(antidote path)
+    "$(antidote path zsh-users/zsh-completions)/src"
 {{- if eq .chezmoi.os "darwin" }}
     "$(brew --prefix)/share/zsh/site-functions"
 {{- end }}
@@ -73,17 +74,10 @@ autoload bashcompinit && bashcompinit
 
 source $zsh_plugins_zsh
 
-if command -v carapace &>/dev/null; then
-    # NOTE: do NOT add 'zsh' here. carapace is already the zsh completer for
-    # every command, so bridging zsh->zsh is circular: carapace's ~1578
-    # "bridge to zsh" commands (uv, etc.) resolve back to _carapace_completer,
-    # which the bridge subshell can't invoke -> "command not found:
-    # _carapace_completer". Omitting zsh lets those commands keep their own
-    # native completions (e.g. _uv).
-    export CARAPACE_BRIDGES='bash,inshellisense'
-    zstyle ':completion:*' format-explanation '  %e'
-    source <(carapace _carapace)
-fi
+# terraform/tofu only ship bash-protocol completion (`complete -C <binary>`);
+# bashcompinit (above) runs it under zsh.
+command -v terraform &>/dev/null && complete -o nospace -C "$(command -v terraform)" terraform
+command -v tofu &>/dev/null && complete -o nospace -C "$(command -v tofu)" tofu
 
 # antidote load
 

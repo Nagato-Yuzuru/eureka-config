@@ -1,7 +1,8 @@
 ohmyzsh/ohmyzsh path:lib/history.zsh
 ohmyzsh/ohmyzsh path:lib/directories.zsh
 
-zsh-users/zsh-completions kind:fpath
+# clone only: .zshrc puts <clone>/src on fpath itself, before compinit
+zsh-users/zsh-completions kind:clone
 
 ohmyzsh/ohmyzsh path:lib/completion.zsh
 
