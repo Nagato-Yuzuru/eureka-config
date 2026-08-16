@@ -8,6 +8,7 @@
 #   via       system (default: brew on darwin, dnf on linux) | mise
 #             Rule: one global version -> system; multi-version -> mise.
 #   version   mise version spec (default latest)
+#   components list of extra components mise installs with the tool
 #   brew, dnf, mise   name on that backend when it differs from the key
 #   cask      macOS cask (brew backend, cask flavour)
 #   copr      Fedora COPR repo (owner/project) that ships the package
@@ -79,7 +80,9 @@ packages:
 
   # -- dev toolchains (mise) ----------------------------------------------------
   go: { on: [darwin, linux], via: mise }
-  rust: { on: [darwin, linux], via: mise, version: stable }
+  # components: rustup's default profile ships neither, and both are what the
+  # editor needs (rust-src for std completion).
+  rust: { on: [darwin, linux], via: mise, version: stable, components: [rust-analyzer, rust-src] }
   deno: { on: [darwin, linux], via: mise }
   node: { on: [darwin, linux], via: mise, version: lts }
   pnpm: { on: [darwin, linux], via: mise, overrides: [{ $when: darwin/amd64, mise: "npm:pnpm" }] }

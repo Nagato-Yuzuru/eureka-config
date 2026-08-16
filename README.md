@@ -33,7 +33,7 @@ goes and how it gets there.
 ```yaml
 fd:      { on: [darwin, linux], dnf: fd-find }
 ghostty: { on: [darwin], cask: ghostty }
-rust:    { on: [darwin, linux], via: mise, version: stable }
+rust:    { on: [darwin, linux], via: mise, version: stable, components: [rust-analyzer] }
 pnpm:    { on: [darwin, linux], via: mise, overrides: [{ $when: darwin/amd64, mise: "npm:pnpm" }] }
 ```
 
@@ -45,6 +45,10 @@ pnpm:    { on: [darwin, linux], via: mise, overrides: [{ $when: darwin/amd64, mi
   scripts need it before mise has installed anything.
 - `brew` / `dnf` / `mise` override the name on that backend when it differs
   from the key. `copr` and `repofile` add the Fedora repo the package needs.
+- `version` and `components` are mise-only: the version spec, and the extra
+  components installed alongside the tool. rust-analyzer and rust-src ride on
+  the rust toolchain that way — rustup's default profile ships neither, so
+  without the line a new machine gets no language server.
 - `overrides` is the only per-machine mechanism. Each entry whose `$when` tag
   matches this machine is merged over the line, in order. Any field can differ
   per machine that way; today only pnpm does.

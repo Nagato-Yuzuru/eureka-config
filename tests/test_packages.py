@@ -111,6 +111,44 @@ RENDER_CASES = [
         {("mise-tools", "darwin-arm64"): ['"rust" = "stable"']},
     ),
     RenderCase(
+        "components-render-an-inline-table",
+        {
+            "rust": {
+                "on": ["darwin"],
+                "via": "mise",
+                "version": "stable",
+                "components": ["rust-analyzer", "rust-src"],
+            }
+        },
+        {
+            ("mise-tools", "darwin-arm64"): [
+                '"rust" = { version = "stable", components = ["rust-analyzer","rust-src"] }'
+            ]
+        },
+    ),
+    RenderCase(
+        "components-without-a-version-still-get-one",
+        {"foo": {"on": ["darwin"], "via": "mise", "components": ["only"]}},
+        {("mise-tools", "darwin-arm64"): ['"foo" = { version = "latest", components = ["only"] }']},
+    ),
+    RenderCase(
+        "override-replaces-components-wholesale",
+        {
+            "foo": {
+                "on": ["darwin", "linux"],
+                "via": "mise",
+                "components": ["a", "b"],
+                "overrides": [{"$when": "linux", "components": ["c"]}],
+            }
+        },
+        {
+            ("mise-tools", "darwin-arm64"): [
+                '"foo" = { version = "latest", components = ["a","b"] }'
+            ],
+            ("mise-tools", "linux-arm64"): ['"foo" = { version = "latest", components = ["c"] }'],
+        },
+    ),
+    RenderCase(
         "name-defaults-to-key-and-per-backend-override-wins",
         {
             "fd": {"on": ["darwin", "linux"], "dnf": "fd-find"},
@@ -350,6 +388,26 @@ REJECTS = [
         {"foo": {"on": ["darwin"], "overrides": [{"$when": "linux", "version": 1}]}},
         "packages.foo.overrides[linux].version: must be a string",
     ),
+    (
+        "components-not-a-list",
+        {"foo": {"on": ["darwin"], "components": "rust-src"}},
+        "packages.foo.components: must be a non-empty list",
+    ),
+    (
+        "components-empty",
+        {"foo": {"on": ["darwin"], "components": []}},
+        "packages.foo.components: must be a non-empty list",
+    ),
+    (
+        "components-entry-not-a-string",
+        {"foo": {"on": ["darwin"], "components": [1]}},
+        "packages.foo.components: entries must be strings",
+    ),
+    (
+        "override-components-not-a-list",
+        {"foo": {"on": ["darwin"], "overrides": [{"$when": "linux", "components": "rust-src"}]}},
+        "packages.foo.overrides[linux].components: must be a non-empty list",
+    ),
 ]
 
 
@@ -396,6 +454,18 @@ INVARIANTS = [
         "darwin-arm64",
         contains=['"pnpm" = "latest"'],
         excludes=['"npm:pnpm" = "latest"'],
+    ),
+    Invariant(
+        "rust-toolchain-ships-the-editor-components-on-mac",
+        "mise-tools",
+        "darwin-arm64",
+        contains=['"rust" = { version = "stable", components = ["rust-analyzer","rust-src"] }'],
+    ),
+    Invariant(
+        "rust-toolchain-ships-the-editor-components-on-linux",
+        "mise-tools",
+        "linux-arm64",
+        contains=['"rust" = { version = "stable", components = ["rust-analyzer","rust-src"] }'],
     ),
     Invariant("uv-not-in-mise-on-mac", "mise-tools", "darwin-arm64", excludes=['"uv" = "latest"']),
     Invariant("uv-not-in-mise-on-linux", "mise-tools", "linux-arm64", excludes=['"uv" = "latest"']),
