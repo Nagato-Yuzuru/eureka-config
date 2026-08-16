@@ -113,3 +113,19 @@ packages:
   oxlint: { on: [darwin, linux], via: mise }
   oxfmt: { on: [darwin, linux], via: mise }
   hcloud: { on: [darwin, linux], via: mise }
+
+  # -- eBPF lab, linux only (system) --------------------------------------------
+  # kernel-devel never matches OrbStack's kernel, so everything here takes the
+  # BTF/CO-RE path. clang because libbpf's headers and `bpftool gen skeleton` are
+  # written against clang's BPF backend; gcc's is a separate cross compiler.
+  clang: { on: [linux] }
+  llvm: { on: [linux] } # llvm-strip -g, the DWARF strip every libbpf build ends with
+  libbpf-devel: { on: [linux] }
+  bpftool: { on: [linux] } # vmlinux.h, skeleton codegen, `feature probe`
+  bpftrace: { on: [linux] }
+  pahole: { on: [linux], dnf: dwarves }
+  elfutils-libelf-devel: { on: [linux] } # libbpf links against libelf and zlib
+  zlib-devel: { on: [linux], dnf: zlib-ng-compat-devel } # Fedora 44 has no zlib-devel
+  kernel-headers: { on: [linux] } # UAPI linux/bpf.h; need not match the running kernel
+  strace: { on: [linux] } # loaders fail in userspace, before the verifier sees anything
+  gdb: { on: [linux] }

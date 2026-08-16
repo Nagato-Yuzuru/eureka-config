@@ -85,16 +85,15 @@ the VM without committing:
 orb -m linux-lab chezmoi apply --source /mnt/mac/Users/yuzuru/.local/share/chezmoi
 ```
 
-The VM runs OrbStack's kernel, not Fedora's, so `kernel-devel` never matches;
-eBPF work goes through BTF/CO-RE (bpftrace, libbpf, bpftool). That toolchain
-belongs to the study project, not to these dotfiles.
+The VM runs OrbStack's kernel, not Fedora's, so `kernel-devel` never matches and
+the eBPF section of `packages.yaml` takes the BTF/CO-RE path throughout.
 
 ## Development
 
 ```sh
 uv run pytest                                          # everything, ~8 s
 UPDATE_GOLDEN=1 uv run pytest tests/test_packages.py   # after an intentional packages.yaml change
-prek install                                           # pre-commit hooks: format, whitespace, yaml/toml/json, shellcheck, pytest
+prek install                                           # the git hooks in .pre-commit-config.yaml
 ```
 
 To see what another machine would get without being on it:
@@ -104,7 +103,7 @@ printf '{{ includeTemplate "mise-tools" . }}' |
   chezmoi execute-template --override-data '{"chezmoi": {"os": "darwin", "arch": "amd64"}}'
 ```
 
-## Claude Code managed settings — the fragment protocol
+## Claude Code managed settings: the fragment protocol
 
 `~/.claude/settings.json` is co-owned: chezmoi manages a declared subset of it,
 everything else belongs to Claude Code and the user. The subset is declared as
@@ -130,7 +129,7 @@ dot_claude/exact_claude-managed.d/<feature>.json.tmpl   source, one file per fea
 A fragment is a JSON object shaped exactly like the `settings.json` subset it
 owns, plus reserved `$`-prefixed top-level keys:
 
-- `$merge` — `{"dotted.path": strategy}` declarations for the paths this file
+- `$merge` declares `{"dotted.path": strategy}` for the paths this file
   owns (`*` matches exactly one segment). Ownership semantics are **declared,
   never inferred from data shape**:
 
@@ -142,7 +141,7 @@ owns, plus reserved `$`-prefixed top-level keys:
 
   Objects without a declaration recurse per key.
 
-- `$legacyHooks` — retired hook basenames to purge (union across fragments).
+- `$legacyHooks` lists retired hook basenames to purge (union across fragments).
 
 ### Invariants
 
@@ -151,12 +150,12 @@ owns, plus reserved `$`-prefixed top-level keys:
   settings on the same apply, as long as it still equals the base.
 - **Fail-safe against the outside world.** A foreign edit to a value we own is
   a conflict: reported on stderr, `chezmoi apply` exits 1, settings untouched.
-  A foreign edit to a value we _retired_ is kept (warning only) — ownership
+  A foreign edit to a value we _retired_ is kept with a warning. Ownership
   was withdrawn, so it never blocks. Nothing foreign is ever silently
   overwritten; without a base the engine errs toward conflicts.
 - **Fragments must be self-consistent.** Cross-fragment value collisions,
   strategy contradictions (overlapping or nested patterns), duplicate claim
-  keys and ensure elements, and unknown `$` keys are compose errors — all
+  keys and ensure elements, and unknown `$` keys are compose errors, all
   reported at once, apply refused. They surface on `chezmoi apply`: the filter
   composes the _deployed_ fragments, so a contradiction in freshly edited
   sources shows up when apply deploys them and then refuses the settings
