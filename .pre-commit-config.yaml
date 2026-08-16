@@ -51,7 +51,7 @@ repos:
       # markdown, vendored configs) has never been oxfmt-formatted.
       - id: oxfmt
         name: oxfmt
-        entry: oxfmt --check
+        entry: oxfmt --write
         language: system
         files: ^(\.chezmoidata/.*\.ya?ml|\.pre-commit-config\.yaml|\.yamllint\.yaml)$
 
