@@ -23,8 +23,6 @@
 
 set -euo pipefail
 
-GRANTS="$HOME/.claude/hooks/path-gate-grants.json"
-SESSIONS_DIR="$HOME/.claude/hooks/path-gate-sessions"
 CWD="$PWD"
 
 # --- path helpers -----------------------------------------------------------
@@ -73,16 +71,11 @@ normalize_raw() {
     if ((${#out[@]} == 0)); then echo /; else printf '/%s' "${out[@]}"; echo; fi
 }
 
-# macOS: /tmp and /var are symlinks into /private — compare in canonical form.
-canon() {
-    case "$1" in
-        /tmp | /tmp/*) echo "/private$1" ;;
-        /var | /var/*) echo "/private$1" ;;
-        *) echo "$1" ;;
-    esac
-}
-
-lex() { canon "$(normalize "$1")"; }
+# Lexical spelling, no symlink following. Only the tool-owned-store check uses
+# it, to catch a path by name as well as by target. Everything a decision
+# compares against a resolved path goes through real(), so the two spellings
+# never have to be reconciled by hand.
+lex() { normalize "$1"; }
 
 # under PATH ROOT — true if PATH is ROOT or inside it
 under() {
@@ -111,7 +104,7 @@ resolve() {
     done
     if [[ -e "$p" ]]; then
         if t=$(/bin/realpath "$p" 2> /dev/null); then
-            canon "$t"
+            echo "$t"
             return
         fi
     fi
@@ -122,13 +115,26 @@ resolve() {
         [[ -z "$cur" ]] && cur=/
     done
     if [[ "$cur" == "/" ]]; then
-        canon "$(normalize "$p")"
+        normalize "$p"
         return
     fi
     t=$(/bin/realpath "$cur" 2> /dev/null || echo "$cur")
     [[ "$t" == "/" ]] && t=""
-    canon "$(normalize "$t$suffix")"
+    normalize "$t$suffix"
 }
+
+# The space every allow/deny comparison happens in.
+real() { resolve "$(normalize_raw "$1")"; }
+
+# Roots, resolved. $HOME itself can sit behind a symlink (on macOS /tmp and /var
+# are symlinks into /private), so ask the filesystem instead of hardcoding which
+# platform redirects what. On a system that redirects nothing this is identity.
+HOME_R=$(real "$HOME")
+TMP_R=$(real /tmp)
+GRANTS="$HOME_R/.claude/hooks/path-gate-grants.json"
+SESSIONS_DIR="$HOME_R/.claude/hooks/path-gate-sessions"
+GRANTS_L=$(lex "$HOME/.claude/hooks/path-gate-grants.json")
+SESSIONS_DIR_L=$(lex "$HOME/.claude/hooks/path-gate-sessions")
 
 # Claude Code's project-dir slug: every non-[A-Za-z0-9] character -> '-'.
 # ASCII-only regardless of locale (LC_ALL=C — [[:alnum:]] would keep non-ASCII
@@ -195,7 +201,7 @@ session_covers() { # TARGET NEEDED SID
 allowed() {
     local L="$1" R="$2" needed="$3" project="$4" sid="$5" store d
     # step 0: tool-owned stores, checked against BOTH spellings
-    for store in "$GRANTS" "$SESSIONS_DIR"; do
+    for store in "$GRANTS" "$SESSIONS_DIR" "$GRANTS_L" "$SESSIONS_DIR_L"; do
         if under "$L" "$store" || under "$R" "$store"; then
             [[ "$needed" == w ]] && return 2
             grant_covers "$R" "$needed" "$project" && return 0
@@ -206,18 +212,18 @@ allowed() {
     under "$R" "$project" && return 0
     while IFS= read -r d; do
         [[ -n "$d" ]] || continue
-        under "$R" "$(lex "$d")" && return 0
+        under "$R" "$(real "$d")" && return 0
     done < <(addl_dirs "$project")
-    under "$R" /private/tmp && return 0
+    under "$R" "$TMP_R" && return 0
     local slug
     slug=$(slug_of "$project")
-    under "$R" "$HOME/.claude/projects/$slug/memory" && return 0
+    under "$R" "$HOME_R/.claude/projects/$slug/memory" && return 0
     if [[ "$needed" == r ]]; then
-        under "$R" "$HOME/.claude/projects/$slug" && return 0
+        under "$R" "$HOME_R/.claude/projects/$slug" && return 0
         for d in plugins skills agents commands rules output-styles; do
-            under "$R" "$HOME/.claude/$d" && return 0
+            under "$R" "$HOME_R/.claude/$d" && return 0
         done
-        [[ "$R" == "$HOME/.claude/CLAUDE.md" || "$R" == "$HOME/.claude/keybindings.json" ]] && return 0
+        [[ "$R" == "$HOME_R/.claude/CLAUDE.md" || "$R" == "$HOME_R/.claude/keybindings.json" ]] && return 0
     fi
     session_covers "$R" "$needed" "$sid" && return 0
     grant_covers "$R" "$needed" "$project" && return 0
@@ -290,9 +296,9 @@ hook_mode() {
     fi
     CWD="$cwd"
     local project L R rc=0
-    project=$(lex "${CLAUDE_PROJECT_DIR:-${cwd:-/nonexistent}}")
+    project=$(real "${CLAUDE_PROJECT_DIR:-${cwd:-/nonexistent}}")
     L=$(lex "$fpath")
-    R=$(resolve "$(normalize_raw "$fpath")")
+    R=$(real "$fpath")
     allowed "$L" "$R" "$needed" "$project" "$sid" || rc=$?
     case "$rc" in
         0)
@@ -363,9 +369,9 @@ cmd_record() {
 
     CWD="$cwd"
     local project L R rc=0
-    project=$(lex "${CLAUDE_PROJECT_DIR:-${cwd:-/nonexistent}}")
+    project=$(real "${CLAUDE_PROJECT_DIR:-${cwd:-/nonexistent}}")
     L=$(lex "$fpath")
-    R=$(resolve "$(normalize_raw "$fpath")")
+    R=$(real "$fpath")
 
     jq -e --arg p "$R" --arg m "$needed" \
         '.pending[]? | select(.path == $p and .mode == $m)' "$f" > /dev/null 2>&1 || exit 0
@@ -435,8 +441,8 @@ cmd_grant() {
     [[ -n "$path" && -n "$mode" ]] || die "usage: grant <path> <r|w|rw> [--global | --project DIR] [--ttl 2h] [--note TEXT]"
     [[ "$mode" =~ ^(r|w|rw)$ ]] || die "mode must be r, w, or rw"
 
-    path=$(lex "$path")
-    [[ "$scope" != "*" ]] && scope=$(lex "$scope")
+    path=$(real "$path")
+    [[ "$scope" != "*" ]] && scope=$(real "$scope")
 
     local expires=null
     [[ -n "$ttl" ]] && expires=$(jq -n --argjson ttl "$(ttl_to_seconds "$ttl")" '(now + $ttl)')
@@ -475,8 +481,8 @@ cmd_revoke() {
         shift
     done
     [[ -n "$path" ]] || die "usage: revoke <path> [--global | --project DIR]"
-    path=$(lex "$path")
-    [[ "$scope" != "*" ]] && scope=$(lex "$scope")
+    path=$(real "$path")
+    [[ "$scope" != "*" ]] && scope=$(real "$scope")
 
     [[ -f "$GRANTS" ]] || die "no grants file"
     local tmp before after
@@ -526,9 +532,9 @@ cmd_check() {
     done
     [[ -n "$path" && "$needed" =~ ^(r|w)$ ]] || die "usage: check <path> <r|w> [--project DIR] [--session SID]"
     local L R rc=0
-    project=$(lex "$project")
+    project=$(real "$project")
     L=$(lex "$path")
-    R=$(resolve "$(normalize_raw "$path")")
+    R=$(real "$path")
     allowed "$L" "$R" "$needed" "$project" "$sid" || rc=$?
     case "$rc" in
         0) echo "allow: $needed on $R (project $project)" ;;

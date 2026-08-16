@@ -325,3 +325,7 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 .venv/
+
+### Project
+# pytest sandbox for tests/test_path_gate.py (a root the path gate calls foreign)
+.pytest-sandbox/

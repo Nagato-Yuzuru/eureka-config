@@ -1,11 +1,16 @@
-"""path-gate v2 — drives the hook scripts as subprocesses with a fake $HOME.
+"""path-gate v2. Drives the hook scripts as subprocesses with a fake $HOME.
 
 The gate's decision chain is tested through the `check` verb (exit codes:
 0=allow, 1=ask, 2=deny). Hook mode (stdin JSON) and the record verb are
-tested in their own sections. pytest's tmp_path lives under
-/private/var/folders on macOS, which v2 deliberately does NOT allow — so
-fixture paths are "foreign" by default, and /private/tmp cases use an
-explicit tempfile dir there.
+tested in their own sections.
+
+Two roots carry the whole suite, and neither hardcodes a platform:
+
+- TMP_ROOT is the OS shared scratch the gate allows, spelled the way the
+  filesystem spells it. pytest's own tmp_path is NOT usable as a foreign path,
+  because it lands inside TMP_ROOT on Linux.
+- SANDBOX is a repo-relative root the gate must call foreign. test_sandbox_is_foreign
+  asserts that, so a platform where it stops holding fails once and legibly.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -25,23 +31,37 @@ GATE = REPO_ROOT / "dot_claude" / "hooks" / "executable_path-gate.sh"
 
 SID = "11111111-2222-3333-4444-555555555555"
 
+# The gate's only fixed allowlist root. realpath, never a literal: the kernel
+# spells it /private/tmp on macOS and /tmp on Linux.
+TMP_ROOT = Path(os.path.realpath("/tmp"))
+
+# Everything else the gate allows is derived from $HOME and --project, which the
+# fixtures own, so any root outside TMP_ROOT is foreign. The repo qualifies.
+SANDBOX = REPO_ROOT / ".pytest-sandbox"
+
 
 def slug_of(path: Path) -> str:
     return re.sub(r"[^A-Za-z0-9]", "-", str(path))
 
 
 @pytest.fixture()
-def home(tmp_path):
-    # realpath: macOS tmp dirs are /var/... symlinks; the gate canonicalizes,
-    # so the fixture must hand out canonical paths for equality asserts.
-    h = Path(os.path.realpath(tmp_path)) / "home"
+def sandbox():
+    SANDBOX.mkdir(exist_ok=True)
+    d = Path(tempfile.mkdtemp(dir=SANDBOX))
+    yield d
+    shutil.rmtree(d, ignore_errors=True)
+
+
+@pytest.fixture()
+def home(sandbox):
+    h = sandbox / "home"
     (h / ".claude" / "hooks").mkdir(parents=True)
     return h
 
 
 @pytest.fixture()
-def project(tmp_path):
-    p = Path(os.path.realpath(tmp_path)) / "proj"
+def project(sandbox):
+    p = sandbox / "proj"
     p.mkdir()
     return p
 
@@ -72,6 +92,12 @@ def cli(home, *args) -> subprocess.CompletedProcess:
 ALLOW, ASK, DENY = 0, 1, 2
 
 
+def test_sandbox_is_foreign(home, project, sandbox):
+    """Every foreign-path assertion below rests on this. If a platform ever puts
+    the repo inside an allowlist root, fail here once instead of everywhere."""
+    assert check(home, sandbox / "probe.txt", "r", project) == ASK
+
+
 # --- decision chain via check ------------------------------------------------
 
 
@@ -90,8 +116,8 @@ class TestWorkspace:
     def test_traversal_does_not_escape(self, home, project):
         assert check(home, project / ".." / "escape.txt", "r", project) == ASK
 
-    def test_additional_directories_from_user_settings(self, home, project, tmp_path):
-        extra = Path(os.path.realpath(tmp_path)) / "extra"
+    def test_additional_directories_from_user_settings(self, home, project, sandbox):
+        extra = sandbox / "extra"
         extra.mkdir()
         (home / ".claude" / "settings.json").write_text(
             json.dumps({"permissions": {"additionalDirectories": [str(extra)]}})
@@ -99,9 +125,9 @@ class TestWorkspace:
         assert check(home, extra / "f.txt", "r", project) == ALLOW
         assert check(home, extra / "f.txt", "w", project) == ALLOW
 
-    def test_additional_directories_from_project_and_local(self, home, project, tmp_path):
-        e1 = Path(os.path.realpath(tmp_path)) / "e1"
-        e2 = Path(os.path.realpath(tmp_path)) / "e2"
+    def test_additional_directories_from_project_and_local(self, home, project, sandbox):
+        e1 = sandbox / "e1"
+        e2 = sandbox / "e2"
         e1.mkdir()
         e2.mkdir()
         cfg = project / ".claude"
@@ -118,29 +144,21 @@ class TestWorkspace:
 
 class TestTmp:
     def test_private_tmp_allows_rw_even_foreign_and_old(self, home, project):
-        d = tempfile.mkdtemp(dir="/private/tmp")
+        d = tempfile.mkdtemp(dir=TMP_ROOT)
         f = Path(d) / "old.log"
         f.write_text("x")
         os.utime(f, (0, 0))  # ancient mtime — must not matter, no birthtime logic
         assert check(home, f, "r", project) == ALLOW
         assert check(home, f, "w", project) == ALLOW
 
-    def test_var_spelling_normalizes(self, home, project):
-        # /var/folders is gated; the /private prefix must not change the verdict
-        assert check(home, "/var/folders/zz/nope", "r", project) == ASK
-        assert check(home, "/private/var/folders/zz/nope", "r", project) == ASK
-
-    def test_tmp_spelling_normalizes(self, home, project):
-        d = tempfile.mkdtemp(dir="/private/tmp")
+    def test_tmp_symlink_spelling_still_allows(self, home, project):
+        d = tempfile.mkdtemp(dir=TMP_ROOT)
         f = Path(d) / "f.txt"
         f.write_text("x")
-        assert (
-            check(home, "/tmp/" + f.relative_to("/private/tmp").as_posix(), "r", project) == ALLOW
-        )
+        assert check(home, "/tmp/" + f.relative_to(TMP_ROOT).as_posix(), "r", project) == ALLOW
 
-    def test_var_folders_asks(self, home, project, tmp_path):
-        # tmp_path itself lives under /private/var/folders on macOS
-        foreign = Path(os.path.realpath(tmp_path)) / "foreign.txt"
+    def test_foreign_temp_dir_asks(self, home, project, sandbox):
+        foreign = sandbox / "foreign.txt"
         foreign.write_text("x")
         assert check(home, foreign, "r", project) == ASK
 
@@ -159,7 +177,7 @@ class TestSymlinks:
     def test_link_in_tmp_to_outside_secret_asks(self, home, project):
         secret = home / "secret.txt"
         secret.write_text("key")
-        d = tempfile.mkdtemp(dir="/private/tmp")
+        d = tempfile.mkdtemp(dir=TMP_ROOT)
         link = Path(d) / "grab"
         link.symlink_to(secret)
         assert check(home, link, "r", project) == ASK
@@ -167,13 +185,13 @@ class TestSymlinks:
     def test_link_resolving_into_workspace_allows(self, home, project):
         inside = project / "real.txt"
         inside.write_text("x")
-        d = tempfile.mkdtemp(dir="/private/tmp")
+        d = tempfile.mkdtemp(dir=TMP_ROOT)
         link = Path(d) / "into-proj"
         link.symlink_to(inside)
         assert check(home, link, "r", project) == ALLOW
 
-    def test_symlinked_parent_on_creation_path_judged_at_target(self, home, project):
-        outside = Path(os.path.realpath(tempfile.mkdtemp())) / "nest"
+    def test_symlinked_parent_on_creation_path_judged_at_target(self, home, project, sandbox):
+        outside = sandbox / "outside" / "nest"
         outside.mkdir(parents=True)
         linkdir = project / "linkdir"
         linkdir.symlink_to(outside)
@@ -186,8 +204,8 @@ class TestSymlinks:
         link.symlink_to(home / "planted.txt")
         assert check(home, link, "w", project) == ASK
 
-    def test_dotdot_through_symlink_does_not_escape(self, home, project):
-        outside = Path(os.path.realpath(tempfile.mkdtemp())) / "nest"
+    def test_dotdot_through_symlink_does_not_escape(self, home, project, sandbox):
+        outside = sandbox / "outside" / "nest"
         outside.mkdir(parents=True)
         (outside.parent / "grab_existing").write_text("secret")
         link = project / "mylink"
@@ -215,6 +233,18 @@ class TestStores:
         target = home / ".claude" / "hooks" / "path-gate-sessions" / f"{SID}.json"
         assert check(home, target, "w", project) == DENY
         assert check(home, home / ".claude" / "hooks" / "path-gate-sessions", "w", project) == DENY
+
+    def test_store_deny_survives_home_inside_an_allowlist_root(self, project):
+        """The deny compares $HOME-derived store paths against a resolved target.
+        With HOME under TMP_ROOT the two spellings used to diverge, and the deny
+        silently stopped matching while the whole tree read as allowed."""
+        h = Path(tempfile.mkdtemp(dir=TMP_ROOT)) / "home"
+        (h / ".claude" / "hooks").mkdir(parents=True)
+        try:
+            grants = h / ".claude" / "hooks" / "path-gate-grants.json"
+            assert check(h, grants, "w", project) == DENY
+        finally:
+            shutil.rmtree(h.parent, ignore_errors=True)
 
     def test_store_read_asks_not_allows(self, home):
         grants = home / ".claude" / "hooks" / "path-gate-grants.json"
@@ -260,12 +290,11 @@ class TestMemoryAndWhitelist:
     def test_excluded_claude_files_ask(self, home, project, name):
         assert check(home, home / ".claude" / name, "r", project) == ASK
 
-    def test_slug_matches_real_layout(self, home, project):
-        # pin the mapping against the observed rule: every non-alnum -> '-'
-        assert (
-            slug_of(Path("/Users/colas/.local/share/chezmoi"))
-            == "-Users-colas--local-share-chezmoi"
-        )
+    def test_slug_matches_real_layout(self):
+        """Every non-alnum -> '-'. The rule is undocumented upstream, so this is a
+        transcription of observed behaviour: re-check by eye against
+        `ls ~/.claude/projects` when a Claude Code release moves it."""
+        assert slug_of(Path("/home/u/.local/share/chezmoi")) == "-home-u--local-share-chezmoi"
 
 
 class TestGrantsCli:
@@ -275,8 +304,8 @@ class TestGrantsCli:
         assert check(home, home / "shared" / "x.txt", "r", project) == ALLOW
         assert check(home, home / "shared" / "x.txt", "w", project) == ASK
 
-    def test_grant_scope_other_project_does_not_match(self, home, project, tmp_path):
-        other = Path(os.path.realpath(tmp_path)) / "other"
+    def test_grant_scope_other_project_does_not_match(self, home, project, sandbox):
+        other = sandbox / "other"
         other.mkdir()
         cli(home, "grant", str(home / "shared"), "r", "--project", str(other))
         assert check(home, home / "shared" / "x", "r", project) == ASK
@@ -399,8 +428,8 @@ class TestHookMode:
         )
         assert r.returncode == 0 and not r.stdout.strip()
 
-    def test_claude_project_dir_env_wins_over_cwd(self, home, project, tmp_path):
-        elsewhere = Path(os.path.realpath(tmp_path)) / "elsewhere"
+    def test_claude_project_dir_env_wins_over_cwd(self, home, project, sandbox):
+        elsewhere = sandbox / "elsewhere"
         elsewhere.mkdir()
         out = run_hook(
             home,
