@@ -5,7 +5,8 @@
 {{- if eq $r.backend "mise" }}
 {{- $version := get $r.item "version" | default "latest" }}
 {{- if hasKey $r.item "components" }}
-"{{ $r.name }}" = { version = "{{ $version }}", components = {{ $r.item.components | toJson }} }
+{{- /* array spelled the way mise (toml_edit) writes it back, so its rewrites don't drift from the render */}}
+"{{ $r.name }}" = { version = "{{ $version }}", components = [{{ range $i, $c := $r.item.components }}{{ if $i }}, {{ end }}{{ $c | quote }}{{ end }}] }
 {{- else }}
 "{{ $r.name }}" = "{{ $version }}"
 {{- end }}

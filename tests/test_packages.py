@@ -122,7 +122,7 @@ RENDER_CASES = [
         },
         {
             ("mise-tools", "darwin-arm64"): [
-                '"rust" = { version = "stable", components = ["rust-analyzer","rust-src"] }'
+                '"rust" = { version = "stable", components = ["rust-analyzer", "rust-src"] }'
             ]
         },
     ),
@@ -143,7 +143,7 @@ RENDER_CASES = [
         },
         {
             ("mise-tools", "darwin-arm64"): [
-                '"foo" = { version = "latest", components = ["a","b"] }'
+                '"foo" = { version = "latest", components = ["a", "b"] }'
             ],
             ("mise-tools", "linux-arm64"): ['"foo" = { version = "latest", components = ["c"] }'],
         },
@@ -459,13 +459,13 @@ INVARIANTS = [
         "rust-toolchain-ships-the-editor-components-on-mac",
         "mise-tools",
         "darwin-arm64",
-        contains=['"rust" = { version = "stable", components = ["rust-analyzer","rust-src"] }'],
+        contains=['"rust" = { version = "stable", components = ["rust-analyzer", "rust-src"] }'],
     ),
     Invariant(
         "rust-toolchain-ships-the-editor-components-on-linux",
         "mise-tools",
         "linux-arm64",
-        contains=['"rust" = { version = "stable", components = ["rust-analyzer","rust-src"] }'],
+        contains=['"rust" = { version = "stable", components = ["rust-analyzer", "rust-src"] }'],
     ),
     Invariant("uv-not-in-mise-on-mac", "mise-tools", "darwin-arm64", excludes=['"uv" = "latest"']),
     Invariant("uv-not-in-mise-on-linux", "mise-tools", "linux-arm64", excludes=['"uv" = "latest"']),

@@ -10,5 +10,5 @@
 "oxlint" = "latest"
 "pnpm" = "latest"
 "prek" = "latest"
-"rust" = { version = "stable", components = ["rust-analyzer","rust-src"] }
+"rust" = { version = "stable", components = ["rust-analyzer", "rust-src"] }
 "usage" = "latest"
