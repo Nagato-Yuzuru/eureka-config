@@ -29,7 +29,7 @@ from jsonschema import Draft202012Validator
 from inventory.cli import main
 from inventory.inventory import DATA_FILES, Inventory, InventoryError, load_data
 from inventory.model import DOCS
-from inventory.render import ARTIFACTS, RENDERED_DIR, render, render_tree, stale
+from inventory.render import ARTIFACTS, RENDERED_DIR, render, render_tree, stale, write_tree
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA = REPO_ROOT / ".chezmoidata"
@@ -314,6 +314,57 @@ RENDER_CASES = [
         },
     ),
     RenderCase(
+        "override-switches-brew-flavour",  # a deciding field replaces, it does not pile up
+        {
+            "foo": {
+                "on": ["darwin"],
+                "brew": {"name": "foo-formula"},
+                "overrides": [{"when": "darwin/amd64", "brew": {"cask": "foo-app"}}],
+            }
+        },
+        {
+            ("brewfile", "darwin-arm64"): ['brew "foo-formula"'],
+            ("brewfile", "darwin-amd64"): ['cask "foo-app"'],
+        },
+    ),
+    RenderCase(
+        "override-switches-dnf-source-but-a-name-patch-keeps-it",
+        {
+            "a": {
+                "on": ["linux"],
+                "dnf": {"copr": "x/y"},
+                "overrides": [{"when": "linux/arm64", "dnf": {"repofile": "https://x/y.repo"}}],
+            },
+            "b": {
+                "on": ["linux"],
+                "dnf": {"copr": "x/y"},
+                "overrides": [{"when": "linux", "dnf": {"name": "b2"}}],
+            },
+        },
+        {
+            ("dnf-repos", "linux-arm64"): ["repofile https://x/y.repo", "copr x/y"],
+            ("dnf-list", "linux-arm64"): ["a", "b2"],
+        },
+    ),
+    RenderCase(
+        "overrides-apply-cumulatively-in-order",  # the second only makes sense after the first
+        {
+            "foo": {
+                "on": ["darwin", "linux"],
+                "via": "mise",
+                "overrides": [
+                    {"when": "linux", "via": "system"},
+                    {"when": "linux/arm64", "dnf": {"copr": "a/b"}},
+                ],
+            }
+        },
+        {
+            ("mise-tools", "darwin-arm64"): ['"foo" = "latest"'],
+            ("dnf-list", "linux-arm64"): ["foo"],
+            ("dnf-repos", "linux-arm64"): ["copr a/b"],
+        },
+    ),
+    RenderCase(
         "dnf-repos-lists-copr-and-repofile-only-for-packages-installed-here-via-system",
         {
             "starship": {"on": ["darwin", "linux"], "dnf": {"copr": "atim/starship"}},
@@ -593,7 +644,7 @@ REJECTS = [
     Reject(
         "components-empty",
         {"foo": {"on": ["darwin"], "via": "mise", "mise": {"components": []}}},
-        "packages.foo.mise.components: must be a non-empty list",
+        "packages.foo.mise.components: List should have at least 1 item",
     ),
     Reject(
         "components-entry-not-a-string",
@@ -608,7 +659,7 @@ REJECTS = [
     Reject(
         "completions-empty",
         {"foo": {"on": ["darwin"], "completions": {}}},
-        "packages.foo.completions: must be a non-empty map of command -> recipe",
+        "packages.foo.completions: Dictionary should have at least 1 item",
     ),
     Reject(
         "completions-recipe-not-a-string",
@@ -625,6 +676,27 @@ REJECTS = [
         {"foo": {"on": ["darwin"], "overrides": [{"when": "linux", "completions": {"foo": "x"}}]}},
         "packages.foo.overrides[linux]: cannot override 'completions'",
     ),
+    Reject(  # inside an override the same union rule applies, and is named as such
+        "override-brew-both-flavours",
+        {
+            "foo": {
+                "on": ["darwin"],
+                "overrides": [{"when": "linux", "brew": {"name": "a", "cask": "b"}}],
+            }
+        },
+        "packages.foo.overrides[linux].brew: a formula ({ name }) or a cask ({ cask }), not both",
+    ),
+    Reject(
+        "override-unknown-key-inside-a-block",
+        {
+            "foo": {
+                "on": ["darwin"],
+                "via": "mise",
+                "overrides": [{"when": "linux", "mise": {"nope": 1}}],
+            }
+        },
+        "packages.foo.overrides[linux].mise.nope: Extra inputs are not permitted",
+    ),
 ]
 
 
@@ -640,6 +712,15 @@ def test_validation_rejects(packages: Mapping[str, Any], message: str):
 def test_machine_must_name_a_declared_platform():
     with pytest.raises(InventoryError, match="machines.x: unknown platform 'nope'"):
         Inventory(PLATFORMS, {"x": {"platform": "nope", "arch": "arm64"}}, {})
+
+
+def test_load_rejects_a_stray_top_level_table(tmp_path: Path):
+    """A misspelt table would otherwise vanish silently: every document is checked whole."""
+    src = _source_copy(tmp_path)
+    with (src / ".chezmoidata" / "machines.toml").open("a") as f:
+        f.write('\n[machine]\nlaptop = { platform = "macos", arch = "arm64" }\n')
+    with pytest.raises(InventoryError, match="machine: Extra inputs are not permitted"):
+        Inventory.load(src / ".chezmoidata")
 
 
 def test_platform_system_manager_is_one_we_render_for():
@@ -840,6 +921,8 @@ SCHEMA_REJECTS = [
     ("unknown-key", {"on": ["darwin"], "nope": 1}),
     ("override-of-on", {"on": ["darwin"], "overrides": [{"when": "linux", "on": ["linux"]}]}),
     ("bad-via", {"on": ["darwin"], "via": "pip"}),
+    ("components-empty", {"on": ["darwin"], "via": "mise", "mise": {"components": []}}),
+    ("completions-empty", {"on": ["darwin"], "completions": {}}),
 ]
 
 
@@ -848,6 +931,17 @@ def test_packages_schema_rejects_what_the_types_reject(package: Mapping[str, Any
     with pytest.raises(InventoryError):
         inventory({"foo": package})
     assert not schema_for("packages.toml").is_valid({"packages": {"foo": package}})
+
+
+def test_write_tree_only_touches_what_changed_and_removes_what_left(tmp_path: Path):
+    out = tmp_path / "out"
+    files = {"a/x": "1\n", "b/y": "2\n", "STAMP": "s\n"}
+    assert sorted(write_tree(files, out)) == ["STAMP", "a/x", "b/y"]
+    before = (out / "a" / "x").stat().st_mtime_ns
+    smaller = {"a/x": "1\n", "STAMP": "t\n"}
+    assert write_tree(smaller, out) == ["STAMP", "b/y"]
+    assert not (out / "b").exists() and (out / "a" / "x").stat().st_mtime_ns == before
+    assert stale(smaller, out) == []
 
 
 def test_render_schema_needs_no_valid_data(tmp_path: Path):
@@ -917,8 +1011,10 @@ def test_onchange_refresh_script_keys_on_this_machines_recipes(machine: str, tmp
     rendered = chezmoi_render(REFRESH_SCRIPT, machine)
     script.write_text(rendered)
     check_shell(script)
-    assert "mise ls --missing" in rendered
-    assert rendered.index("mise ls --missing") < rendered.index("mise run refresh-completions")
+    guards = ("command -v mise", "mise ls --missing", "export XDG_CACHE_HOME=")
+    assert all(g in rendered for g in guards)
+    assert all(rendered.index(g) < rendered.index("mise run refresh-completions") for g in guards)
+    assert "mise run refresh-completions ||" in rendered, "a failed recipe must not fail the apply"
     assert heredoc(rendered, "RECIPES") == lines(REAL, "completions", machine)
 
 

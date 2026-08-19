@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -148,14 +147,23 @@ def render_tree(inv: Inventory, data_dir: Path) -> dict[str, str]:
     return files
 
 
-def write_tree(files: Mapping[str, str], out_dir: Path) -> None:
-    """Rebuilt from scratch: a machine that leaves machines.toml leaves no directory behind."""
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
-    for rel, text in files.items():
+def write_tree(files: Mapping[str, str], out_dir: Path) -> list[str]:
+    """Bring `out_dir` to `files`: write what differs, remove what is not in `files` (a
+    machine that leaves machines.toml leaves no directory behind), touch nothing else.
+    Returns the paths it changed."""
+    changed = stale(files, out_dir)
+    for rel in changed:
         path = out_dir / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+        if rel in files:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(files[rel])
+        else:
+            path.unlink()
+            for parent in path.parents:  # an emptied machine dir goes too
+                if parent == out_dir or any(parent.iterdir()):
+                    break
+                parent.rmdir()
+    return changed
 
 
 def stale(files: Mapping[str, str], out_dir: Path) -> list[str]:

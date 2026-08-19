@@ -45,9 +45,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if changed:
             log.error("run `uv run render` and commit the result")
         return 1 if changed else 0
-    write_tree(files, out_dir)
-    for rel in changed:
-        log.info("wrote %s/%s", shown, rel)
+    for rel in write_tree(files, out_dir):
+        log.info("%s %s/%s", "wrote" if rel in files else "removed", shown, rel)
     return 0
 
 

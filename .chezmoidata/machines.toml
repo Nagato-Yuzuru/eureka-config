@@ -1,7 +1,9 @@
 #:schema ../.rendered/schema/machines.json
 # The render targets: `uv run render` compiles .rendered/<id>/ for each, and chezmoi
-# includes the one whose id is `<os>-<arch>` (.chezmoitemplates/artifact). A specific
-# device is one more entry; `on` in packages.toml can then name it.
+# includes the one whose id is `<os>-<arch>` (.chezmoitemplates/artifact). Today that
+# is the only id chezmoi can pick, so an entry per os/arch is all this can hold; a
+# specific device would need a machine-level Selector variant (model.py) and a way
+# for the artifact template to know which machine it is on — a seam, not a feature yet.
 [machines]
 darwin-arm64 = { platform = "macos", arch = "arm64" }
 darwin-amd64 = { platform = "macos", arch = "amd64" }

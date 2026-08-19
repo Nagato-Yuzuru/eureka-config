@@ -21,6 +21,7 @@ from inventory.model import (
     DOCS,
     PACKAGE,
     VIAS,
+    Arch,
     Brew,
     Cask,
     Dnf,
@@ -77,26 +78,29 @@ def _explain(prefix: str, err: ValidationError, tags: Sequence[str] = ()) -> str
                 msg = f"via must be {'|'.join(VIAS)}"
             case "model_type":
                 msg = "must be a map"
-            case "extra_forbidden" if tag and loc and loc[-1] in BACKENDS:
-                msg = f"no {loc[-1]} block on a `via: {tag}` package"
-        if len(loc) >= 2 and loc[1] in _VARIANTS.get(loc[0], ()):  # inside a block's union
-            if e["type"] == "extra_forbidden" and loc[2] not in _FIELDS[loc[0]]:
-                del loc[1]  # a key no variant has: name it, not the choice
-            else:
-                loc, msg = loc[:1], _CHOICES[loc[0]]
+            case "extra_forbidden" if tag and len(loc) == 1 and loc[0] in BACKENDS:
+                msg = f"no {loc[0]} block on a `via: {tag}` package"
         if len(loc) >= 2 and loc[0] == "overrides" and loc[1].isdigit():
             i = int(loc[1])
             loc[0:2] = [f"overrides[{tags[i] if i < len(tags) else '?'}]"]
-            if e["type"] == "extra_forbidden":  # only the how may be patched
-                loc, msg = loc[:1], f"cannot override {loc[-1]!r}"
-        path = ".".join([prefix, *loc]) if loc else prefix
+            if e["type"] == "extra_forbidden" and len(loc) == 2:  # only the how may be patched
+                loc, msg = loc[:1], f"cannot override {loc[1]!r}"
+        # inside a union block (`brew`, `dnf`), wherever it sits: one choice, not per variant
+        for i in range(len(loc) - 1):
+            if loc[i] in _UNIONS and loc[i + 1] in _VARIANTS[loc[i]]:
+                if e["type"] == "extra_forbidden" and loc[-1] not in _FIELDS[loc[i]]:
+                    del loc[i + 1]  # a key no variant has: name it, not the choice
+                else:
+                    loc, msg = loc[: i + 1], _CHOICES[loc[i]]
+                break
+        path = ".".join(filter(None, [prefix, *loc]))
         line = f"{path}: {msg}"
         if line not in lines:
             lines.append(line)
     # a key no variant has explains a block by itself; the choice line would only add noise
     for block, choice in _CHOICES.items():
-        if any(ln.startswith(f"{prefix}.{block}.") for ln in lines):
-            lines = [ln for ln in lines if ln != f"{prefix}.{block}: {choice}"]
+        named = {ln.rsplit(f".{block}.", 1)[0] for ln in lines if f".{block}." in ln}
+        lines = [ln for ln in lines if not any(ln == f"{n}.{block}: {choice}" for n in named)]
     return "\n".join(lines)
 
 
@@ -119,13 +123,16 @@ def deep_merge(dst: Mapping[str, Any], src: Mapping[str, Any]) -> dict[str, Any]
     return out
 
 
-def matches(sel: Selector, machine: Machine, platforms: Mapping[str, Platform]) -> bool:
-    os_ = platforms[machine.platform].os
+def matches_os_arch(sel: Selector, os_: str, arch: str) -> bool:
     match sel:
         case OsSel(os=o):
             return o == os_
         case OsArchSel(os=o, arch=a):
-            return o == os_ and a == machine.arch
+            return o == os_ and a == arch
+
+
+def matches(sel: Selector, machine: Machine, platforms: Mapping[str, Platform]) -> bool:
+    return matches_os_arch(sel, platforms[machine.platform].os, machine.arch)
 
 
 def parse_package(prefix: str, raw: Any) -> Package:
@@ -136,18 +143,43 @@ def parse_package(prefix: str, raw: Any) -> Package:
         raise InventoryError(_explain(prefix, e, _when_tags(raw))) from None
 
 
+# In a union block, the fields that tell the variants apart (`cask` for brew, `copr` and
+# `repofile` for dnf — and `name`, which Cask lacks); the rest is common to all variants.
+_DISCRIMINATING = {
+    b: {f for v in vs for f in v.model_fields}
+    - set.intersection(*(set(v.model_fields) for v in vs))
+    for b, vs in _UNIONS.items()
+}
+
+
 def patched(pkg: Package, overrides: Iterable[Override]) -> dict[str, Any]:
     """The package's own fields with the overrides merged over them, in order — the raw
-    form of what `parse_package` turns back into a package. A patch that switches `via`
-    starts the how afresh: the previous backend's block goes, only what it brings applies."""
+    form of what `parse_package` turns back into a package. Two things replace instead of
+    merging, because merging could only produce a shape the types reject: a patch that
+    switches `via` starts the how afresh (the previous backend's block goes), and a patch
+    that sets a union block's discriminating field (formula -> cask, copr -> repofile)
+    drops the block's previous discriminating fields."""
     eff = pkg.model_dump(exclude_unset=True, by_alias=True, exclude={"overrides"})
     via = pkg.via
     for ov in overrides:
-        if ov.patch.get("via", via) != via:
+        patch = ov.patch
+        if patch.get("via", via) != via:
             eff = {k: v for k, v in eff.items() if k not in BACKENDS}
-            via = ov.patch["via"]
-        eff = deep_merge(eff, ov.patch)
+            via = patch["via"]
+        for block, disc in _DISCRIMINATING.items():
+            if block in eff and disc & set(patch.get(block, {})):
+                eff[block] = {k: v for k, v in eff[block].items() if k not in disc}
+        eff = deep_merge(eff, patch)
     return eff
+
+
+def _tag_machines(sel: Selector) -> list[tuple[str, str]]:
+    """The (os, arch) pairs a tag stands for — every arch for a bare OS tag."""
+    match sel:
+        case OsSel(os=o):
+            return [(o, a) for a in get_args(Arch)]
+        case OsArchSel(os=o, arch=a):
+            return [(o, a)]
 
 
 class Inventory:
@@ -170,25 +202,29 @@ class Inventory:
         self.packages: dict[str, Package] = {}
         for key, raw in raw_packages.items():
             pkg = parse_package(f"packages.{key}", raw)
-            for ov in pkg.overrides:  # a bad patch fails here, even one whose tag matches nothing
-                parse_package(f"packages.{key}.overrides[{ov.when.tag}]", patched(pkg, [ov]))
+            # Every override checked as it would apply: cumulatively, in list order, on each
+            # machine its tag stands for — declared or not, so a patch whose tag matches no
+            # machine fails here too, and one that only works after an earlier entry passes.
+            for i, ov in enumerate(pkg.overrides):
+                for os_, arch in _tag_machines(ov.when):
+                    upto = [o for o in pkg.overrides[: i + 1] if matches_os_arch(o.when, os_, arch)]
+                    parse_package(f"packages.{key}.overrides[{ov.when.tag}]", patched(pkg, upto))
             self.packages[key] = pkg
 
     @classmethod
     def load(cls, data_dir: Path) -> Inventory:
-        """Every .chezmoidata file checked against its document model (xdg/zsh only feed
-        templates, but a typo there should fail here too); the three the inventory is
-        built from go through the per-entry parse for its messages."""
+        """Every .chezmoidata file checked whole against its document model — a stray or
+        misspelt top-level table, an empty key, xdg/zsh typos all fail here. An error
+        inside a packages.toml entry is left to the per-entry parse below, whose message
+        names the override and the choice."""
         docs = {f: load_data(data_dir / f) for f in DOCS}
         for name, doc in DOCS.items():
-            if name in DATA_FILES:
-                if not isinstance(docs[name].get(Path(name).stem), Mapping):
-                    raise InventoryError(f"{name}: needs a top-level [{Path(name).stem}] table")
-                continue
             try:
                 doc.model_validate(docs[name])
             except ValidationError as e:
-                raise InventoryError(_explain(name, e)) from None
+                if name == "packages.toml" and all(len(x["loc"]) > 2 for x in e.errors()):
+                    continue
+                raise InventoryError(_explain("", e)) from None
         return cls(
             docs["platforms.toml"]["platforms"],
             docs["machines.toml"]["machines"],

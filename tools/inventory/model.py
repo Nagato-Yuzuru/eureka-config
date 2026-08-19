@@ -25,7 +25,6 @@ from pydantic import (
     Tag,
     TypeAdapter,
     WithJsonSchema,
-    field_validator,
 )
 
 Os = Literal["darwin", "linux"]
@@ -157,14 +156,8 @@ Dnf = Rpm | CoprRpm | RepofileRpm  # where dnf gets it: exactly one source
 class Mise(Strict):
     name: NonEmpty | None = None  # mise's name, incl. backend prefix ("npm:pnpm", "go:…")
     version: NonEmpty = "latest"
-    components: list[NonEmpty] = []  # extra components installed with the tool
-
-    @field_validator("components")
-    @classmethod
-    def _non_empty(cls, v: list[str]) -> list[str]:
-        if not v:
-            raise ValueError("must be a non-empty list")
-        return v
+    # extra components installed with the tool; absent means none, an empty list is a mistake
+    components: Annotated[list[NonEmpty], Field(min_length=1)] = []
 
 
 class Uv(Strict):
@@ -195,15 +188,9 @@ class Override(Strict):
 
 class _Package(Strict):
     on: Annotated[list[SelectorField], Field(min_length=1)]
-    completions: dict[NonEmpty, NonEmpty] = {}  # command -> sh command printing its completion
+    # command -> sh command printing its zsh completion; absent means none, {} is a mistake
+    completions: Annotated[dict[NonEmpty, NonEmpty], Field(min_length=1)] = {}
     overrides: list[Override] = []
-
-    @field_validator("completions")
-    @classmethod
-    def _non_empty(cls, v: dict[str, str]) -> dict[str, str]:
-        if not v:
-            raise ValueError("must be a non-empty map of command -> recipe")
-        return v
 
 
 class SystemPackage(_Package):

@@ -97,8 +97,10 @@ completions = { ruff = "ruff generate-shell-completion zsh" }
 - `overrides` is the only per-machine mechanism. Each entry whose `when` tag
   matches this machine is deep-merged over the line, in order (maps merge,
   lists and scalars replace); an entry that switches `via` starts the how
-  afresh. It may touch `via` and the blocks, never `on` or `completions`;
-  today only pnpm uses one.
+  afresh, and one that sets a union block's deciding field (`cask`, `copr`,
+  `repofile`) switches that block's variant instead of piling up. It may
+  touch `via` and the blocks, never `on` or `completions`; today only pnpm
+  uses one.
 - `completions` maps a command to the shell command that prints its zsh
   completion. See the next section.
 

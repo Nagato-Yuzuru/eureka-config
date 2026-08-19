@@ -59,6 +59,7 @@
             "minLength": 1,
             "type": "string"
           },
+          "minItems": 1,
           "title": "Components",
           "type": "array"
         },
@@ -87,6 +88,7 @@
             "type": "string"
           },
           "default": {},
+          "minProperties": 1,
           "propertyNames": {
             "minLength": 1
           },
@@ -267,6 +269,7 @@
             "type": "string"
           },
           "default": {},
+          "minProperties": 1,
           "propertyNames": {
             "minLength": 1
           },
@@ -356,6 +359,7 @@
             "type": "string"
           },
           "default": {},
+          "minProperties": 1,
           "propertyNames": {
             "minLength": 1
           },
