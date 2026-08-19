@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
 from inventory.inventory import DATA_FILES, Inventory
@@ -116,7 +116,7 @@ def render_tree(inv: Inventory, data_dir: Path) -> dict[str, str]:
     return files
 
 
-def write_tree(files: dict[str, str], out_dir: Path) -> None:
+def write_tree(files: Mapping[str, str], out_dir: Path) -> None:
     """Rebuilt from scratch: a machine that leaves machines.yaml leaves no directory behind."""
     if out_dir.exists():
         shutil.rmtree(out_dir)
@@ -126,7 +126,7 @@ def write_tree(files: dict[str, str], out_dir: Path) -> None:
         path.write_text(text)
 
 
-def stale(files: dict[str, str], out_dir: Path) -> list[str]:
+def stale(files: Mapping[str, str], out_dir: Path) -> list[str]:
     """Paths whose on-disk content differs from `files` — missing, changed, or extra."""
     on_disk = (
         {str(p.relative_to(out_dir)): p.read_text() for p in out_dir.rglob("*") if p.is_file()}

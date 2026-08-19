@@ -18,8 +18,10 @@ import json
 import shutil
 import subprocess
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -40,7 +42,7 @@ REAL = Inventory.load(DATA)
 # --- harness ------------------------------------------------------------------------------------
 
 
-def inventory(packages: dict) -> Inventory:
+def inventory(packages: Mapping[str, Any]) -> Inventory:
     """The real platforms and machines, synthetic packages."""
     return Inventory(PLATFORMS, MACHINES, packages)
 
@@ -81,10 +83,10 @@ def check_shell(script: Path, shell: str = "bash") -> None:
 # --- render semantics (synthetic data) ----------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RenderCase:
     id: str
-    packages: dict
+    packages: Mapping[str, Any]
     expect: dict[tuple[str, str], list[str]] = field(default_factory=dict)  # (artifact, machine)
 
 
@@ -458,85 +460,97 @@ RENDER_CASES = [
         for (artifact, machine), want in c.expect.items()
     ],
 )
-def test_render(packages: dict, artifact: str, machine: str, want: list[str]):
+def test_render(packages: Mapping[str, Any], artifact: str, machine: str, want: list[str]):
     assert lines(inventory(packages), artifact, machine) == want
 
 
 # --- validation ---------------------------------------------------------------------------------
 
+
+@dataclass(frozen=True, slots=True)
+class Reject:
+    id: str
+    packages: Mapping[str, Any]
+    message: str  # what the InventoryError must contain
+
+
 REJECTS = [
-    ("unknown-key", {"foo": {"on": ["darwin"], "nope": "1"}}, "packages.foo.nope: Extra inputs"),
-    ("missing-on", {"foo": {"via": "mise"}}, "packages.foo.on: Field required"),
-    ("on-not-a-list", {"foo": {"on": "darwin"}}, "packages.foo.on: Input should be a valid list"),
-    ("on-empty", {"foo": {"on": []}}, "packages.foo.on: List should have at least 1 item"),
-    ("on-unknown-tag", {"foo": {"on": ["mars"]}}, "packages.foo.on.0: unknown tag 'mars'"),
-    (
+    Reject(
+        "unknown-key", {"foo": {"on": ["darwin"], "nope": "1"}}, "packages.foo.nope: Extra inputs"
+    ),
+    Reject("missing-on", {"foo": {"via": "mise"}}, "packages.foo.on: Field required"),
+    Reject(
+        "on-not-a-list", {"foo": {"on": "darwin"}}, "packages.foo.on: Input should be a valid list"
+    ),
+    Reject("on-empty", {"foo": {"on": []}}, "packages.foo.on: List should have at least 1 item"),
+    Reject("on-unknown-tag", {"foo": {"on": ["mars"]}}, "packages.foo.on.0: unknown tag 'mars'"),
+    Reject(
         "via-invalid",
         {"foo": {"on": ["darwin"], "via": "pip"}},
         "packages.foo: via must be system|mise|uv",
     ),
-    (
+    Reject(
         "name-field-is-a-map",
         {"foo": {"on": ["darwin"], "via": "mise", "mise": {"name": {"darwin": "x"}}}},
         "packages.foo.mise.name: Input should be a valid string",
     ),
     # the point of the blocks: a backend's parameters cannot land on another backend
-    (
+    Reject(
         "brew-block-on-a-mise-package",
         {"foo": {"on": ["darwin"], "via": "mise", "brew": {"cask": "x"}}},
         "packages.foo.brew: no brew block on a `via: mise` package",
     ),
-    (
+    Reject(
         "dnf-block-on-a-mise-package",
         {"foo": {"on": ["linux"], "via": "mise", "dnf": {"copr": "a/b"}}},
         "packages.foo.dnf: no dnf block on a `via: mise` package",
     ),
-    (
+    Reject(
         "mise-block-on-a-system-package",
         {"foo": {"on": ["darwin"], "mise": {"version": "1"}}},
         "packages.foo.mise: no mise block on a `via: system` package",
     ),
-    (
+    Reject(
         "uv-block-on-a-mise-package",
         {"foo": {"on": ["darwin"], "via": "mise", "uv": {"version": "1"}}},
         "packages.foo.uv: no uv block on a `via: mise` package",
     ),
-    (
+    Reject(
         "version-outside-a-block",  # brew and dnf have no version; the field lives where it means something
         {"foo": {"on": ["darwin"], "version": "9"}},
         "packages.foo.version: Extra inputs are not permitted",
     ),
-    (
+    Reject(
         "brew-is-a-formula-or-a-cask-not-both",
         {"foo": {"on": ["darwin"], "brew": {"name": "a", "cask": "b"}}},
         "packages.foo.brew: a formula ({ name }) or a cask ({ cask }), not both",
     ),
-    (
+    Reject(
         "overrides-not-a-list",
         {"foo": {"on": ["darwin"], "overrides": {"$when": "linux"}}},
         "packages.foo.overrides: Input should be a valid list",
     ),
-    (
+    Reject(
         "override-missing-when",
         {"foo": {"on": ["darwin"], "overrides": [{"via": "mise"}]}},
         "packages.foo.overrides[?].$when: Field required",
     ),
-    (
+    Reject(
         "override-unknown-tag",
         {"foo": {"on": ["darwin"], "overrides": [{"$when": "mars"}]}},
         "packages.foo.overrides[mars].$when: unknown tag 'mars'",
     ),
-    (
+    Reject(
         "override-of-on",
         {"foo": {"on": ["darwin"], "overrides": [{"$when": "linux", "on": ["linux"]}]}},
         "packages.foo.overrides[linux]: cannot override 'on'",
     ),
-    (
+    Reject(
         "override-via-invalid",
         {"foo": {"on": ["darwin"], "overrides": [{"$when": "linux", "via": "pip"}]}},
         "packages.foo.overrides[linux]: via must be system|mise|uv",
     ),
-    (
+    Reject(
         "override-value-not-string",
         {
             "foo": {
@@ -547,7 +561,7 @@ REJECTS = [
         },
         "packages.foo.overrides[linux].mise.version: Input should be a valid string",
     ),
-    (
+    Reject(
         "override-that-matches-nothing-is-still-checked",
         {
             "foo": {
@@ -557,42 +571,42 @@ REJECTS = [
         },
         "packages.foo.overrides[linux/amd64].mise: no mise block on a `via: system` package",
     ),
-    (
+    Reject(
         "components-not-a-list",
         {"foo": {"on": ["darwin"], "via": "mise", "mise": {"components": "rust-src"}}},
         "packages.foo.mise.components: Input should be a valid list",
     ),
-    (
+    Reject(
         "components-empty",
         {"foo": {"on": ["darwin"], "via": "mise", "mise": {"components": []}}},
         "packages.foo.mise.components: must be a non-empty list",
     ),
-    (
+    Reject(
         "components-entry-not-a-string",
         {"foo": {"on": ["darwin"], "via": "mise", "mise": {"components": [1]}}},
         "packages.foo.mise.components.0: Input should be a valid string",
     ),
-    (
+    Reject(
         "completions-not-a-map",
         {"foo": {"on": ["darwin"], "completions": "foo completion zsh"}},
         "packages.foo.completions: Input should be a valid dictionary",
     ),
-    (
+    Reject(
         "completions-empty",
         {"foo": {"on": ["darwin"], "completions": {}}},
         "packages.foo.completions: must be a non-empty map of command -> recipe",
     ),
-    (
+    Reject(
         "completions-recipe-not-a-string",
         {"foo": {"on": ["darwin"], "completions": {"foo": ["foo", "completion"]}}},
         "packages.foo.completions.foo: Input should be a valid string",
     ),
-    (
+    Reject(
         "completions-recipe-empty",
         {"foo": {"on": ["darwin"], "completions": {"foo": ""}}},
         "packages.foo.completions.foo: String should have at least 1 character",
     ),
-    (
+    Reject(
         "completions-not-overridable",  # fpath order already arbitrates per-backend differences
         {"foo": {"on": ["darwin"], "overrides": [{"$when": "linux", "completions": {"foo": "x"}}]}},
         "packages.foo.overrides[linux]: cannot override 'completions'",
@@ -600,8 +614,10 @@ REJECTS = [
 ]
 
 
-@pytest.mark.parametrize(("packages", "message"), [pytest.param(p, m, id=i) for i, p, m in REJECTS])
-def test_validation_rejects(packages: dict, message: str):
+@pytest.mark.parametrize(
+    ("packages", "message"), [pytest.param(r.packages, r.message, id=r.id) for r in REJECTS]
+)
+def test_validation_rejects(packages: Mapping[str, Any], message: str):
     with pytest.raises(InventoryError) as e:
         inventory(packages)
     assert message in str(e.value), str(e.value)
@@ -629,7 +645,7 @@ def test_yaml_on_is_a_key_not_a_boolean(tmp_path: Path):
 # --- real data ----------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Invariant:
     id: str
     artifact: str

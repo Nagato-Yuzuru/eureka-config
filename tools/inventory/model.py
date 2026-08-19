@@ -11,7 +11,8 @@ declared once, never assumed from the OS.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from collections.abc import Mapping
+from typing import Annotated, Any, Literal, get_args
 
 from pydantic import (
     BaseModel,
@@ -19,6 +20,7 @@ from pydantic import (
     ConfigDict,
     Discriminator,
     Field,
+    PlainSerializer,
     StringConstraints,
     Tag,
     TypeAdapter,
@@ -30,8 +32,9 @@ Os = Literal["darwin", "linux"]
 Arch = Literal["arm64", "amd64"]
 SystemBackend = Literal["brew", "dnf"]
 Backend = Literal["brew", "dnf", "mise", "uv"]
-BACKENDS: tuple[Backend, ...] = ("brew", "dnf", "mise", "uv")
-VIAS = ("system", "mise", "uv")
+Via = Literal["system", "mise", "uv"]
+BACKENDS: tuple[Backend, ...] = get_args(Backend)
+VIAS: tuple[Via, ...] = get_args(Via)
 
 NonEmpty = Annotated[str, StringConstraints(min_length=1)]
 
@@ -60,32 +63,45 @@ class Machine(Strict):
 class OsSel(Strict):
     os: Os
 
+    @property
+    def tag(self) -> str:
+        return self.os
+
 
 class OsArchSel(Strict):
     os: Os
     arch: Arch
+
+    @property
+    def tag(self) -> str:
+        return f"{self.os}/{self.arch}"
 
 
 # `on:` tags. An open sum: a platform- or device-level selector is one more class
 # and one more arm in `matches` (inventory.py); existing data does not change.
 Selector = OsSel | OsArchSel
 
-_OS: tuple[str, ...] = ("darwin", "linux")
-_ARCH: tuple[str, ...] = ("arm64", "amd64")
 
-
-def parse_selector(v: Any) -> Any:
+def parse_selector(v: Any) -> Selector:
+    """`darwin` | `darwin/amd64` (or an already-parsed selector) -> the selector."""
     if isinstance(v, OsSel | OsArchSel):
         return v
     if not isinstance(v, str):
         raise ValueError("tags are strings: darwin, linux, or os/arch")
     os_, sep, arch = v.partition("/")
-    if os_ not in _OS or (sep and arch not in _ARCH):
+    if os_ not in get_args(Os) or (sep and arch not in get_args(Arch)):
         raise ValueError(f"unknown tag {v!r}")
-    return OsArchSel(os=os_, arch=arch) if sep else OsSel(os=os_)  # type: ignore[arg-type]
+    return (
+        OsArchSel.model_validate({"os": os_, "arch": arch})
+        if sep
+        else OsSel.model_validate({"os": os_})
+    )
 
 
-SelectorField = Annotated[Selector, BeforeValidator(parse_selector)]
+# Round-trips as its tag, so a dumped package re-parses and error paths read like the file.
+SelectorField = Annotated[
+    Selector, BeforeValidator(parse_selector), PlainSerializer(lambda s: s.tag, return_type=str)
+]
 
 
 # --- install: how -------------------------------------------------------------------------------
@@ -139,8 +155,9 @@ class Override(BaseModel):
     when: Annotated[SelectorField, Field(alias="$when")]
 
     @property
-    def patch(self) -> dict[str, Any]:
-        return dict(self.model_extra or {})
+    def patch(self) -> Mapping[str, Any]:
+        """The fields other than `$when`, unvalidated until merged into a package."""
+        return self.model_extra or {}  # pydantic types the extras Optional; extra="allow" fills it
 
     @model_validator(mode="after")
     def _only_the_how(self) -> Override:
@@ -179,8 +196,13 @@ class UvPackage(_Package):
     uv: Uv = Uv()
 
 
-def _via(v: Any) -> str:
-    return v.get("via", "system") if isinstance(v, dict) else getattr(v, "via", "system")
+def _via(v: Any) -> Any:
+    """The discriminator: `via` of a raw line (absent means system) or of a package."""
+    if isinstance(v, Mapping):
+        return v.get("via", "system")
+    if isinstance(v, _Package):
+        return v.via
+    return "system"  # anything else then fails SystemPackage's validation as "not a map"
 
 
 Package = Annotated[
