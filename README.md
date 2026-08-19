@@ -16,12 +16,14 @@ identity beyond os and arch yet; the three machines happen to differ there.
 | ----------------------------------- | ------------------------------------------------------------------------------------------ |
 | `.chezmoidata/packages.yaml`        | every tool, one line each, whatever installs it (see below)                                |
 | `.chezmoidata/xdg.yaml`             | XDG base dirs; `.zshenv` exports them, externals and symlinks derive their paths from them |
+| `.chezmoidata/zsh.yaml`             | the generated-completions dir, declared once for `.zshrc` and both mise tasks              |
 | `.chezmoitemplates/`                | the package renderers and validator                                                        |
 | `.chezmoiexternal.toml.tmpl`        | oh-my-tmux and (linux) antidote as git clones under `$XDG_DATA_HOME`                       |
 | `.chezmoiignore`                    | what a non-Mac never gets: Brewfile, ghostty, wezterm, 1Password                           |
 | `run_onchange_before_install-*.sh`  | installs the system packages (brew bundle / dnf) whenever this machine's set changes       |
 | `run_once_after_setup-linux.sh`     | Fedora bootstrap: login shell, git include and identity                                    |
 | `run_onchange_after_install-yazi-*` | `ya pkg install` whenever yazi's `package.toml` (a rev+hash lockfile) changes              |
+| `dot_config/mise/tasks/`            | mise file tasks rendered per machine: `refresh-completions`, `audit-completions` (below)   |
 | `dot_claude/`                       | Claude Code: CLAUDE.md, hooks, skills, and the managed-settings fragments (last section)    |
 | `tests/`                            | pytest for the package model and the settings merge engine; never deployed                 |
 
@@ -51,16 +53,59 @@ pnpm:    { on: [darwin, linux], via: mise, overrides: [{ $when: darwin/amd64, mi
   without the line a new machine gets no language server.
 - `overrides` is the only per-machine mechanism. Each entry whose `$when` tag
   matches this machine is merged over the line, in order. Any field can differ
-  per machine that way; today only pnpm does.
+  per machine that way (except `completions`, see below); today only pnpm does.
+- `completions` maps a command to the shell command that prints its zsh
+  completion (`kubectl: "kubectl completion zsh"`). See the next section.
 
 From that one file chezmoi renders `~/.Brewfile`, the `[tools]` block of
-`~/.config/mise/config.toml`, and the dnf half of the install script. Bad data
-fails the render with a message naming the entry. `tests/golden/<machine>/`
-holds the rendered lists per machine, so a diff there shows exactly which
-machine an edit touched.
+`~/.config/mise/config.toml`, the dnf half of the install script, and the
+recipe list inside `~/.config/mise/tasks/refresh-completions`. Bad data fails
+the render with a message naming the entry. `tests/golden/<machine>/` holds the
+rendered lists per machine, so a diff there shows exactly which machine an edit
+touched.
 
 chezmoi installs the system packages but never runs `mise install`; that is a
 manual step and stays one.
+
+## Zsh completions
+
+Completion definitions come from four layers, none of them hand-written here:
+zsh's own compsys (`_git _tmux _jq`), what brew formulae and Fedora rpms
+install alongside the tool (`_gh _bat _fd _rg _uv …`), what the tool generates
+itself (`kubectl completion zsh`, `COMPLETE=zsh prek`), and
+zsh-users/zsh-completions (`_golang _node _tsc _cmake`). The third layer is the
+only one nobody installs for us — mise tools, casks — and `packages.yaml`
+carries its recipes:
+
+```yaml
+kubectl: { on: [darwin], via: mise, completions: { kubectl: "kubectl completion zsh" } }
+mise:    { on: [darwin, linux], …,   completions: { mise: "mise completion zsh" } }  # jdx's rpm ships none
+```
+
+- `mise run refresh-completions` (rendered per machine, so it only knows this
+  machine's recipes) rebuilds the generated dir (`zsh.generatedCompletions` in `.chezmoidata/zsh.yaml`, under `$XDG_CACHE_HOME`) from scratch:
+  skips commands not installed, runs each recipe with stdin closed, checks the
+  output starts with `#compdef`, then swaps the directory in and drops
+  `~/.zcompdump`. A tool that leaves `packages.yaml` leaves no file behind.
+  mise's `postinstall` hook runs it after every `mise install` / `mise up`; the
+  first shell after a fresh clone or a wiped cache runs it once too.
+- `.zshrc` puts that directory **last** on fpath. compinit takes the first
+  `_<cmd>` it finds, so a completion the package manager ships always beats a
+  generated one — which is what makes a recipe safe to declare on any tool:
+  where brew or dnf already ship it, the file is a shadowed no-op; where they
+  don't (Fedora's mise and starship rpms), it fills the gap. Nothing in
+  `packages.yaml` records who ships what, and `completions` cannot be
+  overridden per machine, because it never needs to be.
+- `clap_stub <cmd> '<generator>'` in a recipe wraps a clap dynamic completer
+  (`COMPLETE=zsh prek`) whose script must be sourced, so it works from a file.
+- `mise run audit-completions` reports, for this machine, which packages ship
+  their own completion, who completes every command mise puts on PATH, and
+  whether each recipe is what actually completes here or is shadowed —
+  the check to run before adding or doubting a recipe.
+- Not files: terraform/tofu only speak bash's `complete -C` protocol and are
+  wired through bashcompinit in `.zshrc`; `sg` borrows `_ast-grep` there too.
+- `~/.local/share/zsh/site-functions` stays first on fpath for anything dropped
+  by hand; the generator never touches it.
 
 ## New machine
 
@@ -69,7 +114,7 @@ Mac (Homebrew and 1Password's SSH agent already set up):
 ```sh
 brew install chezmoi
 chezmoi init --apply git@github.com:Nagato-Yuzuru/eureka-config.git
-mise install
+mise install   # its postinstall hook generates the zsh completions too
 ```
 
 Fedora VM in OrbStack (the SSH agent is forwarded from the Mac):
@@ -88,6 +133,12 @@ the VM without committing:
 ```sh
 orb -m linux-lab chezmoi apply --source /mnt/mac/Users/yuzuru/.local/share/chezmoi
 ```
+
+`orb` keeps the Mac's working directory (mounted at `/mnt/mac`), and mise
+treats `<dir>/.config/mise/config.toml` of every ancestor as a project config:
+run `mise …` in the VM from a VM path (`orb -m linux-lab zsh -lc 'cd ~ && mise …'`),
+or from under `/mnt/mac/Users/yuzuru` it loads the Mac's global config and
+installs the Mac's tool set into the VM.
 
 The VM runs OrbStack's kernel, not Fedora's, so `kernel-devel` never matches and
 the eBPF section of `packages.yaml` takes the BTF/CO-RE path throughout.

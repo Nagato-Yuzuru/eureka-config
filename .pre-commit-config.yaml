@@ -66,4 +66,4 @@ repos:
         entry: uv run pytest -q
         language: system
         pass_filenames: false
-        files: ^(tests/|\.chezmoitemplates/|\.chezmoidata/|run_onchange_before_install-packages\.sh\.tmpl|dot_claude/(modify_settings\.json|exact_claude-managed\.d/)|run_onchange_after_snapshot-claude-managed\.py\.tmpl|dot_config/mise/config\.toml\.tmpl|dot_Brewfile\.tmpl)
+        files: ^(tests/|\.chezmoitemplates/|\.chezmoidata/|run_onchange_before_install-packages\.sh\.tmpl|dot_claude/(modify_settings\.json|exact_claude-managed\.d/)|run_onchange_after_snapshot-claude-managed\.py\.tmpl|dot_config/mise/(config\.toml\.tmpl|tasks/)|dot_Brewfile\.tmpl)

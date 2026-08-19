@@ -1,0 +1,139 @@
+#!/usr/bin/env zsh
+#MISE description="who provides each tool's zsh completion here: the package manager, a recipe, zsh itself, nobody"
+# Read-only report for keeping the `completions` recipes in .chezmoidata/packages.yaml
+# honest on this machine:
+#   1. system packages (brew|dnf): the zsh completions each package itself installs;
+#      for one that installs none, who covers each of its commands — or nobody
+#   2. mise tools: every command mise puts on PATH and who completes it
+#   3. recipes: who provides each recipe command's completer — anything but
+#      "generated" means the recipe is redundant on this machine (harmless)
+emulate -L zsh
+setopt extended_glob null_glob pipe_fail
+
+generated="${XDG_CACHE_HOME:?set by ~/.zshenv}/{{ .zsh.generatedCompletions }}"
+handdropped="${XDG_DATA_HOME:?set by ~/.zshenv}/zsh/site-functions"
+
+# A fresh terminal (login + interactive shell) is the truth of what completes; ask
+# one for its fpath and for compinit's command -> completer map ($_comps), which
+# also knows `#compdef ls gls`, `_pnpm`'s `pn`, plugin compdefs and bashcompinit
+# registrations that no file name reveals. Without the caller's FPATH: `brew
+# shellenv` exports it, so a nested shell would inherit its ancestor's stale
+# entries. .zshrc's banner lands on stdout too, hence the absolute-path filter.
+probe="$(env -u FPATH zsh -lic 'print -rl -- $fpath; print -- --COMPS--; for k v in "${(@kv)_comps}"; do print -r -- "$k $v"; done' 2>/dev/null)"
+typeset -a ifpath
+ifpath=(${(M)${(f)${probe%%$'\n'--COMPS--*}}:#/*})
+typeset -A comps
+for line in "${(@f)${probe#*--COMPS--$'\n'}}"; do comps[${line%% *}]=${line#* }; done
+
+row() { printf '  %-16s %-15s %s\n' "$1" "$2" "$3"; }
+
+# first_n <words...>: the first 8, then "(+N)".
+first_n() {
+    local -a w
+    w=("$@")
+    if (( $#w > 8 )); then
+        print -r -- "${(j: :)w[1,8]} (+$(( $#w - 8 )))"
+    else
+        print -r -- "${(j: :)w}"
+    fi
+}
+
+# report <name> <cmd>: one row naming who provides <cmd>'s completer in a fresh shell:
+# the fpath dir its function file comes from, or "runtime" for one defined at startup.
+report() {
+    local func=${comps[$2]} d
+    [[ -n $func ]] || { row "$1" "-" "(nothing completes $2)"; return; }
+    for d in "${ifpath[@]}"; do
+        [[ -f $d/$func ]] || continue
+        case $d in
+        "$generated") row "$1" generated "$d/$func" ;;
+        "$handdropped") row "$1" hand-dropped "$d/$func" ;;
+        */zsh-completions/*) row "$1" zsh-completions "$d/$func" ;;
+        /usr/share/zsh/site-functions | /usr/local/share/zsh/site-functions) row "$1" system "$d/$func" ;;
+        */share/zsh/[0-9]*/functions) row "$1" zsh "$d/$func" ;;
+        "${HOMEBREW_PREFIX:-/nonexistent}"/*) row "$1" brew "$d/$func" ;;
+        *) row "$1" other "$d/$func" ;;
+        esac
+        return
+    done
+    row "$1" runtime "$func (defined at startup, not an fpath file)"
+}
+
+# report_bins <name> <bins...>: one report row per bin (first 8), so a package that ships
+# no completion still shows whether zsh, zsh-completions or a recipe covers its commands.
+report_bins() {
+    local name=$1; shift
+    local -a bins; bins=("$@")
+    local b
+    (( $#bins )) || { row "$name" "-" "(no commands)"; return; }
+    for b in "${bins[@][1,8]}"; do report "$name" "$b"; done
+    (( $#bins > 8 )) && row "$name" "" "(+$(( $#bins - 8 )) more commands)"
+}
+
+# --- 1. system packages -----------------------------------------------------------------
+{{- if eq .chezmoi.os "darwin" }}
+print "== brew packages: zsh completions the package installs (else who covers its commands) =="
+: "${HOMEBREW_PREFIX:=$(brew --prefix)}"
+# Filesystem, not `brew list` (0.5 s of ruby per call): opt/<name> is the current keg.
+while read -r kind name; do
+    name=${name//\"/}
+    case $kind in
+    brew)
+        keg="$HOMEBREW_PREFIX/opt/${name:t}"
+        [[ -d $keg ]] || { row "$name" "-" "(not installed)"; continue; }
+        shipped=("$keg"/share/zsh/site-functions/_*(N:t))
+        if (( $#shipped )); then
+            row "$name" brew "$(first_n "${shipped[@]}")"
+        else
+            report_bins "$name" "$keg"/bin/*(N-*:t)
+        fi ;;
+    cask)
+        [[ -d $HOMEBREW_PREFIX/Caskroom/$name ]] || { row "$name" "-" "(not installed)"; continue; }
+        row "$name" "-" "(cask: never ships completions)" ;;
+    esac
+done <<'PACKAGES'
+{{ template "brewfile" . }}
+PACKAGES
+{{- else }}
+print "== dnf packages: zsh completions the package installs (else who covers its commands) =="
+while read -r name; do
+    [[ -n $name ]] || continue
+    files=("${(@f)$(rpm -ql "$name" 2>/dev/null)}")
+    (( $#files )) || { row "$name" "-" "(not installed)"; continue; }
+    shipped=(${(M)files:#*/zsh/site-functions/_*})
+    if (( $#shipped )); then
+        row "$name" dnf "$(first_n "${shipped[@]:t}")"
+    else
+        bins=(${(M)files:#/usr/(s|)bin/[^/]##})
+        report_bins "$name" "${bins[@]:t}"
+    fi
+done <<'PACKAGES'
+{{ template "dnf-list" . }}
+PACKAGES
+{{- end }}
+
+# --- 2. mise tools ------------------------------------------------------------------------
+print
+print "== mise tools: commands on PATH and who completes them =="
+for dir in "${(@f)$(mise bin-paths 2>/dev/null)}"; do
+    # installs/<tool>/<version>/...; rust's bin dir is ~/.cargo/bin, name it as is
+    if [[ $dir == */installs/* ]]; then tool=${${dir#*/installs/}%%/*}; else tool=${dir/#$HOME/\~}; fi
+    for bin in "$dir"/*(N-*:t); do
+        report "$tool" "$bin"
+    done
+done
+
+# --- 3. recipes ---------------------------------------------------------------------------
+print
+print "== recipes (packages.yaml completions): who provides each command's completer =="
+print "   generated = this recipe is what completes here; anything else = redundant here"
+while read -r cmd rest; do
+    [[ -n $cmd ]] || continue
+    if command -v "$cmd" >/dev/null 2>&1; then
+        report "$cmd" "$cmd"
+    else
+        row "$cmd" "-" "($cmd not installed)"
+    fi
+done <<'RECIPES'
+{{ template "completions" . }}
+RECIPES

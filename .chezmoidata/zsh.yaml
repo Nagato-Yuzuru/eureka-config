@@ -1,0 +1,7 @@
+# Paths the zsh setup shares between .zshrc and the mise tasks that feed it.
+# Declared once here; the templates reference it (like xdg.yaml for the base dirs).
+zsh:
+  # Where `mise run refresh-completions` writes, relative to $XDG_CACHE_HOME.
+  # Owned by that task alone: rebuilt from scratch on every run, never hand-edited.
+  # .zshrc puts it LAST on fpath, so a package manager's completion always wins.
+  generatedCompletions: zsh/completions

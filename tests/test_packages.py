@@ -22,6 +22,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = REPO_ROOT / ".chezmoitemplates"
 INSTALL_SCRIPT = REPO_ROOT / "run_onchange_before_install-packages.sh.tmpl"
+MISE_TASKS = REPO_ROOT / "dot_config" / "mise" / "tasks"
 GOLDEN = Path(__file__).parent / "golden"
 
 MACHINES = {
@@ -29,7 +30,7 @@ MACHINES = {
     "darwin-amd64": ("darwin", "amd64"),
     "linux-arm64": ("linux", "arm64"),
 }
-RENDERERS = ("brewfile", "mise-tools", "dnf-list", "dnf-repos")
+RENDERERS = ("brewfile", "mise-tools", "dnf-list", "dnf-repos", "completions")
 
 # --- harness ------------------------------------------------------------------------------------
 
@@ -322,6 +323,64 @@ RENDER_CASES = [
         {"a": {"on": ["linux"], "copr": "x/y"}, "b": {"on": ["linux"], "copr": "x/y"}},
         {("dnf-repos", "linux-arm64"): ["copr x/y", "copr x/y"]},
     ),
+    RenderCase(
+        "completions-render-command-then-recipe-only-where-the-package-installs",
+        {
+            "kubectl": {
+                "on": ["darwin"],
+                "via": "mise",
+                "completions": {"kubectl": "kubectl completion zsh"},
+            },
+            "plain": {"on": ["darwin", "linux"], "via": "mise"},
+        },
+        {
+            ("completions", "darwin-arm64"): ["kubectl kubectl completion zsh"],
+            ("completions", "linux-arm64"): [],
+            ("mise-tools", "darwin-arm64"): ['"kubectl" = "latest"', '"plain" = "latest"'],
+        },
+    ),
+    RenderCase(
+        "completions-on-a-system-package-render-on-every-backend",  # fpath order arbitrates
+        {"mise": {"on": ["darwin", "linux"], "completions": {"mise": "mise completion zsh"}}},
+        {
+            ("completions", "darwin-arm64"): ["mise mise completion zsh"],
+            ("completions", "linux-arm64"): ["mise mise completion zsh"],
+            ("brewfile", "darwin-arm64"): ['brew "mise"'],
+        },
+    ),
+    RenderCase(
+        "completions-map-renders-one-line-per-command-sorted-and-keeps-shell-syntax",
+        {
+            "rust": {
+                "on": ["darwin"],
+                "via": "mise",
+                "completions": {
+                    "rustup": "rustup completions zsh rustup",
+                    "cargo": "x | grep -q '^n' && clap_stub cargo 'C=zsh cargo' || y",
+                },
+            }
+        },
+        {
+            ("completions", "darwin-arm64"): [
+                "cargo x | grep -q '^n' && clap_stub cargo 'C=zsh cargo' || y",
+                "rustup rustup completions zsh rustup",
+            ]
+        },
+    ),
+    RenderCase(
+        "completions-on-a-cask-render-under-the-command-name",
+        {
+            "1password-cli": {
+                "on": ["darwin"],
+                "cask": "1password-cli",
+                "completions": {"op": "op completion zsh"},
+            }
+        },
+        {
+            ("completions", "darwin-arm64"): ["op op completion zsh"],
+            ("brewfile", "darwin-arm64"): ['cask "1password-cli"'],
+        },
+    ),
 ]
 
 
@@ -408,6 +467,31 @@ REJECTS = [
         {"foo": {"on": ["darwin"], "overrides": [{"$when": "linux", "components": "rust-src"}]}},
         "packages.foo.overrides[linux].components: must be a non-empty list",
     ),
+    (
+        "completions-not-a-map",
+        {"foo": {"on": ["darwin"], "completions": "foo completion zsh"}},
+        "packages.foo.completions: must be a non-empty map of command -> recipe",
+    ),
+    (
+        "completions-empty",
+        {"foo": {"on": ["darwin"], "completions": {}}},
+        "packages.foo.completions: must be a non-empty map of command -> recipe",
+    ),
+    (
+        "completions-recipe-not-a-string",
+        {"foo": {"on": ["darwin"], "completions": {"foo": ["foo", "completion"]}}},
+        "packages.foo.completions.foo: recipe must be a non-empty string",
+    ),
+    (
+        "completions-recipe-empty",
+        {"foo": {"on": ["darwin"], "completions": {"foo": ""}}},
+        "packages.foo.completions.foo: recipe must be a non-empty string",
+    ),
+    (
+        "completions-not-overridable",  # fpath order already arbitrates per-backend differences
+        {"foo": {"on": ["darwin"], "overrides": [{"$when": "linux", "completions": {"foo": "x"}}]}},
+        'packages.foo.overrides[linux]: cannot override "completions"',
+    ),
 ]
 
 
@@ -473,7 +557,42 @@ INVARIANTS = [
     Invariant("uv-from-dnf", "dnf-list", "linux-arm64", contains=["uv"]),
     Invariant("mac-installs-nothing-via-dnf", "dnf-list", "darwin-arm64", exact=[]),
     Invariant("linux-has-no-brewfile", "brewfile", "linux-arm64", exact=[]),
+    # The two system tools Fedora's repos ship no zsh completion for; brew's copy wins on a Mac.
+    Invariant(
+        "mise-and-starship-recipes-reach-linux",
+        "completions",
+        "linux-arm64",
+        contains=["mise mise completion zsh", "starship starship completions zsh"],
+    ),
+    Invariant(
+        "workstation-only-tools-generate-no-completion-on-linux",
+        "completions",
+        "linux-arm64",
+        excludes=["kubectl kubectl completion zsh", "op op completion zsh"],
+    ),
+    # Both ship it on both backends (Fedora rpm and brew formula alike): no recipe.
+    Invariant(
+        "uv-has-no-recipe",
+        "completions",
+        "darwin-arm64",
+        excludes=["uv uv generate-shell-completion zsh"],
+    ),
+    Invariant(
+        "prek-uses-the-clap-stub",
+        "completions",
+        "linux-arm64",
+        contains=["prek clap_stub prek 'COMPLETE=zsh prek'"],
+    ),
 ]
+
+
+@pytest.mark.parametrize("machine", MACHINES)
+def test_completions_commands_are_unique_per_machine(machine: str):
+    """Two packages claiming the same command would race for one _<cmd> file."""
+    cmds = [
+        ln.split(" ", 1)[0] for ln in render_lines("completions", source=REPO_ROOT, machine=machine)
+    ]
+    assert len(cmds) == len(set(cmds)), sorted(c for c in cmds if cmds.count(c) > 1)
 
 
 @pytest.mark.parametrize("inv", [pytest.param(i, id=i.id) for i in INVARIANTS])
@@ -519,6 +638,46 @@ def test_install_script_renders_to_valid_shell(machine: str, tmp_path: Path):
     subprocess.run(["bash", "-n", str(script)], check=True)
     if shutil.which("shellcheck"):
         subprocess.run(["shellcheck", str(script)], check=True)
+
+
+def render_file(path: Path, machine: str) -> str:
+    os_, arch = MACHINES[machine]
+    proc = subprocess.run(
+        [
+            "chezmoi", "execute-template", "--source", str(REPO_ROOT),
+            "--override-data", json.dumps({"chezmoi": {"os": os_, "arch": arch}}),
+            "--file", str(path),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )  # fmt: skip
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout
+
+
+@pytest.mark.parametrize("machine", MACHINES)
+def test_refresh_completions_task_renders_to_valid_bash(machine: str, tmp_path: Path):
+    """The recipe heredoc is `read` line by line: one `<cmd> <recipe>` per line, no blank cmd."""
+    script = tmp_path / "refresh-completions"
+    script.write_text(render_file(MISE_TASKS / "executable_refresh-completions.tmpl", machine))
+    subprocess.run(["bash", "-n", str(script)], check=True)
+    if shutil.which("shellcheck"):
+        subprocess.run(["shellcheck", str(script)], check=True)
+    body = script.read_text().split("<<'RECIPES'\n", 1)[1].split("\nRECIPES\n", 1)[0]
+    recipes = [ln for ln in body.splitlines() if ln.strip()]
+    assert recipes == render_lines("completions", source=REPO_ROOT, machine=machine)
+
+
+@pytest.mark.parametrize("machine", MACHINES)
+def test_audit_completions_task_renders_to_valid_zsh(machine: str, tmp_path: Path):
+    script = tmp_path / "audit-completions"
+    rendered = render_file(MISE_TASKS / "executable_audit-completions.tmpl", machine)
+    script.write_text(rendered)
+    subprocess.run(["zsh", "-n", str(script)], check=True)
+    os_, _ = MACHINES[machine]
+    assert ("brew packages" in rendered) == (os_ == "darwin")
+    assert ("rpm -ql" in rendered) == (os_ == "linux")
 
 
 @pytest.mark.parametrize("machine", MACHINES)

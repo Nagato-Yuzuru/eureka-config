@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+#MISE description="regenerate the zsh completions no package manager ships (mise tools, casks)"
+# Rendered by chezmoi from the `completions` field of .chezmoidata/packages.yaml.
+# Runs from mise's postinstall hook (~/.config/mise/config.toml) and by hand.
+#
+# The output dir is rebuilt from scratch on every run, so a tool that leaves
+# packages.yaml, or is not installed on this machine, leaves no file behind. It
+# is the LAST fpath entry (.zshrc): a completion the package manager ships
+# always wins, and what is generated here only fills gaps — declaring a recipe
+# for a tool whose backend does ship one costs a shadowed file, nothing more.
+# `mise run audit-completions` shows who provides what on this machine.
+set -uo pipefail
+
+out="${XDG_CACHE_HOME:?set by ~/.zshenv}/{{ .zsh.generatedCompletions }}"
+mkdir -p "${out%/*}"
+# Same filesystem as $out, so the final swap is a rename.
+tmp="$(mktemp -d "${out%/*}/.completions.XXXXXX")"
+err="$(mktemp "${out%/*}/.completions-err.XXXXXX")"
+trap 'rm -rf "$tmp" "$err"' EXIT
+
+# clap's dynamic completer (`COMPLETE=zsh <cmd>`) prints a script meant to be
+# sourced: it defines _clap_dynamic_completer_<cmd> and ends in `compdef`. As
+# an fpath file that would register but not complete on the first Tab, so wrap
+# it in a stub that sources it and then completes once itself.
+clap_stub() { # <cmd> <sh command printing the dynamic script>
+    printf '%s\n' "#compdef $1" \
+        "source <($2)" \
+        "if [ \"\$funcstack[1]\" = \"_$1\" ]; then _clap_dynamic_completer_$1 \"\$@\"; fi"
+}
+
+failed=()
+while read -r cmd recipe; do
+    [[ -n $cmd ]] || continue
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "skip  _$cmd ($cmd not installed)"
+        continue
+    fi
+    # Subshell: a recipe's cd/exports stay its own. No stdin: generators that
+    # would prompt (hcloud's first run) fail instead of hanging.
+    if (eval "$recipe") >"$tmp/_$cmd" 2>"$err" </dev/null &&
+        IFS= read -r first <"$tmp/_$cmd" && [[ $first == '#compdef'* ]]; then
+        echo "wrote _$cmd"
+    else
+        echo "FAIL  _$cmd: $recipe" >&2
+        sed 's/^/      /' "$err" >&2
+        rm -f "$tmp/_$cmd"
+        failed+=("$cmd")
+    fi
+done <<'RECIPES'
+{{ template "completions" . }}
+RECIPES
+
+rm -rf "$out"
+mv "$tmp" "$out"
+# .zshrc's `compinit -C` fast path trusts the dump for 24 h; drop it so the next
+# shell registers the new set.
+rm -f "${ZDOTDIR:-$HOME}/.zcompdump" "${ZDOTDIR:-$HOME}/.zcompdump.zwc"
+
+if ((${#failed[@]})); then
+    echo "refresh-completions: ${#failed[@]} recipe(s) failed: ${failed[*]}" >&2
+    exit 1
+fi

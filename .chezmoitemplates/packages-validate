@@ -1,6 +1,8 @@
 {{- /* Schema check for .chezmoidata/packages.yaml. */ -}}
 {{- $fields := list "via" "version" "brew" "dnf" "mise" "cask" "copr" "repofile" -}}
 {{- $lists := list "components" -}}
+{{- /* maps are not overridable: fpath order already arbitrates per-backend differences */ -}}
+{{- $maps := list "completions" -}}
 {{- $tags := list "darwin" "linux" "darwin/amd64" "darwin/arm64" "linux/amd64" "linux/arm64" -}}
 {{- $backends := list "system" "mise" -}}
 {{- range $name, $item := .packages -}}
@@ -11,6 +13,9 @@
     {{- else if has $k $lists -}}
       {{- if or (not (kindIs "slice" $v)) (empty $v) }}{{ fail (printf "packages.%s.%s: must be a non-empty list" $name $k) }}{{ end -}}
       {{- range $v }}{{ if not (kindIs "string" .) }}{{ fail (printf "packages.%s.%s: entries must be strings" $name $k) }}{{ end }}{{ end -}}
+    {{- else if has $k $maps -}}
+      {{- if or (not (kindIs "map" $v)) (empty $v) }}{{ fail (printf "packages.%s.%s: must be a non-empty map of command -> recipe" $name $k) }}{{ end -}}
+      {{- range $ck, $cv := $v }}{{ if or (not (kindIs "string" $cv)) (empty $cv) }}{{ fail (printf "packages.%s.%s.%s: recipe must be a non-empty string" $name $k $ck) }}{{ end }}{{ end -}}
     {{- else if eq $k "on" -}}
       {{- if or (not (kindIs "slice" $v)) (empty $v) }}{{ fail (printf "packages.%s: 'on' must be a non-empty list" $name) }}{{ end -}}
       {{- range $v }}{{ if not (has . $tags) }}{{ fail (printf "packages.%s.on: unknown tag %q" $name .) }}{{ end }}{{ end -}}

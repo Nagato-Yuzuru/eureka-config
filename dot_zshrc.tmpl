@@ -47,8 +47,13 @@ if [[ ! -s $zsh_plugins_zsh || ! $zsh_plugins_zsh -nt $zsh_plugins_txt || $#anti
 fi
 unset antidote_clones
 
-# zsh-completions is `kind:clone` in .zsh_plugins.txt: antidote only clones it;
-# it goes on fpath here, before compinit, so its #compdef lines get registered.
+# fpath, front to back — the first _<cmd> found wins:
+#   hand-dropped completions; zsh-users/zsh-completions (`kind:clone` in
+#   .zsh_plugins.txt: antidote only clones it, so it goes on fpath here, before
+#   compinit); what Homebrew ships; what zsh and the system ship; and LAST the
+#   set `mise run refresh-completions` generates from packages.yaml for tools no
+#   package manager covers — last on purpose, so a shipped completion always
+#   beats a generated one and the generated set only ever fills gaps.
 fpath=(
     "${XDG_DATA_HOME}/zsh/site-functions"
     "$(antidote path zsh-users/zsh-completions)/src"
@@ -56,9 +61,15 @@ fpath=(
     "$(brew --prefix)/share/zsh/site-functions"
 {{- end }}
     "${fpath[@]}"
+    "${XDG_CACHE_HOME}/{{ .zsh.generatedCompletions }}"
 )
 
 fpath=(${(u)fpath})
+
+# mise's postinstall hook keeps the generated set current; this covers the first
+# shell after the config lands and a wiped cache. Once: the dir exists afterwards
+# even when a recipe failed.
+[[ -d "${XDG_CACHE_HOME}/{{ .zsh.generatedCompletions }}" ]] || mise run refresh-completions
 
 autoload -Uz compinit
 
@@ -84,10 +95,6 @@ command -v tofu &>/dev/null && complete -o nospace -C "$(command -v tofu)" tofu
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
 zstyle ':completion:*' menu select
 zstyle ':completion:*:descriptions' format '%d'
-
-if command -v prek &>/dev/null; then
-    eval "$(COMPLETE=zsh prek)"
-fi
 
 if command -v ast-grep &>/dev/null && command -v sg &>/dev/null &&
     whence -w _ast-grep &>/dev/null; then
