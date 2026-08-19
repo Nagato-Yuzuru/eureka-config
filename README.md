@@ -15,9 +15,13 @@ identity beyond os and arch yet; the three machines happen to differ there.
 | Path                                | What                                                                                       |
 | ----------------------------------- | ------------------------------------------------------------------------------------------ |
 | `.chezmoidata/packages.yaml`        | every tool, one line each, whatever installs it (see below)                                |
+| `.chezmoidata/platforms.yaml`       | kinds of machine: OS and the system package manager that comes with it                     |
+| `.chezmoidata/machines.yaml`        | the render targets, `<os>-<arch>` today; a specific device would be one more entry         |
 | `.chezmoidata/xdg.yaml`             | XDG base dirs; `.zshenv` exports them, externals and symlinks derive their paths from them |
 | `.chezmoidata/zsh.yaml`             | the generated-completions dir, declared once for `.zshrc` and both mise tasks              |
-| `.chezmoitemplates/`                | the package renderers and validator                                                        |
+| `tools/inventory/`                  | the inventory compiler: types, resolution, renderers; `uv run render` writes `.rendered/`  |
+| `.rendered/<machine>/`              | the compiled artifacts chezmoi includes (Brewfile lines, mise tools, recipes …), committed |
+| `.chezmoitemplates/artifact`        | includes this machine's artifact; refuses a stale tree or an undeclared machine            |
 | `.chezmoiexternal.toml.tmpl`        | oh-my-tmux and (linux) antidote as git clones under `$XDG_DATA_HOME`                       |
 | `.chezmoiignore`                    | what a non-Mac never gets: Brewfile, ghostty, wezterm, 1Password                           |
 | `run_onchange_before_install-*.sh`  | installs the system packages (brew bundle / dnf) and uv tools whenever this machine's set changes |
@@ -26,57 +30,73 @@ identity beyond os and arch yet; the three machines happen to differ there.
 | `run_onchange_after_refresh-*.sh`   | regenerates the zsh completions whenever this machine's recipe list changes (below)        |
 | `dot_config/mise/tasks/`            | mise file tasks rendered per machine: `refresh-completions`, `audit-completions` (below)   |
 | `dot_claude/`                       | Claude Code: CLAUDE.md, hooks, skills, and the managed-settings fragments (last section)    |
-| `tests/`                            | pytest for the package model and the settings merge engine; never deployed                 |
+| `tests/`                            | pytest for the inventory and the settings merge engine; never deployed                     |
 
 ## Packages
 
-`packages.yaml` is the inventory. One line per tool; the fields say where it
-goes and how it gets there.
+`packages.yaml` is the inventory. One line per tool answers three questions:
+where it goes (`on`), how it gets there (`via` and that backend's block), and
+which zsh completions it generates (`completions`).
 
 ```yaml
-fd:      { on: [darwin, linux], dnf: fd-find }
-ghostty: { on: [darwin], cask: ghostty }
-rust:    { on: [darwin, linux], via: mise, version: stable, components: [rust-analyzer] }
-pnpm:    { on: [darwin, linux], via: mise, overrides: [{ $when: darwin/amd64, mise: "npm:pnpm" }] }
-ruff:    { on: [darwin, linux], via: uv, completions: { ruff: "ruff generate-shell-completion zsh" } }
+git:       { on: [darwin, linux] }
+fd:        { on: [darwin, linux], dnf: { name: fd-find } }
+starship:  { on: [darwin, linux], dnf: { copr: atim/starship }, completions: { starship: "starship completions zsh" } }
+ghostty:   { on: [darwin], brew: { cask: ghostty } }
+kubectl:   { on: [darwin], via: mise, completions: { kubectl: "kubectl completion zsh" } }
+rust:      { on: [darwin, linux], via: mise, mise: { version: stable, components: [rust-analyzer, rust-src] } }
+pnpm:      { on: [darwin, linux], via: mise, overrides: [{ $when: darwin/amd64, mise: { name: "npm:pnpm" } }] }
+ruff:      { on: [darwin, linux], via: uv, completions: { ruff: "ruff generate-shell-completion zsh" } }
 ```
 
-- `on` is a list of machine tags: `darwin`, `linux`, or `os/arch`.
-- `via` picks the backend. `system` (the default) means brew on a Mac and dnf
-  on Fedora; `mise` puts the tool in mise's `[tools]`; `uv` is `uv tool install`
-  (a venv per tool, entry points in `~/.local/bin`). The rule I use: one global
+- `on` is a list of machine tags: `darwin`, `linux`, or `os/arch`. (An open
+  set: a platform or device selector is one more variant, existing lines do
+  not change.)
+- `via` picks the backend and is the discriminator for the rest of the line.
+  `system` (the default) means the machine's platform's package manager —
+  brew on macOS, dnf on Fedora, per `platforms.yaml`, nowhere else — and
+  allows both a `brew:` and a `dnf:` block, each read only where it applies.
+  `mise` and `uv` allow exactly their own block. The rule I use: one global
   version, system package; multiple versions, mise; a Python CLI, uv. uv itself
-  is a system package on both, it never needs more than one version and
-  chezmoi's own scripts need it before mise has installed anything — which is
-  also what lets the install script run `uv tool install` right after brew/dnf.
-- `brew` / `dnf` / `mise` / `uv` override the name on that backend when it
-  differs from the key. `copr` and `repofile` add the Fedora repo the package
-  needs.
-- `version` is the version spec in the backend's own syntax (`stable`, `lts`,
+  is a system package on both: it never needs more than one version, chezmoi's
+  own scripts need it before mise has installed anything, and that is what
+  lets the install script run `uv tool install` right after brew/dnf.
+- The blocks carry what only that backend understands: `brew: { name | cask }`,
+  `dnf: { name | copr | repofile }`, `mise: { name | version | components }`,
+  `uv: { name | version }`. `name` is the name on that backend when it differs
+  from the key. `version` is in the backend's own syntax (`stable`, `lts`,
   `0.15.21`); declaring it and spelling it into a command are separate jobs,
-  the second is each renderer's. `components` is mise-only: the extra
-  components installed alongside the tool. rust-analyzer and rust-src ride on
-  the rust toolchain that way — rustup's default profile ships neither, so
-  without the line a new machine gets no language server.
+  the second is each renderer's. rust-analyzer and rust-src ride on the rust
+  toolchain as `components` — rustup's default profile ships neither, so
+  without the line a new machine gets no language server. A block on the wrong
+  `via`, or a `version` outside a block, is a type error, not an ignored field.
 - `overrides` is the only per-machine mechanism. Each entry whose `$when` tag
-  matches this machine is merged over the line, in order. Any field can differ
-  per machine that way (except `completions`, see below); today only pnpm does.
+  matches this machine is deep-merged over the line, in order (maps merge,
+  lists and scalars replace); an entry that switches `via` starts the how
+  afresh. It may touch `via` and the blocks, never `on` or `completions`;
+  today only pnpm uses one.
 - `completions` maps a command to the shell command that prints its zsh
-  completion (`kubectl: "kubectl completion zsh"`). See the next section.
+  completion. See the next section.
 
-From that one file chezmoi renders `~/.Brewfile`, the `[tools]` block of
-`~/.config/mise/config.toml`, the dnf and uv halves of the install script, and
-the recipe list inside `~/.config/mise/tasks/refresh-completions`. Bad data
-fails the render with a message naming the entry. `tests/golden/<machine>/`
-holds the rendered lists per machine, so a diff there shows exactly which
+The types are the schema: `tools/inventory/model.py` (Pydantic) says exactly
+what a line may contain, `inventory.py` resolves it per machine, `render.py`
+turns the resolved list into text. `uv run render` compiles every machine in
+`machines.yaml` into `.rendered/<machine>/{brewfile,dnf-list,dnf-repos,mise-tools,uv-tools,completions}`
+plus a `STAMP` (the hash of the three data files); the tree is committed, and
+`prek` refuses a commit where it is stale. chezmoi never runs Python: its
+templates `include` the file for `<os>-<arch>` through `.chezmoitemplates/artifact`,
+which recomputes the hash and fails on a tree compiled from other data than
+what is checked out, or on a machine `machines.yaml` does not declare. Bad data
+fails `render` with a message naming the entry (`packages.rust.mise.components:
+must be a non-empty list`). A diff under `.rendered/` shows exactly which
 machine an edit touched.
 
 Each layer has one owner and one trigger: chezmoi installs the system packages
 and uv tools when this machine's set changes; `mise install` is a manual step
 and stays one. Not modelled yet: pnpm globals. When the first one is declared,
-`via: pnpm` takes the same shape — a rendered mise task run by hand after
-`mise install` (pnpm is a mise tool), `depends_post` on `refresh-completions`,
-no hook.
+`via: pnpm` takes the same shape — one more package variant and renderer, and a
+rendered mise task run by hand after `mise install` (pnpm is a mise tool),
+`depends_post` on `refresh-completions`, no hook.
 
 ## Zsh completions
 
@@ -167,17 +187,13 @@ the eBPF section of `packages.yaml` takes the BTF/CO-RE path throughout.
 ## Development
 
 ```sh
-uv run pytest                                          # everything, ~8 s
-UPDATE_GOLDEN=1 uv run pytest tests/test_packages.py   # after an intentional packages.yaml change
-prek install                                           # the git hooks in .pre-commit-config.yaml
+uv run render            # after editing .chezmoidata/{packages,platforms,machines}.yaml; commit .rendered/ with it
+uv run render --check    # what prek runs: fails on a stale tree
+uv run pytest            # everything, ~15 s
+prek install             # the git hooks in .pre-commit-config.yaml
 ```
 
-To see what another machine would get without being on it:
-
-```sh
-printf '{{ includeTemplate "mise-tools" . }}' |
-  chezmoi execute-template --override-data '{"chezmoi": {"os": "darwin", "arch": "amd64"}}'
-```
+What another machine gets is a file: `cat .rendered/darwin-amd64/mise-tools`.
 
 ## Claude Code managed settings: the fragment protocol
 

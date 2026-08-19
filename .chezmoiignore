@@ -24,3 +24,6 @@ uv.lock
 .venv/
 **/__pycache__
 .pytest_cache/
+
+# Repo-only: the inventory compiler (uv run render)
+tools/

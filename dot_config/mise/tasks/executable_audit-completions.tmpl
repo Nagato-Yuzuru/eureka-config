@@ -93,7 +93,7 @@ while read -r kind name; do
         row "$name" "-" "(cask: never ships completions)" ;;
     esac
 done <<'PACKAGES'
-{{ template "brewfile" . }}
+{{ includeTemplate "artifact" (merge (dict "name" "brewfile") .) -}}
 PACKAGES
 {{- else }}
 print "== dnf packages: zsh completions the package installs (else who covers its commands) =="
@@ -109,7 +109,7 @@ while read -r name; do
         report_bins "$name" "${bins[@]:t}"
     fi
 done <<'PACKAGES'
-{{ template "dnf-list" . }}
+{{ includeTemplate "artifact" (merge (dict "name" "dnf-list") .) -}}
 PACKAGES
 {{- end }}
 
@@ -144,7 +144,7 @@ while read -r spec; do
         row "$tool" "-" "(not installed)"
     fi
 done <<'UVTOOLS'
-{{ template "uv-tools" . }}
+{{ includeTemplate "artifact" (merge (dict "name" "uv-tools") .) -}}
 UVTOOLS
 
 # --- 4. recipes ---------------------------------------------------------------------------
@@ -159,5 +159,5 @@ while read -r cmd rest; do
         row "$cmd" "-" "($cmd not installed)"
     fi
 done <<'RECIPES'
-{{ template "completions" . }}
+{{ includeTemplate "artifact" (merge (dict "name" "completions") .) -}}
 RECIPES

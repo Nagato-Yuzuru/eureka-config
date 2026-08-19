@@ -1,6 +1,7 @@
 #:schema https://mise.jdx.dev/schema/mise.json
-# [tools] is generated from .chezmoidata/packages.yaml (via: mise entries)
-{{ template "mise-tools" . }}
+# [tools] is compiled by `uv run render` from .chezmoidata/packages.yaml (via: mise entries)
+[tools]
+{{ includeTemplate "artifact" (merge (dict "name" "mise-tools") .) }}
 [settings]
 experimental = true
 python.uv_venv_auto = "source" # use uv

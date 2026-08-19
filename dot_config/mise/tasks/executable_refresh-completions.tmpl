@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="regenerate the zsh completions no package manager ships (mise tools, uv tools, casks)"
-# Rendered by chezmoi from the `completions` field of .chezmoidata/packages.yaml.
+# The recipes are the `completions` field of .chezmoidata/packages.yaml, compiled
+# per machine by `uv run render` (.rendered/) and included by chezmoi.
 # Runs from mise's postinstall hook (~/.config/mise/config.toml), from chezmoi's
 # run_onchange_after_refresh-completions when this machine's recipe list changes,
 # and by hand.
@@ -49,7 +50,7 @@ while read -r cmd recipe; do
         failed+=("$cmd")
     fi
 done <<'RECIPES'
-{{ template "completions" . }}
+{{ includeTemplate "artifact" (merge (dict "name" "completions") .) -}}
 RECIPES
 
 rm -rf "$out"

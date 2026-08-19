@@ -18,5 +18,5 @@ mise run refresh-completions
 # This machine's recipes, one `<command> <recipe>` per line. Never executed; here
 # so the rendered content — and with it chezmoi's re-run — changes when they do.
 : <<'RECIPES'
-{{ template "completions" . }}
+{{ includeTemplate "artifact" (merge (dict "name" "completions") .) -}}
 RECIPES

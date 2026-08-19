@@ -1,79 +1,81 @@
-"""Executable spec for .chezmoidata/packages.yaml and its renderers in .chezmoitemplates/.
+"""Executable spec for the inventory: .chezmoidata/{platforms,machines,packages}.yaml, its
+types (tools/inventory/model.py), resolution (inventory.py) and the artifacts chezmoi
+includes from .rendered/ (render.py, `uv run render`).
 
-Table-driven. Each table row is one fact about the model:
-- RENDER_CASES   synthetic packages -> exact lines each renderer emits on each machine
-- REJECTS        malformed entries -> the validation message naming the entry
-- INVARIANTS     facts the real packages.yaml must keep (per machine)
-Plus golden renders of the real data per machine — the checked-in "what does each
-machine get" view (regenerate: `UPDATE_GOLDEN=1 uv run pytest tests/test_packages.py`).
+Table-driven. Each row is one fact about the model:
+- RENDER_CASES   synthetic packages -> exact lines each artifact holds on each machine
+- REJECTS        malformed entries -> the message naming the entry
+- INVARIANTS     facts the real inventory must keep, per machine
+Plus: .rendered/ is what the data compiles to today (the check `uv run render --check`
+runs before every commit), the chezmoi consumers render to valid shell/toml with the
+artifact's lines inside, and the `artifact` template refuses stale data and machines
+nobody declared.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 
+from inventory.inventory import DATA_FILES, Inventory, InventoryError, load_yaml
+from inventory.render import ARTIFACTS, RENDERED_DIR, render, render_tree, stale
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TEMPLATES = REPO_ROOT / ".chezmoitemplates"
+DATA = REPO_ROOT / ".chezmoidata"
+RENDERED = REPO_ROOT / RENDERED_DIR
+MISE_TASKS = REPO_ROOT / "dot_config" / "mise" / "tasks"
 INSTALL_SCRIPT = REPO_ROOT / "run_onchange_before_install-packages.sh.tmpl"
 REFRESH_SCRIPT = REPO_ROOT / "run_onchange_after_refresh-completions.sh.tmpl"
-MISE_TASKS = REPO_ROOT / "dot_config" / "mise" / "tasks"
-GOLDEN = Path(__file__).parent / "golden"
 
-MACHINES = {
-    "darwin-arm64": ("darwin", "arm64"),
-    "darwin-amd64": ("darwin", "amd64"),
-    "linux-arm64": ("linux", "arm64"),
-}
-RENDERERS = ("brewfile", "mise-tools", "dnf-list", "dnf-repos", "uv-tools", "completions")
+PLATFORMS = load_yaml(DATA / "platforms.yaml")["platforms"]
+MACHINES = load_yaml(DATA / "machines.yaml")["machines"]
+REAL = Inventory.load(DATA)
 
 # --- harness ------------------------------------------------------------------------------------
 
 
-def chezmoi_template(
-    expr: str, *, source: Path, machine: str, data: dict | None = None
-) -> subprocess.CompletedProcess[str]:
-    os_, arch = MACHINES[machine]
-    override = {"chezmoi": {"os": os_, "arch": arch}, **(data or {})}
-    return subprocess.run(
+def inventory(packages: dict) -> Inventory:
+    """The real platforms and machines, synthetic packages."""
+    return Inventory(PLATFORMS, MACHINES, packages)
+
+
+def lines(inv: Inventory, artifact: str, machine: str) -> list[str]:
+    return render(artifact, inv.resolved(machine)).splitlines()
+
+
+def chezmoi_render(path: Path, machine: str, source: Path = REPO_ROOT) -> str:
+    os_, arch = MACHINES[machine]["platform"], MACHINES[machine]["arch"]
+    os_ = PLATFORMS[os_]["os"]
+    proc = subprocess.run(
         [
-            "chezmoi",
-            "execute-template",
-            "--source",
-            str(source),
-            "--override-data",
-            json.dumps(override),
+            "chezmoi", "execute-template", "--source", str(source),
+            "--override-data", json.dumps({"chezmoi": {"os": os_, "arch": arch}}),
+            "--file", str(path),
         ],
-        input=expr,
         text=True,
         capture_output=True,
         check=False,
-    )
-
-
-def render_lines(
-    template: str, *, source: Path, machine: str, data: dict | None = None
-) -> list[str]:
-    """Non-blank lines of a renderer's output; the constant `[tools]` header is dropped."""
-    proc = chezmoi_template(
-        f'{{{{ includeTemplate "{template}" . }}}}', source=source, machine=machine, data=data
-    )
+    )  # fmt: skip
     assert proc.returncode == 0, proc.stderr
-    return [ln for ln in proc.stdout.splitlines() if ln.strip() and ln != "[tools]"]
+    return proc.stdout
 
 
-@pytest.fixture(scope="session")
-def bare_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A source dir holding only the templates, so `packages` comes solely from --override-data."""
-    src = tmp_path_factory.mktemp("chezmoi-src")
-    (src / ".chezmoitemplates").symlink_to(TEMPLATES)
-    return src
+def heredoc(text: str, tag: str) -> list[str]:
+    """Non-blank lines of the first `<<'TAG' … TAG` block in a rendered script."""
+    body = text.split(f"<<'{tag}'\n", 1)[1].split(f"\n{tag}\n", 1)[0]
+    return [ln for ln in body.splitlines() if ln.strip()]
+
+
+def check_shell(script: Path, shell: str = "bash") -> None:
+    subprocess.run([shell, "-n", str(script)], check=True)
+    if shell == "bash" and shutil.which("shellcheck"):
+        subprocess.run(["shellcheck", str(script)], check=True)
 
 
 # --- render semantics (synthetic data) ----------------------------------------------------------
@@ -83,19 +85,18 @@ def bare_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
 class RenderCase:
     id: str
     packages: dict
-    expect: dict[tuple[str, str], list[str]] = field(
-        default_factory=dict
-    )  # (renderer, machine) -> lines
+    expect: dict[tuple[str, str], list[str]] = field(default_factory=dict)  # (artifact, machine)
 
 
 RENDER_CASES = [
     RenderCase(
-        "default-backend-is-system",
+        "default-backend-is-the-platforms-system-manager",
         {"foo": {"on": ["darwin", "linux"]}},
         {
             ("brewfile", "darwin-arm64"): ['brew "foo"'],
             ("dnf-list", "linux-arm64"): ["foo"],
             ("mise-tools", "darwin-arm64"): [],
+            ("uv-tools", "darwin-arm64"): [],
         },
     ),
     RenderCase(
@@ -120,12 +121,12 @@ RENDER_CASES = [
     ),
     RenderCase(
         "version-is-emitted-for-mise",
-        {"rust": {"on": ["darwin"], "via": "mise", "version": "stable"}},
+        {"rust": {"on": ["darwin"], "via": "mise", "mise": {"version": "stable"}}},
         {("mise-tools", "darwin-arm64"): ['"rust" = "stable"']},
     ),
     RenderCase(
-        "uv-spells-name-and-version-as-name-at-version",  # one `version` field; each renderer spells it
-        {"foo": {"on": ["darwin"], "via": "uv", "uv": "foo-cli", "version": "1.2"}},
+        "uv-spells-name-and-version-as-name-at-version",
+        {"foo": {"on": ["darwin"], "via": "uv", "uv": {"name": "foo-cli", "version": "1.2"}}},
         {("uv-tools", "darwin-arm64"): ["foo-cli@1.2"]},
     ),
     RenderCase(
@@ -134,13 +135,10 @@ RENDER_CASES = [
             "foo": {
                 "on": ["darwin", "linux"],
                 "via": "uv",
-                "overrides": [{"$when": "linux", "version": "1"}],
+                "overrides": [{"$when": "linux", "uv": {"version": "1"}}],
             }
         },
-        {
-            ("uv-tools", "darwin-arm64"): ["foo"],
-            ("uv-tools", "linux-arm64"): ["foo@1"],
-        },
+        {("uv-tools", "darwin-arm64"): ["foo"], ("uv-tools", "linux-arm64"): ["foo@1"]},
     ),
     RenderCase(
         "components-render-an-inline-table",
@@ -148,8 +146,7 @@ RENDER_CASES = [
             "rust": {
                 "on": ["darwin"],
                 "via": "mise",
-                "version": "stable",
-                "components": ["rust-analyzer", "rust-src"],
+                "mise": {"version": "stable", "components": ["rust-analyzer", "rust-src"]},
             }
         },
         {
@@ -160,17 +157,17 @@ RENDER_CASES = [
     ),
     RenderCase(
         "components-without-a-version-still-get-one",
-        {"foo": {"on": ["darwin"], "via": "mise", "components": ["only"]}},
+        {"foo": {"on": ["darwin"], "via": "mise", "mise": {"components": ["only"]}}},
         {("mise-tools", "darwin-arm64"): ['"foo" = { version = "latest", components = ["only"] }']},
     ),
     RenderCase(
-        "override-replaces-components-wholesale",
+        "override-replaces-components-wholesale",  # lists replace, maps merge
         {
             "foo": {
                 "on": ["darwin", "linux"],
                 "via": "mise",
-                "components": ["a", "b"],
-                "overrides": [{"$when": "linux", "components": ["c"]}],
+                "mise": {"components": ["a", "b"]},
+                "overrides": [{"$when": "linux", "mise": {"components": ["c"]}}],
             }
         },
         {
@@ -181,11 +178,27 @@ RENDER_CASES = [
         },
     ),
     RenderCase(
-        "name-defaults-to-key-and-per-backend-override-wins",
+        "override-merges-into-the-block-it-patches",  # version kept, name added
         {
-            "fd": {"on": ["darwin", "linux"], "dnf": "fd-find"},
-            "macism": {"on": ["darwin"], "brew": "laishulu/homebrew/macism"},
-            "gopls": {"on": ["darwin"], "via": "mise", "mise": "go:golang.org/x/tools/gopls"},
+            "foo": {
+                "on": ["darwin"],
+                "via": "mise",
+                "mise": {"version": "2"},
+                "overrides": [{"$when": "darwin", "mise": {"name": "npm:foo"}}],
+            }
+        },
+        {("mise-tools", "darwin-arm64"): ['"npm:foo" = "2"']},
+    ),
+    RenderCase(
+        "name-defaults-to-key-and-the-backend-block-renames",
+        {
+            "fd": {"on": ["darwin", "linux"], "dnf": {"name": "fd-find"}},
+            "macism": {"on": ["darwin"], "brew": {"name": "laishulu/homebrew/macism"}},
+            "gopls": {
+                "on": ["darwin"],
+                "via": "mise",
+                "mise": {"name": "go:golang.org/x/tools/gopls"},
+            },
         },
         {
             ("brewfile", "darwin-arm64"): ['brew "fd"', 'brew "laishulu/homebrew/macism"'],
@@ -195,8 +208,24 @@ RENDER_CASES = [
     ),
     RenderCase(
         "cask-renders-cask-line-not-brew",
-        {"ghostty": {"on": ["darwin"], "cask": "ghostty"}},
+        {"ghostty": {"on": ["darwin"], "brew": {"cask": "ghostty"}}},
         {("brewfile", "darwin-arm64"): ['cask "ghostty"']},
+    ),
+    RenderCase(
+        "both-system-blocks-may-coexist-and-each-platform-reads-its-own",
+        {
+            "starship": {
+                "on": ["darwin", "linux"],
+                "brew": {"name": "starship-formula"},
+                "dnf": {"copr": "atim/starship"},
+            }
+        },
+        {
+            ("brewfile", "darwin-arm64"): ['brew "starship-formula"'],
+            ("dnf-list", "linux-arm64"): ["starship"],
+            ("dnf-repos", "linux-arm64"): ["copr atim/starship"],
+            ("dnf-repos", "darwin-arm64"): [],
+        },
     ),
     RenderCase(
         "package-absent-from-on-renders-nowhere",
@@ -210,10 +239,7 @@ RENDER_CASES = [
     RenderCase(
         "os-arch-tag-matches-only-that-arch",
         {"foo": {"on": ["darwin/amd64"]}},
-        {
-            ("brewfile", "darwin-amd64"): ['brew "foo"'],
-            ("brewfile", "darwin-arm64"): [],
-        },
+        {("brewfile", "darwin-amd64"): ['brew "foo"'], ("brewfile", "darwin-arm64"): []},
     ),
     RenderCase(
         "override-when-os-changes-backend",
@@ -236,7 +262,7 @@ RENDER_CASES = [
             "pnpm": {
                 "on": ["darwin", "linux"],
                 "via": "mise",
-                "overrides": [{"$when": "darwin/amd64", "mise": "npm:pnpm"}],
+                "overrides": [{"$when": "darwin/amd64", "mise": {"name": "npm:pnpm"}}],
             }
         },
         {
@@ -251,10 +277,10 @@ RENDER_CASES = [
             "foo": {
                 "on": ["darwin"],
                 "via": "mise",
-                "version": "1",
+                "mise": {"version": "1"},
                 "overrides": [
-                    {"$when": "darwin", "version": "2"},
-                    {"$when": "darwin/arm64", "version": "3"},
+                    {"$when": "darwin", "mise": {"version": "2"}},
+                    {"$when": "darwin/arm64", "mise": {"version": "3"}},
                 ],
             }
         },
@@ -264,15 +290,15 @@ RENDER_CASES = [
         },
     ),
     RenderCase(
-        "override-reaches-every-field",
+        "override-may-switch-backend-and-bring-that-backends-block",
         {
             "foo": {
                 "on": ["darwin", "linux"],
                 "via": "mise",
-                "version": "1",
+                "mise": {"version": "1"},
                 "overrides": [
-                    {"$when": "darwin/arm64", "version": "2"},
-                    {"$when": "linux", "via": "system", "dnf": "foo-bin", "copr": "a/b"},
+                    {"$when": "darwin/arm64", "mise": {"version": "2"}},
+                    {"$when": "linux", "via": "system", "dnf": {"name": "foo-bin", "copr": "a/b"}},
                 ],
             }
         },
@@ -285,10 +311,9 @@ RENDER_CASES = [
     RenderCase(
         "dnf-repos-lists-copr-and-repofile-only-for-packages-installed-here-via-system",
         {
-            "starship": {"on": ["darwin", "linux"], "copr": "atim/starship"},
-            "mise": {"on": ["linux"], "repofile": "https://mise.jdx.dev/rpm/mise.repo"},
-            "mac-only": {"on": ["darwin"], "copr": "nope/nope"},
-            "via-mise": {"on": ["linux"], "via": "mise", "copr": "nope/nope"},
+            "starship": {"on": ["darwin", "linux"], "dnf": {"copr": "atim/starship"}},
+            "mise": {"on": ["linux"], "dnf": {"repofile": "https://mise.jdx.dev/rpm/mise.repo"}},
+            "mac-only": {"on": ["darwin"], "dnf": {"copr": "nope/nope"}},
         },
         {
             ("dnf-repos", "linux-arm64"): [
@@ -309,12 +334,7 @@ RENDER_CASES = [
     RenderCase(
         "no-packages-renders-nothing",
         {},
-        {
-            ("brewfile", "darwin-arm64"): [],
-            ("mise-tools", "darwin-arm64"): [],
-            ("dnf-list", "linux-arm64"): [],
-            ("dnf-repos", "linux-arm64"): [],
-        },
+        {(a, "darwin-arm64"): [] for a in ARTIFACTS} | {(a, "linux-arm64"): [] for a in ARTIFACTS},
     ),
     RenderCase(
         "empty-overrides-is-a-no-op",
@@ -327,7 +347,7 @@ RENDER_CASES = [
             "foo": {
                 "on": ["darwin", "linux"],
                 "via": "mise",
-                "overrides": [{"$when": "linux/amd64", "version": "9"}],
+                "overrides": [{"$when": "linux/amd64", "mise": {"version": "9"}}],
             }
         },
         {
@@ -341,17 +361,17 @@ RENDER_CASES = [
             "foo": {
                 "on": ["darwin/arm64"],
                 "via": "mise",
-                "overrides": [{"$when": "darwin", "version": "2"}],
+                "overrides": [{"$when": "darwin", "mise": {"version": "2"}}],
             }
         },
-        {
-            ("mise-tools", "darwin-arm64"): ['"foo" = "2"'],
-            ("mise-tools", "darwin-amd64"): [],
-        },
+        {("mise-tools", "darwin-arm64"): ['"foo" = "2"'], ("mise-tools", "darwin-amd64"): []},
     ),
     RenderCase(
         "shared-copr-is-emitted-once-per-package",  # the install script's guard makes repeats no-ops
-        {"a": {"on": ["linux"], "copr": "x/y"}, "b": {"on": ["linux"], "copr": "x/y"}},
+        {
+            "a": {"on": ["linux"], "dnf": {"copr": "x/y"}},
+            "b": {"on": ["linux"], "dnf": {"copr": "x/y"}},
+        },
         {("dnf-repos", "linux-arm64"): ["copr x/y", "copr x/y"]},
     ),
     RenderCase(
@@ -403,7 +423,7 @@ RENDER_CASES = [
         {
             "1password-cli": {
                 "on": ["darwin"],
-                "cask": "1password-cli",
+                "brew": {"cask": "1password-cli"},
                 "completions": {"op": "op completion zsh"},
             }
         },
@@ -431,28 +451,25 @@ RENDER_CASES = [
 
 
 @pytest.mark.parametrize(
-    ("packages", "renderer", "machine", "want"),
+    ("packages", "artifact", "machine", "want"),
     [
-        pytest.param(c.packages, renderer, machine, want, id=f"{c.id}:{renderer}@{machine}")
+        pytest.param(c.packages, artifact, machine, want, id=f"{c.id}:{artifact}@{machine}")
         for c in RENDER_CASES
-        for (renderer, machine), want in c.expect.items()
+        for (artifact, machine), want in c.expect.items()
     ],
 )
-def test_render(bare_source: Path, packages: dict, renderer: str, machine: str, want: list[str]):
-    assert (
-        render_lines(renderer, source=bare_source, machine=machine, data={"packages": packages})
-        == want
-    )
+def test_render(packages: dict, artifact: str, machine: str, want: list[str]):
+    assert lines(inventory(packages), artifact, machine) == want
 
 
 # --- validation ---------------------------------------------------------------------------------
 
 REJECTS = [
-    ("unknown-key", {"foo": {"on": ["darwin"], "nope": "1"}}, 'packages.foo: unknown key "nope"'),
-    ("missing-on", {"foo": {"via": "mise"}}, "packages.foo: missing 'on'"),
-    ("on-not-a-list", {"foo": {"on": "darwin"}}, "packages.foo: 'on' must be a non-empty list"),
-    ("on-empty", {"foo": {"on": []}}, "packages.foo: 'on' must be a non-empty list"),
-    ("on-unknown-tag", {"foo": {"on": ["mars"]}}, 'packages.foo.on: unknown tag "mars"'),
+    ("unknown-key", {"foo": {"on": ["darwin"], "nope": "1"}}, "packages.foo.nope: Extra inputs"),
+    ("missing-on", {"foo": {"via": "mise"}}, "packages.foo.on: Field required"),
+    ("on-not-a-list", {"foo": {"on": "darwin"}}, "packages.foo.on: Input should be a valid list"),
+    ("on-empty", {"foo": {"on": []}}, "packages.foo.on: List should have at least 1 item"),
+    ("on-unknown-tag", {"foo": {"on": ["mars"]}}, "packages.foo.on.0: unknown tag 'mars'"),
     (
         "via-invalid",
         {"foo": {"on": ["darwin"], "via": "pip"}},
@@ -460,33 +477,59 @@ REJECTS = [
     ),
     (
         "name-field-is-a-map",
-        {"foo": {"on": ["darwin"], "mise": {"darwin": "x"}}},
-        "packages.foo.mise: must be a string",
+        {"foo": {"on": ["darwin"], "via": "mise", "mise": {"name": {"darwin": "x"}}}},
+        "packages.foo.mise.name: Input should be a valid string",
+    ),
+    # the point of the blocks: a backend's parameters cannot land on another backend
+    (
+        "brew-block-on-a-mise-package",
+        {"foo": {"on": ["darwin"], "via": "mise", "brew": {"cask": "x"}}},
+        "packages.foo.brew: no brew block on a `via: mise` package",
     ),
     (
-        "uv-name-field-is-a-list",
-        {"foo": {"on": ["darwin"], "via": "uv", "uv": ["foo-cli"]}},
-        "packages.foo.uv: must be a string",
+        "dnf-block-on-a-mise-package",
+        {"foo": {"on": ["linux"], "via": "mise", "dnf": {"copr": "a/b"}}},
+        "packages.foo.dnf: no dnf block on a `via: mise` package",
+    ),
+    (
+        "mise-block-on-a-system-package",
+        {"foo": {"on": ["darwin"], "mise": {"version": "1"}}},
+        "packages.foo.mise: no mise block on a `via: system` package",
+    ),
+    (
+        "uv-block-on-a-mise-package",
+        {"foo": {"on": ["darwin"], "via": "mise", "uv": {"version": "1"}}},
+        "packages.foo.uv: no uv block on a `via: mise` package",
+    ),
+    (
+        "version-outside-a-block",  # brew and dnf have no version; the field lives where it means something
+        {"foo": {"on": ["darwin"], "version": "9"}},
+        "packages.foo.version: Extra inputs are not permitted",
+    ),
+    (
+        "brew-is-a-formula-or-a-cask-not-both",
+        {"foo": {"on": ["darwin"], "brew": {"name": "a", "cask": "b"}}},
+        "packages.foo.brew: a formula ({ name }) or a cask ({ cask }), not both",
     ),
     (
         "overrides-not-a-list",
         {"foo": {"on": ["darwin"], "overrides": {"$when": "linux"}}},
-        "packages.foo: 'overrides' must be a list",
+        "packages.foo.overrides: Input should be a valid list",
     ),
     (
         "override-missing-when",
         {"foo": {"on": ["darwin"], "overrides": [{"via": "mise"}]}},
-        "each entry needs $when",
+        "packages.foo.overrides[?].$when: Field required",
     ),
     (
         "override-unknown-tag",
         {"foo": {"on": ["darwin"], "overrides": [{"$when": "mars"}]}},
-        "each entry needs $when",
+        "packages.foo.overrides[mars].$when: unknown tag 'mars'",
     ),
     (
         "override-of-on",
         {"foo": {"on": ["darwin"], "overrides": [{"$when": "linux", "on": ["linux"]}]}},
-        'packages.foo.overrides[linux]: cannot override "on"',
+        "packages.foo.overrides[linux]: cannot override 'on'",
     ),
     (
         "override-via-invalid",
@@ -495,33 +538,44 @@ REJECTS = [
     ),
     (
         "override-value-not-string",
-        {"foo": {"on": ["darwin"], "overrides": [{"$when": "linux", "version": 1}]}},
-        "packages.foo.overrides[linux].version: must be a string",
+        {
+            "foo": {
+                "on": ["darwin"],
+                "via": "mise",
+                "overrides": [{"$when": "linux", "mise": {"version": 1}}],
+            }
+        },
+        "packages.foo.overrides[linux].mise.version: Input should be a valid string",
+    ),
+    (
+        "override-that-matches-nothing-is-still-checked",
+        {
+            "foo": {
+                "on": ["darwin"],
+                "overrides": [{"$when": "linux/amd64", "mise": {"version": "1"}}],
+            }
+        },
+        "packages.foo.overrides[linux/amd64].mise: no mise block on a `via: system` package",
     ),
     (
         "components-not-a-list",
-        {"foo": {"on": ["darwin"], "components": "rust-src"}},
-        "packages.foo.components: must be a non-empty list",
+        {"foo": {"on": ["darwin"], "via": "mise", "mise": {"components": "rust-src"}}},
+        "packages.foo.mise.components: Input should be a valid list",
     ),
     (
         "components-empty",
-        {"foo": {"on": ["darwin"], "components": []}},
-        "packages.foo.components: must be a non-empty list",
+        {"foo": {"on": ["darwin"], "via": "mise", "mise": {"components": []}}},
+        "packages.foo.mise.components: must be a non-empty list",
     ),
     (
         "components-entry-not-a-string",
-        {"foo": {"on": ["darwin"], "components": [1]}},
-        "packages.foo.components: entries must be strings",
-    ),
-    (
-        "override-components-not-a-list",
-        {"foo": {"on": ["darwin"], "overrides": [{"$when": "linux", "components": "rust-src"}]}},
-        "packages.foo.overrides[linux].components: must be a non-empty list",
+        {"foo": {"on": ["darwin"], "via": "mise", "mise": {"components": [1]}}},
+        "packages.foo.mise.components.0: Input should be a valid string",
     ),
     (
         "completions-not-a-map",
         {"foo": {"on": ["darwin"], "completions": "foo completion zsh"}},
-        "packages.foo.completions: must be a non-empty map of command -> recipe",
+        "packages.foo.completions: Input should be a valid dictionary",
     ),
     (
         "completions-empty",
@@ -531,35 +585,45 @@ REJECTS = [
     (
         "completions-recipe-not-a-string",
         {"foo": {"on": ["darwin"], "completions": {"foo": ["foo", "completion"]}}},
-        "packages.foo.completions.foo: recipe must be a non-empty string",
+        "packages.foo.completions.foo: Input should be a valid string",
     ),
     (
         "completions-recipe-empty",
         {"foo": {"on": ["darwin"], "completions": {"foo": ""}}},
-        "packages.foo.completions.foo: recipe must be a non-empty string",
+        "packages.foo.completions.foo: String should have at least 1 character",
     ),
     (
         "completions-not-overridable",  # fpath order already arbitrates per-backend differences
         {"foo": {"on": ["darwin"], "overrides": [{"$when": "linux", "completions": {"foo": "x"}}]}},
-        'packages.foo.overrides[linux]: cannot override "completions"',
+        "packages.foo.overrides[linux]: cannot override 'completions'",
     ),
 ]
 
 
-def validation_error(source: Path, packages: dict) -> str | None:
-    proc = chezmoi_template(
-        '{{ includeTemplate "packages-validate" . }}',
-        source=source,
-        machine="darwin-arm64",
-        data={"packages": packages},
-    )
-    return None if proc.returncode == 0 else proc.stderr
-
-
 @pytest.mark.parametrize(("packages", "message"), [pytest.param(p, m, id=i) for i, p, m in REJECTS])
-def test_validation_rejects(bare_source: Path, packages: dict, message: str):
-    err = validation_error(bare_source, packages)
-    assert err is not None and message in err, err
+def test_validation_rejects(packages: dict, message: str):
+    with pytest.raises(InventoryError) as e:
+        inventory(packages)
+    assert message in str(e.value), str(e.value)
+
+
+def test_machine_must_name_a_declared_platform():
+    with pytest.raises(InventoryError, match="machines.x: unknown platform 'nope'"):
+        Inventory(PLATFORMS, {"x": {"platform": "nope", "arch": "arm64"}}, {})
+
+
+def test_platform_system_manager_is_one_we_render_for():
+    with pytest.raises(
+        InventoryError, match="platforms.debian.system: Input should be 'brew' or 'dnf'"
+    ):
+        Inventory({"debian": {"os": "linux", "system": "apt"}}, {}, {})
+
+
+def test_yaml_on_is_a_key_not_a_boolean(tmp_path: Path):
+    """pyyaml is YAML 1.1 (`on` → True); the loader reads it as chezmoi does."""
+    f = tmp_path / "x.yaml"
+    f.write_text("on: [darwin]\nyes: no\n")
+    assert load_yaml(f) == {"on": ["darwin"], "yes": "no"}
 
 
 # --- real data ----------------------------------------------------------------------------------
@@ -568,7 +632,7 @@ def test_validation_rejects(bare_source: Path, packages: dict, message: str):
 @dataclass(frozen=True)
 class Invariant:
     id: str
-    renderer: str
+    artifact: str
     machine: str
     contains: list[str] = field(default_factory=list)
     excludes: list[str] = field(default_factory=list)
@@ -648,90 +712,126 @@ INVARIANTS = [
 ]
 
 
-@pytest.mark.parametrize("machine", MACHINES)
-def test_completions_commands_are_unique_per_machine(machine: str):
-    """Two packages claiming the same command would race for one _<cmd> file."""
-    cmds = [
-        ln.split(" ", 1)[0] for ln in render_lines("completions", source=REPO_ROOT, machine=machine)
-    ]
-    assert len(cmds) == len(set(cmds)), sorted(c for c in cmds if cmds.count(c) > 1)
-
-
 @pytest.mark.parametrize("inv", [pytest.param(i, id=i.id) for i in INVARIANTS])
 def test_real_data_invariant(inv: Invariant):
-    lines = render_lines(inv.renderer, source=REPO_ROOT, machine=inv.machine)
-    assert set(inv.contains) <= set(lines), inv.contains
-    assert not set(inv.excludes) & set(lines), inv.excludes
+    got = lines(REAL, inv.artifact, inv.machine)
+    assert set(inv.contains) <= set(got), inv.contains
+    assert not set(inv.excludes) & set(got), inv.excludes
     if inv.exact is not None:
-        assert lines == inv.exact
+        assert got == inv.exact
 
 
 @pytest.mark.parametrize("machine", MACHINES)
 @pytest.mark.parametrize(
-    "renderer", [r for r in RENDERERS if r != "dnf-repos"]
-)  # shared repos repeat by design
-def test_real_data_has_no_duplicate_lines(renderer: str, machine: str):
-    lines = render_lines(renderer, source=REPO_ROOT, machine=machine)
-    assert len(lines) == len(set(lines)), sorted(ln for ln in lines if lines.count(ln) > 1)
+    "artifact", [a for a in ARTIFACTS if a != "dnf-repos"]
+)  # shared repos repeat
+def test_real_data_has_no_duplicate_lines(artifact: str, machine: str):
+    got = lines(REAL, artifact, machine)
+    assert len(got) == len(set(got)), sorted(ln for ln in got if got.count(ln) > 1)
 
 
-def render_file(path: Path, machine: str) -> str:
-    os_, arch = MACHINES[machine]
+@pytest.mark.parametrize("machine", MACHINES)
+def test_completions_commands_are_unique_per_machine(machine: str):
+    """Two packages claiming the same command would race for one _<cmd> file."""
+    cmds = [ln.split(" ", 1)[0] for ln in lines(REAL, "completions", machine)]
+    assert len(cmds) == len(set(cmds)), sorted(c for c in cmds if cmds.count(c) > 1)
+
+
+# --- .rendered/: the compiled tree chezmoi includes ---------------------------------------------
+
+
+def test_rendered_tree_is_what_the_data_compiles_to():
+    """`uv run render --check`, in-process: every artifact and STAMP on disk, no extras."""
+    assert stale(render_tree(REAL, DATA), RENDERED) == []
+
+
+@pytest.mark.parametrize("machine", MACHINES)
+@pytest.mark.parametrize("artifact", ARTIFACTS)
+def test_artifact_template_serves_this_machines_file(artifact: str, machine: str, tmp_path: Path):
+    """The template's hash of the data files agrees with STAMP, and it picks the machine's dir."""
+    tmpl = tmp_path / "t.tmpl"
+    tmpl.write_text('{{ includeTemplate "artifact" (merge (dict "name" "' + artifact + '") .) }}')
+    assert chezmoi_render(tmpl, machine) == (RENDERED / machine / artifact).read_text()
+
+
+def _source_copy(tmp_path: Path) -> Path:
+    src = tmp_path / "source"
+    src.mkdir()
+    for d in (".chezmoidata", ".chezmoitemplates", RENDERED_DIR):
+        shutil.copytree(REPO_ROOT / d, src / d)
+    return src
+
+
+def test_artifact_template_refuses_a_stale_tree(tmp_path: Path):
+    src = _source_copy(tmp_path)
+    with (src / ".chezmoidata" / DATA_FILES[1]).open("a") as f:
+        f.write("\n# an edit nobody rendered\n")
+    tmpl = tmp_path / "t.tmpl"
+    tmpl.write_text('{{ includeTemplate "artifact" (merge (dict "name" "brewfile") .) }}')
+    with pytest.raises(AssertionError, match=r"\.rendered/ is stale"):
+        chezmoi_render(tmpl, "darwin-arm64", source=src)
+
+
+def test_artifact_template_refuses_an_undeclared_machine(tmp_path: Path):
+    tmpl = tmp_path / "t.tmpl"
+    tmpl.write_text('{{ includeTemplate "artifact" (merge (dict "name" "brewfile") .) }}')
     proc = subprocess.run(
         [
             "chezmoi", "execute-template", "--source", str(REPO_ROOT),
-            "--override-data", json.dumps({"chezmoi": {"os": os_, "arch": arch}}),
-            "--file", str(path),
+            "--override-data", json.dumps({"chezmoi": {"os": "linux", "arch": "amd64"}}),
+            "--file", str(tmpl),
         ],
         text=True,
         capture_output=True,
         check=False,
     )  # fmt: skip
-    assert proc.returncode == 0, proc.stderr
-    return proc.stdout
+    assert proc.returncode != 0
+    assert "linux-amd64 is not declared" in proc.stderr
 
 
-def heredoc(text: str, tag: str) -> list[str]:
-    """Non-blank lines of the first `<<'TAG' ... TAG` block in a rendered script."""
-    body = text.split(f"<<'{tag}'\n", 1)[1].split(f"\n{tag}\n", 1)[0]
-    return [ln for ln in body.splitlines() if ln.strip()]
+# --- the consumers: scripts and configs that embed the artifacts --------------------------------
 
 
-def check_shell(script: Path, shell: str = "bash") -> None:
-    subprocess.run([shell, "-n", str(script)], check=True)
-    if shell == "bash" and shutil.which("shellcheck"):
-        subprocess.run(["shellcheck", str(script)], check=True)
+def _os(machine: str) -> str:
+    return PLATFORMS[MACHINES[machine]["platform"]]["os"]
 
 
 @pytest.mark.parametrize("machine", MACHINES)
 def test_install_script_renders_to_valid_shell(machine: str, tmp_path: Path):
     """System packages through this machine's package manager only, then the uv tools."""
-    os_, _ = MACHINES[machine]
-    rendered = render_file(INSTALL_SCRIPT, machine)
+    rendered = chezmoi_render(INSTALL_SCRIPT, machine)
     script = tmp_path / "install-packages.sh"
     script.write_text(rendered)
-    if os_ == "darwin":
+    if _os(machine) == "darwin":
         assert "brew bundle install --file=-" in rendered
         assert "dnf" not in rendered
+        assert heredoc(rendered, "EOF") == lines(REAL, "brewfile", machine)
     else:
         assert "xargs -r sudo dnf -y install" in rendered
         assert "brew" not in rendered
+        assert heredoc(rendered, "EOF") == lines(REAL, "dnf-repos", machine)
     assert rendered.index("uv tool install") > rendered.index("<<'EOF'"), "uv tools come after uv"
     check_shell(script)
     uv_block = rendered.split("uv tool install", 1)[1]
-    assert heredoc(uv_block, "EOF") == render_lines("uv-tools", source=REPO_ROOT, machine=machine)
+    assert heredoc(uv_block, "EOF") == lines(REAL, "uv-tools", machine)
+
+
+@pytest.mark.parametrize("machine", MACHINES)
+def test_mise_config_renders_the_tools_table(machine: str):
+    rendered = chezmoi_render(REPO_ROOT / "dot_config" / "mise" / "config.toml.tmpl", machine)
+    doc = tomllib.loads(rendered)
+    want = [ln.split(" = ", 1)[0].strip('"') for ln in lines(REAL, "mise-tools", machine)]
+    assert sorted(doc["tools"]) == sorted(want)
 
 
 @pytest.mark.parametrize("machine", MACHINES)
 def test_refresh_completions_task_renders_to_valid_bash(machine: str, tmp_path: Path):
     """The recipe heredoc is `read` line by line: one `<cmd> <recipe>` per line, no blank cmd."""
     script = tmp_path / "refresh-completions"
-    rendered = render_file(MISE_TASKS / "executable_refresh-completions.tmpl", machine)
+    rendered = chezmoi_render(MISE_TASKS / "executable_refresh-completions.tmpl", machine)
     script.write_text(rendered)
     check_shell(script)
-    assert heredoc(rendered, "RECIPES") == render_lines(
-        "completions", source=REPO_ROOT, machine=machine
-    )
+    assert heredoc(rendered, "RECIPES") == lines(REAL, "completions", machine)
 
 
 @pytest.mark.parametrize("machine", MACHINES)
@@ -739,38 +839,21 @@ def test_onchange_refresh_script_keys_on_this_machines_recipes(machine: str, tmp
     """chezmoi re-runs it when its rendered content changes, so the recipe list is rendered
     into it verbatim; the toolset gate defers to mise's postinstall hook on a new machine."""
     script = tmp_path / "refresh-completions.sh"
-    rendered = render_file(REFRESH_SCRIPT, machine)
+    rendered = chezmoi_render(REFRESH_SCRIPT, machine)
     script.write_text(rendered)
     check_shell(script)
     assert "mise ls --missing" in rendered
     assert rendered.index("mise ls --missing") < rendered.index("mise run refresh-completions")
-    assert heredoc(rendered, "RECIPES") == render_lines(
-        "completions", source=REPO_ROOT, machine=machine
-    )
+    assert heredoc(rendered, "RECIPES") == lines(REAL, "completions", machine)
 
 
 @pytest.mark.parametrize("machine", MACHINES)
 def test_audit_completions_task_renders_to_valid_zsh(machine: str, tmp_path: Path):
     script = tmp_path / "audit-completions"
-    rendered = render_file(MISE_TASKS / "executable_audit-completions.tmpl", machine)
+    rendered = chezmoi_render(MISE_TASKS / "executable_audit-completions.tmpl", machine)
     script.write_text(rendered)
     check_shell(script, "zsh")
-    os_, _ = MACHINES[machine]
-    assert ("brew packages" in rendered) == (os_ == "darwin")
-    assert ("rpm -ql" in rendered) == (os_ == "linux")
-    assert heredoc(rendered, "UVTOOLS") == render_lines(
-        "uv-tools", source=REPO_ROOT, machine=machine
-    )
-
-
-@pytest.mark.parametrize("machine", MACHINES)
-@pytest.mark.parametrize("renderer", RENDERERS)
-def test_golden_render(renderer: str, machine: str):
-    """Regenerate after an intentional packages.yaml change: UPDATE_GOLDEN=1 uv run pytest tests/test_packages.py"""
-    got = "".join(f"{ln}\n" for ln in render_lines(renderer, source=REPO_ROOT, machine=machine))
-    path = GOLDEN / machine / f"{renderer}.txt"
-    if os.environ.get("UPDATE_GOLDEN"):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(got)
-    assert path.exists(), f"missing golden {path}; run with UPDATE_GOLDEN=1"
-    assert got == path.read_text()
+    assert ("brew packages" in rendered) == (_os(machine) == "darwin")
+    assert ("rpm -ql" in rendered) == (_os(machine) == "linux")
+    assert heredoc(rendered, "UVTOOLS") == lines(REAL, "uv-tools", machine)
+    assert heredoc(rendered, "RECIPES") == lines(REAL, "completions", machine)

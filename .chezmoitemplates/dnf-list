@@ -1,8 +1,0 @@
-{{- /* One dnf package name per line, for the packages installed here via system. */ -}}
-{{- includeTemplate "packages-validate" . -}}
-{{- range $name, $item := .packages -}}
-{{- $r := includeTemplate "install-of" (dict "item" $item "key" $name "os" $.chezmoi.os "arch" $.chezmoi.arch) | fromJson -}}
-{{- if and (eq $.chezmoi.os "linux") (eq $r.backend "system") }}
-{{ $r.name }}
-{{- end }}
-{{- end }}

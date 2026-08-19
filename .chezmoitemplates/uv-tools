@@ -1,9 +1,0 @@
-{{- /* One `uv tool install` argument per line for the packages installed here via uv:
-       the name on PyPI, `@<version>` appended when a version is declared. */ -}}
-{{- includeTemplate "packages-validate" . -}}
-{{- range $name, $item := .packages -}}
-{{- $r := includeTemplate "install-of" (dict "item" $item "key" $name "os" $.chezmoi.os "arch" $.chezmoi.arch) | fromJson -}}
-{{- if eq $r.backend "uv" }}
-{{ $r.name }}{{ with get $r.item "version" }}@{{ . }}{{ end }}
-{{- end }}
-{{- end }}

@@ -1,7 +1,0 @@
-{{- includeTemplate "packages-validate" . -}}
-{{- range $name, $item := .packages -}}
-{{- $r := includeTemplate "install-of" (dict "item" $item "key" $name "os" $.chezmoi.os "arch" $.chezmoi.arch) | fromJson -}}
-{{- if and (eq $.chezmoi.os "darwin") (eq $r.backend "system") }}
-{{ if hasKey $r.item "cask" }}cask "{{ $r.item.cask }}"{{ else }}brew "{{ $r.name }}"{{ end }}
-{{- end }}
-{{- end }}
