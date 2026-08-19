@@ -9,13 +9,12 @@ the platform's package manager.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, get_args
 
-import yaml
 from pydantic import TypeAdapter, ValidationError
+from ruamel.yaml import YAML
 
 from inventory.model import (
     BACKENDS,
@@ -59,22 +58,14 @@ class InventoryError(ValueError):
     """Bad data, with the message naming the entry (`packages.foo.mise.version: …`)."""
 
 
-class _Yaml12(yaml.SafeLoader):
-    """pyyaml speaks YAML 1.1, where `on`/`off`/`yes`/`no` are booleans — and `on:` is
-    our most common key. chezmoi's parser (YAML 1.2) reads them as strings; so do we."""
-
-
-_Yaml12.yaml_implicit_resolvers = {
-    ch: [(tag, rx) for tag, rx in rs if tag != "tag:yaml.org,2002:bool"]
-    for ch, rs in yaml.SafeLoader.yaml_implicit_resolvers.items()
-}
-_Yaml12.add_implicit_resolver(
-    "tag:yaml.org,2002:bool", re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"), list("tTfF")
-)
+# ruamel.yaml, not pyyaml: pyyaml is YAML 1.1, where `on`/`off`/`yes`/`no` are booleans
+# — and `on:` is our most common key. YAML 1.2 (ruamel's default, and what chezmoi's
+# parser reads) keeps them strings, so both readers see the same file.
+_yaml = YAML(typ="safe")
 
 
 def load_yaml(path: Path) -> Any:
-    return yaml.load(path.read_text(), Loader=_Yaml12)  # noqa: S506 — a SafeLoader subclass
+    return _yaml.load(path.read_text())
 
 
 def _explain(prefix: str, err: ValidationError, tags: Sequence[str] = ()) -> str:

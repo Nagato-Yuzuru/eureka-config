@@ -177,7 +177,7 @@ class Override(BaseModel):
     when: Annotated[SelectorField, Field(alias="$when")]
 
     @property
-    def patch(self) -> Mapping[str, Any]:
+    def patch(self) -> dict[str, Any]:
         """The fields other than `$when`, unvalidated until merged into a package."""
         return self.model_extra or {}  # pydantic types the extras Optional; extra="allow" fills it
 
