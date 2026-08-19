@@ -14,11 +14,11 @@ identity beyond os and arch yet; the three machines happen to differ there.
 
 | Path                                | What                                                                                       |
 | ----------------------------------- | ------------------------------------------------------------------------------------------ |
-| `.chezmoidata/packages.yaml`        | every tool, one line each, whatever installs it (see below)                                |
-| `.chezmoidata/platforms.yaml`       | kinds of machine: OS and the system package manager that comes with it                     |
-| `.chezmoidata/machines.yaml`        | the render targets, `<os>-<arch>` today; a specific device would be one more entry         |
-| `.chezmoidata/xdg.yaml`             | XDG base dirs; `.zshenv` exports them, externals and symlinks derive their paths from them |
-| `.chezmoidata/zsh.yaml`             | the generated-completions dir, declared once for `.zshrc` and both mise tasks              |
+| `.chezmoidata/packages.toml`        | every tool, one line each, whatever installs it (see below)                                |
+| `.chezmoidata/platforms.toml`       | kinds of machine: OS and the system package manager that comes with it                     |
+| `.chezmoidata/machines.toml`        | the render targets, `<os>-<arch>` today; a specific device would be one more entry         |
+| `.chezmoidata/xdg.toml`             | XDG base dirs; `.zshenv` exports them, externals and symlinks derive their paths from them |
+| `.chezmoidata/zsh.toml`             | the generated-completions dir, declared once for `.zshrc` and both mise tasks              |
 | `tools/inventory/`                  | the inventory compiler: types, resolution, renderers; `uv run render` writes `.rendered/`  |
 | `.rendered/<machine>/`              | the compiled artifacts chezmoi includes (Brewfile lines, mise tools, recipes …), committed |
 | `.chezmoitemplates/artifact`        | includes this machine's artifact; refuses a stale tree or an undeclared machine            |
@@ -34,19 +34,25 @@ identity beyond os and arch yet; the three machines happen to differ there.
 
 ## Packages
 
-`packages.yaml` is the inventory. One line per tool answers three questions:
+`packages.toml` is the inventory. One line per tool answers three questions:
 where it goes (`on`), how it gets there (`via` and that backend's block), and
 which zsh completions it generates (`completions`).
 
-```yaml
-git:       { on: [darwin, linux] }
-fd:        { on: [darwin, linux], dnf: { name: fd-find } }
-starship:  { on: [darwin, linux], dnf: { copr: atim/starship }, completions: { starship: "starship completions zsh" } }
-ghostty:   { on: [darwin], brew: { cask: ghostty } }
-kubectl:   { on: [darwin], via: mise, completions: { kubectl: "kubectl completion zsh" } }
-rust:      { on: [darwin, linux], via: mise, mise: { version: stable, components: [rust-analyzer, rust-src] } }
-pnpm:      { on: [darwin, linux], via: mise, overrides: [{ $when: darwin/amd64, mise: { name: "npm:pnpm" } }] }
-ruff:      { on: [darwin, linux], via: uv, completions: { ruff: "ruff generate-shell-completion zsh" } }
+```toml
+[packages]
+git = { on = ["darwin", "linux"] }
+fd = { on = ["darwin", "linux"], dnf = { name = "fd-find" } }
+ghostty = { on = ["darwin"], brew = { cask = "ghostty" } }
+kubectl = { on = ["darwin"], via = "mise", completions = { kubectl = "kubectl completion zsh" } }
+node = { on = ["darwin", "linux"], via = "mise", mise = { version = "lts" } }
+ruff = { on = ["darwin", "linux"], via = "uv", completions = { ruff = "ruff generate-shell-completion zsh" } }
+# dotted keys when one line will not do (TOML 1.0 has no multi-line inline tables)
+starship.on = ["darwin", "linux"]
+starship.dnf = { copr = "atim/starship" }
+starship.completions.starship = "starship completions zsh"
+pnpm.on = ["darwin", "linux"]
+pnpm.via = "mise"
+pnpm.overrides = [{ when = "darwin/amd64", mise = { name = "npm:pnpm" } }]
 ```
 
 - `on` is a list of machine tags: `darwin`, `linux`, or `os/arch`. (An open
@@ -54,7 +60,7 @@ ruff:      { on: [darwin, linux], via: uv, completions: { ruff: "ruff generate-s
   not change.)
 - `via` picks the backend and is the discriminator for the rest of the line.
   `system` (the default) means the machine's platform's package manager —
-  brew on macOS, dnf on Fedora, per `platforms.yaml`, nowhere else — and
+  brew on macOS, dnf on Fedora, per `platforms.toml`, nowhere else — and
   allows both a `brew:` and a `dnf:` block, each read only where it applies.
   `mise` and `uv` allow exactly their own block. The rule I use: one global
   version, system package; multiple versions, mise; a Python CLI, uv. uv itself
@@ -71,7 +77,7 @@ ruff:      { on: [darwin, linux], via: uv, completions: { ruff: "ruff generate-s
   toolchain as `components` — rustup's default profile ships neither, so
   without the line a new machine gets no language server. A block on the wrong
   `via`, or a `version` outside a block, is a type error, not an ignored field.
-- `overrides` is the only per-machine mechanism. Each entry whose `$when` tag
+- `overrides` is the only per-machine mechanism. Each entry whose `when` tag
   matches this machine is deep-merged over the line, in order (maps merge,
   lists and scalars replace); an entry that switches `via` starts the how
   afresh. It may touch `via` and the blocks, never `on` or `completions`;
@@ -82,12 +88,12 @@ ruff:      { on: [darwin, linux], via: uv, completions: { ruff: "ruff generate-s
 The types are the schema: `tools/inventory/model.py` (Pydantic) says exactly
 what a line may contain, `inventory.py` resolves it per machine, `render.py`
 turns the resolved list into text. `uv run render` compiles every machine in
-`machines.yaml` into `.rendered/<machine>/{brewfile,dnf-list,dnf-repos,mise-tools,uv-tools,completions}`
+`machines.toml` into `.rendered/<machine>/{brewfile,dnf-list,dnf-repos,mise-tools,uv-tools,completions}`
 plus a `STAMP` (the hash of the three data files); the tree is committed, and
 `prek` refuses a commit where it is stale. chezmoi never runs Python: its
 templates `include` the file for `<os>-<arch>` through `.chezmoitemplates/artifact`,
 which recomputes the hash and fails on a tree compiled from other data than
-what is checked out, or on a machine `machines.yaml` does not declare. Bad data
+what is checked out, or on a machine `machines.toml` does not declare. Bad data
 fails `render` with a message naming the entry (`packages.rust.mise.components:
 must be a non-empty list`). A diff under `.rendered/` shows exactly which
 machine an edit touched.
@@ -107,7 +113,7 @@ install alongside the tool (`_gh _bat _fd _rg _uv …`), what the tool generates
 itself (`kubectl completion zsh`, `COMPLETE=zsh prek`), and
 zsh-users/zsh-completions (`_golang _node _tsc _cmake`). The third layer is the
 only one nobody installs for us — mise tools, uv tools, casks — and
-`packages.yaml` carries its recipes. A tool that is not in `packages.yaml` has
+`packages.toml` carries its recipes. A tool that is not in `packages.toml` has
 no completion here, and should not need one:
 
 ```yaml
@@ -117,10 +123,10 @@ mise:    { on: [darwin, linux], …,   completions: { mise: "mise completion zsh
 ```
 
 - `mise run refresh-completions` (rendered per machine, so it only knows this
-  machine's recipes) rebuilds the generated dir (`zsh.generatedCompletions` in `.chezmoidata/zsh.yaml`, under `$XDG_CACHE_HOME`) from scratch:
+  machine's recipes) rebuilds the generated dir (`zsh.generatedCompletions` in `.chezmoidata/zsh.toml`, under `$XDG_CACHE_HOME`) from scratch:
   skips commands not installed, runs each recipe with stdin closed, checks the
   output starts with `#compdef`, then swaps the directory in and drops
-  `~/.zcompdump`. A tool that leaves `packages.yaml` leaves no file behind.
+  `~/.zcompdump`. A tool that leaves `packages.toml` leaves no file behind.
 - Two things make the generated set stale, and each has its own trigger: a
   tool binary changed — mise's `postinstall` hook runs the task after every
   `mise install` / `mise up`; the recipe list changed — chezmoi's
@@ -135,7 +141,7 @@ mise:    { on: [darwin, linux], …,   completions: { mise: "mise completion zsh
   generated one — which is what makes a recipe safe to declare on any tool:
   where brew or dnf already ship it, the file is a shadowed no-op; where they
   don't (Fedora's mise and starship rpms), it fills the gap. Nothing in
-  `packages.yaml` records who ships what, and `completions` cannot be
+  `packages.toml` records who ships what, and `completions` cannot be
   overridden per machine, because it never needs to be.
 - `clap_stub <cmd> '<generator>'` in a recipe wraps a clap dynamic completer
   (`COMPLETE=zsh prek`) whose script must be sourced, so it works from a file.
@@ -183,12 +189,12 @@ or from under `/mnt/mac/Users/yuzuru` it loads the Mac's global config and
 installs the Mac's tool set into the VM.
 
 The VM runs OrbStack's kernel, not Fedora's, so `kernel-devel` never matches and
-the eBPF section of `packages.yaml` takes the BTF/CO-RE path throughout.
+the eBPF section of `packages.toml` takes the BTF/CO-RE path throughout.
 
 ## Development
 
 ```sh
-uv run render            # after editing .chezmoidata/{packages,platforms,machines}.yaml; commit .rendered/ with it
+uv run render            # after editing .chezmoidata/{packages,platforms,machines}.toml; commit .rendered/ with it
 uv run render --check    # what prek runs: fails on a stale tree
 uv run pytest            # everything, ~15 s
 prek install             # the git hooks in .pre-commit-config.yaml

@@ -51,7 +51,7 @@ unset antidote_clones
 #   hand-dropped completions; zsh-users/zsh-completions (`kind:clone` in
 #   .zsh_plugins.txt: antidote only clones it, so it goes on fpath here, before
 #   compinit); what Homebrew ships; what zsh and the system ship; and LAST the
-#   set `mise run refresh-completions` generates from packages.yaml for tools no
+#   set `mise run refresh-completions` generates from packages.toml for tools no
 #   package manager covers — last on purpose, so a shipped completion always
 #   beats a generated one and the generated set only ever fills gaps.
 fpath=(

@@ -1,7 +1,0 @@
-# The render targets: `uv run render` compiles .rendered/<id>/ for each, and chezmoi
-# includes the one whose id is `<os>-<arch>` (.chezmoitemplates/artifact). A specific
-# device is one more entry; `on:` in packages.yaml can then name it.
-machines:
-  darwin-arm64: { platform: macos, arch: arm64 }
-  darwin-amd64: { platform: macos, arch: amd64 }
-  linux-arm64: { platform: fedora, arch: arm64 }

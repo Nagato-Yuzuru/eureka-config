@@ -1,5 +1,5 @@
 #:schema https://mise.jdx.dev/schema/mise.json
-# [tools] is compiled by `uv run render` from .chezmoidata/packages.yaml (via: mise entries)
+# [tools] is compiled by `uv run render` from .chezmoidata/packages.toml (via: mise entries)
 [tools]
 {{ includeTemplate "artifact" (merge (dict "name" "mise-tools") .) }}
 [settings]
@@ -9,7 +9,7 @@ env_cache = true
 env_cache_ttl = "6h"
 npm.package_manager = "pnpm"
 
-# Tasks are files in ~/.config/mise/tasks/, rendered by chezmoi from packages.yaml:
+# Tasks are files in ~/.config/mise/tasks/, rendered by chezmoi from packages.toml:
 #   refresh-completions  regenerate the zsh completions no package manager ships
 #   audit-completions    who provides each tool's completion on this machine
 [hooks]

@@ -1,4 +1,4 @@
-"""Executable spec for the inventory: .chezmoidata/{platforms,machines,packages}.yaml, its
+"""Executable spec for the inventory: .chezmoidata/{platforms,machines,packages}.toml, its
 types (tools/inventory/model.py), resolution (inventory.py) and the artifacts chezmoi
 includes from .rendered/ (render.py, `uv run render`).
 
@@ -25,7 +25,7 @@ from typing import Any
 
 import pytest
 
-from inventory.inventory import DATA_FILES, Inventory, InventoryError, load_yaml
+from inventory.inventory import DATA_FILES, Inventory, InventoryError, load_data
 from inventory.render import ARTIFACTS, RENDERED_DIR, render, render_tree, stale
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -35,8 +35,8 @@ MISE_TASKS = REPO_ROOT / "dot_config" / "mise" / "tasks"
 INSTALL_SCRIPT = REPO_ROOT / "run_onchange_before_install-packages.sh.tmpl"
 REFRESH_SCRIPT = REPO_ROOT / "run_onchange_after_refresh-completions.sh.tmpl"
 
-PLATFORMS = load_yaml(DATA / "platforms.yaml")["platforms"]
-MACHINES = load_yaml(DATA / "machines.yaml")["machines"]
+PLATFORMS = load_data(DATA / "platforms.toml")["platforms"]
+MACHINES = load_data(DATA / "machines.toml")["machines"]
 REAL = Inventory.load(DATA)
 
 # --- harness ------------------------------------------------------------------------------------
@@ -137,7 +137,7 @@ RENDER_CASES = [
             "foo": {
                 "on": ["darwin", "linux"],
                 "via": "uv",
-                "overrides": [{"$when": "linux", "uv": {"version": "1"}}],
+                "overrides": [{"when": "linux", "uv": {"version": "1"}}],
             }
         },
         {("uv-tools", "darwin-arm64"): ["foo"], ("uv-tools", "linux-arm64"): ["foo@1"]},
@@ -169,7 +169,7 @@ RENDER_CASES = [
                 "on": ["darwin", "linux"],
                 "via": "mise",
                 "mise": {"components": ["a", "b"]},
-                "overrides": [{"$when": "linux", "mise": {"components": ["c"]}}],
+                "overrides": [{"when": "linux", "mise": {"components": ["c"]}}],
             }
         },
         {
@@ -186,7 +186,7 @@ RENDER_CASES = [
                 "on": ["darwin"],
                 "via": "mise",
                 "mise": {"version": "2"},
-                "overrides": [{"$when": "darwin", "mise": {"name": "npm:foo"}}],
+                "overrides": [{"when": "darwin", "mise": {"name": "npm:foo"}}],
             }
         },
         {("mise-tools", "darwin-arm64"): ['"npm:foo" = "2"']},
@@ -249,7 +249,7 @@ RENDER_CASES = [
             "uv": {
                 "on": ["darwin", "linux"],
                 "via": "mise",
-                "overrides": [{"$when": "linux", "via": "system"}],
+                "overrides": [{"when": "linux", "via": "system"}],
             }
         },
         {
@@ -264,7 +264,7 @@ RENDER_CASES = [
             "pnpm": {
                 "on": ["darwin", "linux"],
                 "via": "mise",
-                "overrides": [{"$when": "darwin/amd64", "mise": {"name": "npm:pnpm"}}],
+                "overrides": [{"when": "darwin/amd64", "mise": {"name": "npm:pnpm"}}],
             }
         },
         {
@@ -281,8 +281,8 @@ RENDER_CASES = [
                 "via": "mise",
                 "mise": {"version": "1"},
                 "overrides": [
-                    {"$when": "darwin", "mise": {"version": "2"}},
-                    {"$when": "darwin/arm64", "mise": {"version": "3"}},
+                    {"when": "darwin", "mise": {"version": "2"}},
+                    {"when": "darwin/arm64", "mise": {"version": "3"}},
                 ],
             }
         },
@@ -299,8 +299,8 @@ RENDER_CASES = [
                 "via": "mise",
                 "mise": {"version": "1"},
                 "overrides": [
-                    {"$when": "darwin/arm64", "mise": {"version": "2"}},
-                    {"$when": "linux", "via": "system", "dnf": {"name": "foo-bin", "copr": "a/b"}},
+                    {"when": "darwin/arm64", "mise": {"version": "2"}},
+                    {"when": "linux", "via": "system", "dnf": {"name": "foo-bin", "copr": "a/b"}},
                 ],
             }
         },
@@ -349,7 +349,7 @@ RENDER_CASES = [
             "foo": {
                 "on": ["darwin", "linux"],
                 "via": "mise",
-                "overrides": [{"$when": "linux/amd64", "mise": {"version": "9"}}],
+                "overrides": [{"when": "linux/amd64", "mise": {"version": "9"}}],
             }
         },
         {
@@ -363,7 +363,7 @@ RENDER_CASES = [
             "foo": {
                 "on": ["darwin/arm64"],
                 "via": "mise",
-                "overrides": [{"$when": "darwin", "mise": {"version": "2"}}],
+                "overrides": [{"when": "darwin", "mise": {"version": "2"}}],
             }
         },
         {("mise-tools", "darwin-arm64"): ['"foo" = "2"'], ("mise-tools", "darwin-amd64"): []},
@@ -538,27 +538,27 @@ REJECTS = [
     ),
     Reject(
         "overrides-not-a-list",
-        {"foo": {"on": ["darwin"], "overrides": {"$when": "linux"}}},
+        {"foo": {"on": ["darwin"], "overrides": {"when": "linux"}}},
         "packages.foo.overrides: Input should be a valid list",
     ),
     Reject(
         "override-missing-when",
         {"foo": {"on": ["darwin"], "overrides": [{"via": "mise"}]}},
-        "packages.foo.overrides[?].$when: Field required",
+        "packages.foo.overrides[?].when: Field required",
     ),
     Reject(
         "override-unknown-tag",
-        {"foo": {"on": ["darwin"], "overrides": [{"$when": "mars"}]}},
-        "packages.foo.overrides[mars].$when: unknown tag 'mars'",
+        {"foo": {"on": ["darwin"], "overrides": [{"when": "mars"}]}},
+        "packages.foo.overrides[mars].when: unknown tag 'mars'",
     ),
     Reject(
         "override-of-on",
-        {"foo": {"on": ["darwin"], "overrides": [{"$when": "linux", "on": ["linux"]}]}},
+        {"foo": {"on": ["darwin"], "overrides": [{"when": "linux", "on": ["linux"]}]}},
         "packages.foo.overrides[linux]: cannot override 'on'",
     ),
     Reject(
         "override-via-invalid",
-        {"foo": {"on": ["darwin"], "overrides": [{"$when": "linux", "via": "pip"}]}},
+        {"foo": {"on": ["darwin"], "overrides": [{"when": "linux", "via": "pip"}]}},
         "packages.foo.overrides[linux]: via must be system|mise|uv",
     ),
     Reject(
@@ -567,7 +567,7 @@ REJECTS = [
             "foo": {
                 "on": ["darwin"],
                 "via": "mise",
-                "overrides": [{"$when": "linux", "mise": {"version": 1}}],
+                "overrides": [{"when": "linux", "mise": {"version": 1}}],
             }
         },
         "packages.foo.overrides[linux].mise.version: Input should be a valid string",
@@ -577,7 +577,7 @@ REJECTS = [
         {
             "foo": {
                 "on": ["darwin"],
-                "overrides": [{"$when": "linux/amd64", "mise": {"version": "1"}}],
+                "overrides": [{"when": "linux/amd64", "mise": {"version": "1"}}],
             }
         },
         "packages.foo.overrides[linux/amd64].mise: no mise block on a `via: system` package",
@@ -619,7 +619,7 @@ REJECTS = [
     ),
     Reject(
         "completions-not-overridable",  # fpath order already arbitrates per-backend differences
-        {"foo": {"on": ["darwin"], "overrides": [{"$when": "linux", "completions": {"foo": "x"}}]}},
+        {"foo": {"on": ["darwin"], "overrides": [{"when": "linux", "completions": {"foo": "x"}}]}},
         "packages.foo.overrides[linux]: cannot override 'completions'",
     ),
 ]
@@ -644,13 +644,6 @@ def test_platform_system_manager_is_one_we_render_for():
         InventoryError, match="platforms.debian.system: Input should be 'brew' or 'dnf'"
     ):
         Inventory({"debian": {"os": "linux", "system": "apt"}}, {}, {})
-
-
-def test_yaml_on_is_a_key_not_a_boolean(tmp_path: Path):
-    """pyyaml is YAML 1.1 (`on` → True); the loader reads it as chezmoi does."""
-    f = tmp_path / "x.yaml"
-    f.write_text("on: [darwin]\nyes: no\n")
-    assert load_yaml(f) == {"on": ["darwin"], "yes": "no"}
 
 
 # --- real data ----------------------------------------------------------------------------------

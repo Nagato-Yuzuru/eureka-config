@@ -1,0 +1,6 @@
+# Kinds of machine: the OS and the package manager that comes with it. `via = "system"`
+# in packages.toml resolves through `system` here — nowhere else is "linux means
+# dnf" assumed. A Debian box would be a new entry (and a renderer for apt).
+[platforms]
+macos = { os = "darwin", system = "brew" }
+fedora = { os = "linux", system = "dnf" }

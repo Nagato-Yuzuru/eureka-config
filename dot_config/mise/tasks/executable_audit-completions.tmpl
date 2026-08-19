@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 #MISE description="who provides each tool's zsh completion here: the package manager, a recipe, zsh itself, nobody"
-# Read-only report for keeping the `completions` recipes in .chezmoidata/packages.yaml
+# Read-only report for keeping the `completions` recipes in .chezmoidata/packages.toml
 # honest on this machine:
 #   1. system packages (brew|dnf): the zsh completions each package itself installs;
 #      for one that installs none, who covers each of its commands — or nobody
@@ -149,7 +149,7 @@ UVTOOLS
 
 # --- 4. recipes ---------------------------------------------------------------------------
 print
-print "== recipes (packages.yaml completions): who provides each command's completer =="
+print "== recipes (packages.toml completions): who provides each command's completer =="
 print "   generated = this recipe is what completes here; anything else = redundant here"
 while read -r cmd rest; do
     [[ -n $cmd ]] || continue

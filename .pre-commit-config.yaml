@@ -53,7 +53,7 @@ repos:
         name: oxfmt
         entry: oxfmt --write
         language: system
-        files: ^(\.chezmoidata/.*\.ya?ml|\.pre-commit-config\.yaml|\.yamllint\.yaml)$
+        files: ^(\.chezmoidata/.*\.toml|\.pre-commit-config\.yaml|\.yamllint\.yaml)$
 
       - id: yamllint
         name: yamllint

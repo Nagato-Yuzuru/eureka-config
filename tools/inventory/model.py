@@ -1,4 +1,4 @@
-"""What .chezmoidata/{platforms,machines,packages}.yaml may say — the types are the schema.
+"""What .chezmoidata/{platforms,machines,packages}.toml may say — the types are the schema.
 
 A package line answers three questions: where it goes (`on`), how it gets there
 (`via` plus that backend's block), and which zsh completions it generates
@@ -168,17 +168,17 @@ Spec = Brew | Dnf | Mise | Uv
 
 
 class Override(BaseModel):
-    """`{ $when: <tag>, <field>: <value>, … }`: a patch on the how, deep-merged over the
+    """`{ when = <tag>, <field> = <value>, … }`: a patch on the how, deep-merged over the
     package on machines the tag matches, in list order. Any of via/brew/dnf/mise/uv;
     never on/completions/overrides. Switching `via` drops the previous backend's block."""
 
     model_config = ConfigDict(extra="allow", frozen=True)
 
-    when: Annotated[SelectorField, Field(alias="$when")]
+    when: SelectorField
 
     @property
     def patch(self) -> dict[str, Any]:
-        """The fields other than `$when`, unvalidated until merged into a package."""
+        """The fields other than `when`, unvalidated until merged into a package."""
         return self.model_extra or {}  # pydantic types the extras Optional; extra="allow" fills it
 
     @model_validator(mode="after")

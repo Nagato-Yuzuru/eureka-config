@@ -1,4 +1,4 @@
-"""The inventory: the three data files loaded, validated, and resolved per machine.
+"""The inventory: the three data files (.chezmoidata/*.toml) loaded, validated, and resolved per machine.
 
 Resolution is the one place the domain rules live: a selector matches a machine
 through its platform's OS; matching overrides deep-merge over the package (maps
@@ -9,12 +9,12 @@ the platform's package manager.
 
 from __future__ import annotations
 
+import tomllib
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, get_args
 
 from pydantic import TypeAdapter, ValidationError
-from ruamel.yaml import YAML
 
 from inventory.model import (
     BACKENDS,
@@ -36,7 +36,7 @@ from inventory.model import (
     UvPackage,
 )
 
-DATA_FILES = ("machines.yaml", "packages.yaml", "platforms.yaml")
+DATA_FILES = ("machines.toml", "packages.toml", "platforms.toml")
 
 _PLATFORMS = TypeAdapter(dict[str, Platform])
 _MACHINES = TypeAdapter(dict[str, Machine])
@@ -58,20 +58,14 @@ class InventoryError(ValueError):
     """Bad data, with the message naming the entry (`packages.foo.mise.version: …`)."""
 
 
-# ruamel.yaml, not pyyaml: pyyaml is YAML 1.1, where `on`/`off`/`yes`/`no` are booleans
-# — and `on:` is our most common key. YAML 1.2 (ruamel's default, and what chezmoi's
-# parser reads) keeps them strings, so both readers see the same file.
-_yaml = YAML(typ="safe")
-
-
-def load_yaml(path: Path) -> Any:
-    return _yaml.load(path.read_text())
+def load_data(path: Path) -> dict[str, Any]:
+    return tomllib.loads(path.read_text())
 
 
 def _explain(prefix: str, err: ValidationError, tags: Sequence[str] = ()) -> str:
-    """One `<path>: <why>` line per error, the path spelled the way packages.yaml reads:
+    """One `<path>: <why>` line per error, the path spelled the way packages.toml reads:
     `packages.foo.mise.components`, `packages.foo.overrides[linux].via` (`tags` are the
-    overrides' `$when`, by position)."""
+    overrides' `when`, by position)."""
     lines: list[str] = []
     for e in err.errors():
         loc = [str(x) for x in e["loc"]]
@@ -104,9 +98,9 @@ def _explain(prefix: str, err: ValidationError, tags: Sequence[str] = ()) -> str
 
 
 def _when_tags(raw: Any) -> list[str]:
-    """`$when` of each override of a not-yet-validated line, for error paths only."""
+    """`when` of each override of a not-yet-validated line, for error paths only."""
     try:
-        return [str(o["$when"]) for o in raw["overrides"]]
+        return [str(o["when"]) for o in raw["overrides"]]
     except (KeyError, TypeError):
         return []
 
@@ -132,7 +126,7 @@ def matches(sel: Selector, machine: Machine, platforms: Mapping[str, Platform]) 
 
 
 def parse_package(prefix: str, raw: Any) -> Package:
-    """One line of packages.yaml -> its typed form, or InventoryError naming what is wrong."""
+    """One line of packages.toml -> its typed form, or InventoryError naming what is wrong."""
     try:
         return PACKAGE.validate_python(raw)
     except ValidationError as e:
@@ -179,12 +173,12 @@ class Inventory:
 
     @classmethod
     def load(cls, data_dir: Path) -> Inventory:
-        docs = {f: load_yaml(data_dir / f) for f in DATA_FILES}
+        docs = {f: load_data(data_dir / f) for f in DATA_FILES}
         try:
             return cls(
-                docs["platforms.yaml"]["platforms"],
-                docs["machines.yaml"]["machines"],
-                docs["packages.yaml"]["packages"],
+                docs["platforms.toml"]["platforms"],
+                docs["machines.toml"]["machines"],
+                docs["packages.toml"]["packages"],
             )
         except (KeyError, TypeError) as e:
             raise InventoryError(f"a data file lacks its top-level key: {e}") from None

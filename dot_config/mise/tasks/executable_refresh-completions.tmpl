@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #MISE description="regenerate the zsh completions no package manager ships (mise tools, uv tools, casks)"
-# The recipes are the `completions` field of .chezmoidata/packages.yaml, compiled
+# The recipes are the `completions` field of .chezmoidata/packages.toml, compiled
 # per machine by `uv run render` (.rendered/) and included by chezmoi.
 # Runs from mise's postinstall hook (~/.config/mise/config.toml), from chezmoi's
 # run_onchange_after_refresh-completions when this machine's recipe list changes,
 # and by hand.
 #
 # The output dir is rebuilt from scratch on every run, so a tool that leaves
-# packages.yaml, or is not installed on this machine, leaves no file behind. It
+# packages.toml, or is not installed on this machine, leaves no file behind. It
 # is the LAST fpath entry (.zshrc): a completion the package manager ships
 # always wins, and what is generated here only fills gaps — declaring a recipe
 # for a tool whose backend does ship one costs a shadowed file, nothing more.

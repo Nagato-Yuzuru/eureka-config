@@ -117,7 +117,7 @@ def render_tree(inv: Inventory, data_dir: Path) -> dict[str, str]:
 
 
 def write_tree(files: Mapping[str, str], out_dir: Path) -> None:
-    """Rebuilt from scratch: a machine that leaves machines.yaml leaves no directory behind."""
+    """Rebuilt from scratch: a machine that leaves machines.toml leaves no directory behind."""
     if out_dir.exists():
         shutil.rmtree(out_dir)
     for rel, text in files.items():

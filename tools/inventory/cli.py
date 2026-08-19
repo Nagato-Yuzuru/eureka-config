@@ -1,4 +1,4 @@
-"""`uv run render [--check] [--root DIR]`: compile .chezmoidata/{platforms,machines,packages}.yaml
+"""`uv run render [--check] [--root DIR]`: compile .chezmoidata/{platforms,machines,packages}.toml
 into .rendered/<machine>/<artifact> for every declared machine, or with --check report
 what would change (exit 1) — the pre-commit hook, so a data edit never lands without
 its render. Bad data prints the message naming the entry and exits 2."""

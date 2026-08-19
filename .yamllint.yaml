@@ -7,6 +7,6 @@ rules:
   empty-values: enable
   # `0755` is 493 to a YAML 1.1 parser, the string "0755" to a 1.2 one.
   octal-values: enable
-  # Same trap for `yes`/`on` as values. Keys are exempt: `on:` is packages.yaml's
-  # own key, and chezmoi's Go parser keeps it a string.
-  truthy: { check-keys: false }
+  # Same trap for `yes`/`on` as values and keys (the inventory left YAML for TOML
+  # over exactly this; what remains is tool-owned config).
+  truthy: enable
