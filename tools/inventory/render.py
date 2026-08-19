@@ -15,12 +15,16 @@ import json
 import shutil
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
+from typing import Any
 
 from inventory.inventory import DATA_FILES, Inventory
-from inventory.model import Cask, CoprRpm, Mise, RepofileRpm, Resolved, Uv
+from inventory.model import DOCS, Cask, CoprRpm, Mise, RepofileRpm, Resolved, Uv
 
 RENDERED_DIR = ".rendered"
 STAMP = "STAMP"
+SCHEMA_DIR = (
+    "schema"  # <RENDERED_DIR>/schema/<data file stem>.json, what each `#:schema` line names
+)
 
 
 def brewfile(rs: Iterable[Resolved]) -> list[str]:
@@ -105,6 +109,34 @@ def stamp(data_dir: Path) -> str:
     return h.hexdigest()
 
 
+def _no_null(node: Any) -> Any:
+    """TOML cannot write null: drop the `null` branch pydantic adds for `X | None` fields."""
+    if isinstance(node, dict):
+        if isinstance(node.get("anyOf"), list):
+            rest = [b for b in node["anyOf"] if b != {"type": "null"}]
+            if len(rest) == 1:
+                node = {**{k: v for k, v in node.items() if k != "anyOf"}, **rest[0]}
+            else:
+                node = {**node, "anyOf": rest}
+        return {k: _no_null(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_no_null(x) for x in node]
+    return node
+
+
+def schemas() -> dict[str, str]:
+    """JSON Schema (draft 2020-12) per data file, straight from the types — the editor's
+    view of the same constraints `render` enforces."""
+    out = {}
+    for name, doc in DOCS.items():
+        schema = _no_null(doc.model_json_schema())
+        schema = {"$schema": "https://json-schema.org/draft/2020-12/schema", **schema}
+        out[f"{SCHEMA_DIR}/{Path(name).stem}.json"] = (
+            json.dumps(schema, indent=2, sort_keys=True) + "\n"
+        )
+    return out
+
+
 def render_tree(inv: Inventory, data_dir: Path) -> dict[str, str]:
     """Relative path -> content for the whole `.rendered/` tree."""
     files = {
@@ -112,6 +144,7 @@ def render_tree(inv: Inventory, data_dir: Path) -> dict[str, str]:
         for mid in inv.machines
         for name, text in render_machine(inv, mid).items()
     }
+    files.update(schemas())
     files[STAMP] = stamp(data_dir) + "\n"
     return files
 

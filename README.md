@@ -21,6 +21,7 @@ identity beyond os and arch yet; the three machines happen to differ there.
 | `.chezmoidata/zsh.toml`             | the generated-completions dir, declared once for `.zshrc` and both mise tasks              |
 | `tools/inventory/`                  | the inventory compiler: types, resolution, renderers; `uv run render` writes `.rendered/`  |
 | `.rendered/<machine>/`              | the compiled artifacts chezmoi includes (Brewfile lines, mise tools, recipes …), committed |
+| `.rendered/schema/`                 | JSON Schema per data file, generated from the same types; each `.toml` names its own       |
 | `.chezmoitemplates/artifact`        | includes this machine's artifact; refuses a stale tree or an undeclared machine            |
 | `.chezmoiexternal.toml.tmpl`        | oh-my-tmux and (linux) antidote as git clones under `$XDG_DATA_HOME`                       |
 | `.chezmoiignore`                    | what a non-Mac never gets: Brewfile, ghostty, wezterm, 1Password                           |
@@ -102,11 +103,16 @@ completions = { ruff = "ruff generate-shell-completion zsh" }
   completion. See the next section.
 
 The types are the schema: `tools/inventory/model.py` (Pydantic) says exactly
-what a line may contain, `inventory.py` resolves it per machine, `render.py`
+what a table may contain, `inventory.py` resolves it per machine, `render.py`
 turns the resolved list into text. `uv run render` compiles every machine in
 `machines.toml` into `.rendered/<machine>/{brewfile,dnf-list,dnf-repos,mise-tools,uv-tools,completions}`
-plus a `STAMP` (the hash of the three data files); the tree is committed, and
-`prek` refuses a commit where it is stale. chezmoi never runs Python: its
+plus a `STAMP` (the hash of the three data files), and the same types into
+`.rendered/schema/<file>.json` — a JSON Schema per data file, which the
+`#:schema` line at the top of each `.toml` points at, so a TOML language
+server (taplo, tombi) completes and checks the file with the constraints
+`render` enforces (`deno run npm:@taplo/cli lint .chezmoidata/*.toml` does
+the same from a shell). The tree is committed, and `prek` refuses a commit
+where it is stale. chezmoi never runs Python: its
 templates `include` the file for `<os>-<arch>` through `.chezmoitemplates/artifact`,
 which recomputes the hash and fails on a tree compiled from other data than
 what is checked out, or on a machine `machines.toml` does not declare. Bad data

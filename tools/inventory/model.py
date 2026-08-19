@@ -24,8 +24,8 @@ from pydantic import (
     StringConstraints,
     Tag,
     TypeAdapter,
+    WithJsonSchema,
     field_validator,
-    model_validator,
 )
 
 Os = Literal["darwin", "linux"]
@@ -98,9 +98,17 @@ def parse_selector(v: Any) -> Selector:
     )
 
 
-# Round-trips as its tag, so a dumped package re-parses and error paths read like the file.
+TAGS = [*get_args(Os), *(f"{o}/{a}" for o in get_args(Os) for a in get_args(Arch))]
+
+# Round-trips as its tag, so a dumped package re-parses and error paths read like the file;
+# to JSON Schema it is the tag too (an enum), not the parsed object.
 SelectorField = Annotated[
-    Selector, BeforeValidator(parse_selector), PlainSerializer(lambda s: s.tag, return_type=str)
+    Selector,
+    BeforeValidator(parse_selector),
+    PlainSerializer(lambda s: s.tag, return_type=str),
+    WithJsonSchema(
+        {"type": "string", "enum": TAGS, "description": "a machine tag: an OS, or os/arch"}
+    ),
 ]
 
 
@@ -167,26 +175,22 @@ class Uv(Strict):
 Spec = Brew | Dnf | Mise | Uv
 
 
-class Override(BaseModel):
+class Override(Strict):
     """`{ when = <tag>, <field> = <value>, … }`: a patch on the how, deep-merged over the
     package on machines the tag matches, in list order. Any of via/brew/dnf/mise/uv;
     never on/completions/overrides. Switching `via` drops the previous backend's block."""
 
-    model_config = ConfigDict(extra="allow", frozen=True)
-
     when: SelectorField
+    via: Via | None = None
+    brew: Brew | None = None
+    dnf: Dnf | None = None
+    mise: Mise | None = None
+    uv: Uv | None = None
 
     @property
     def patch(self) -> dict[str, Any]:
-        """The fields other than `when`, unvalidated until merged into a package."""
-        return self.model_extra or {}  # pydantic types the extras Optional; extra="allow" fills it
-
-    @model_validator(mode="after")
-    def _only_the_how(self) -> Override:
-        bad = sorted(set(self.patch) - {"via", *BACKENDS})
-        if bad:
-            raise ValueError(f"cannot override {', '.join(repr(k) for k in bad)}")
-        return self
+        """What the entry sets, as written — the raw form `patched` merges over a package."""
+        return self.model_dump(exclude_unset=True, exclude={"when"})
 
 
 class _Package(Strict):
@@ -234,6 +238,50 @@ Package = Annotated[
     Discriminator(_via),
 ]
 PACKAGE = TypeAdapter(Package)
+
+
+# --- the documents: one model per .chezmoidata file, for the JSON Schemas ---------------------
+
+
+class PackagesDoc(Strict):
+    packages: dict[NonEmpty, Package]
+
+
+class PlatformsDoc(Strict):
+    platforms: dict[NonEmpty, Platform]
+
+
+class MachinesDoc(Strict):
+    machines: dict[NonEmpty, Machine]
+
+
+class Xdg(Strict):
+    """XDG base dirs relative to $HOME; .zshenv exports them, templates derive paths."""
+
+    dataHome: NonEmpty
+    stateHome: NonEmpty
+    cacheHome: NonEmpty
+
+
+class XdgDoc(Strict):
+    xdg: Xdg
+
+
+class Zsh(Strict):
+    generatedCompletions: NonEmpty  # where refresh-completions writes, under $XDG_CACHE_HOME
+
+
+class ZshDoc(Strict):
+    zsh: Zsh
+
+
+DOCS: dict[str, type[Strict]] = {
+    "packages.toml": PackagesDoc,
+    "platforms.toml": PlatformsDoc,
+    "machines.toml": MachinesDoc,
+    "xdg.toml": XdgDoc,
+    "zsh.toml": ZshDoc,
+}
 
 
 # --- resolved: what a renderer sees ------------------------------------------------------------

@@ -18,6 +18,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from inventory.model import (
     BACKENDS,
+    DOCS,
     PACKAGE,
     VIAS,
     Brew,
@@ -86,6 +87,8 @@ def _explain(prefix: str, err: ValidationError, tags: Sequence[str] = ()) -> str
         if len(loc) >= 2 and loc[0] == "overrides" and loc[1].isdigit():
             i = int(loc[1])
             loc[0:2] = [f"overrides[{tags[i] if i < len(tags) else '?'}]"]
+            if e["type"] == "extra_forbidden":  # only the how may be patched
+                loc, msg = loc[:1], f"cannot override {loc[-1]!r}"
         path = ".".join([prefix, *loc]) if loc else prefix
         line = f"{path}: {msg}"
         if line not in lines:
@@ -173,15 +176,24 @@ class Inventory:
 
     @classmethod
     def load(cls, data_dir: Path) -> Inventory:
-        docs = {f: load_data(data_dir / f) for f in DATA_FILES}
-        try:
-            return cls(
-                docs["platforms.toml"]["platforms"],
-                docs["machines.toml"]["machines"],
-                docs["packages.toml"]["packages"],
-            )
-        except (KeyError, TypeError) as e:
-            raise InventoryError(f"a data file lacks its top-level key: {e}") from None
+        """Every .chezmoidata file checked against its document model (xdg/zsh only feed
+        templates, but a typo there should fail here too); the three the inventory is
+        built from go through the per-entry parse for its messages."""
+        docs = {f: load_data(data_dir / f) for f in DOCS}
+        for name, doc in DOCS.items():
+            if name in DATA_FILES:
+                if not isinstance(docs[name].get(Path(name).stem), Mapping):
+                    raise InventoryError(f"{name}: needs a top-level [{Path(name).stem}] table")
+                continue
+            try:
+                doc.model_validate(docs[name])
+            except ValidationError as e:
+                raise InventoryError(_explain(name, e)) from None
+        return cls(
+            docs["platforms.toml"]["platforms"],
+            docs["machines.toml"]["machines"],
+            docs["packages.toml"]["packages"],
+        )
 
     # --- resolution ---------------------------------------------------------------------------
 

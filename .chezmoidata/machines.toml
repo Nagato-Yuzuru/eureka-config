@@ -1,3 +1,4 @@
+#:schema ../.rendered/schema/machines.json
 # The render targets: `uv run render` compiles .rendered/<id>/ for each, and chezmoi
 # includes the one whose id is `<os>-<arch>` (.chezmoitemplates/artifact). A specific
 # device is one more entry; `on` in packages.toml can then name it.

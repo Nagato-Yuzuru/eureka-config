@@ -1,0 +1,44 @@
+{
+  "$defs": {
+    "Xdg": {
+      "additionalProperties": false,
+      "description": "XDG base dirs relative to $HOME; .zshenv exports them, templates derive paths.",
+      "properties": {
+        "cacheHome": {
+          "minLength": 1,
+          "title": "Cachehome",
+          "type": "string"
+        },
+        "dataHome": {
+          "minLength": 1,
+          "title": "Datahome",
+          "type": "string"
+        },
+        "stateHome": {
+          "minLength": 1,
+          "title": "Statehome",
+          "type": "string"
+        }
+      },
+      "required": [
+        "dataHome",
+        "stateHome",
+        "cacheHome"
+      ],
+      "title": "Xdg",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "xdg": {
+      "$ref": "#/$defs/Xdg"
+    }
+  },
+  "required": [
+    "xdg"
+  ],
+  "title": "XdgDoc",
+  "type": "object"
+}

@@ -24,8 +24,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from inventory.inventory import DATA_FILES, Inventory, InventoryError, load_data
+from inventory.model import DOCS
 from inventory.render import ARTIFACTS, RENDERED_DIR, render, render_tree, stale
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -559,7 +561,7 @@ REJECTS = [
     Reject(
         "override-via-invalid",
         {"foo": {"on": ["darwin"], "overrides": [{"when": "linux", "via": "pip"}]}},
-        "packages.foo.overrides[linux]: via must be system|mise|uv",
+        "packages.foo.overrides[linux].via: Input should be 'system', 'mise' or 'uv'",
     ),
     Reject(
         "override-value-not-string",
@@ -807,6 +809,44 @@ def test_artifact_template_refuses_an_undeclared_machine(tmp_path: Path):
     )  # fmt: skip
     assert proc.returncode != 0
     assert "linux-amd64 is not declared" in proc.stderr
+
+
+# --- JSON Schemas: the types, for the editor ------------------------------------------------------
+
+
+def schema_for(name: str) -> Any:  # jsonschema ships no types; a Draft202012Validator
+    schema = json.loads((RENDERED / "schema" / f"{Path(name).stem}.json").read_text())
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema)
+
+
+@pytest.mark.parametrize("name", list(DOCS))
+def test_each_data_file_validates_against_its_schema(name: str):
+    """The `#:schema` line at the top of each .chezmoidata file names this file."""
+    first = (DATA / name).read_text().splitlines()[0]
+    assert first == f"#:schema ../.rendered/schema/{Path(name).stem}.json"
+    schema_for(name).validate(load_data(DATA / name))
+
+
+SCHEMA_REJECTS = [
+    ("mise-block-on-a-system-package", {"on": ["darwin"], "mise": {"version": "1"}}),
+    ("brew-block-on-a-mise-package", {"on": ["darwin"], "via": "mise", "brew": {"cask": "x"}}),
+    ("version-outside-a-block", {"on": ["darwin"], "version": "9"}),
+    ("brew-both-flavours", {"on": ["darwin"], "brew": {"name": "a", "cask": "b"}}),
+    ("dnf-two-sources", {"on": ["linux"], "dnf": {"copr": "a/b", "repofile": "u"}}),
+    ("unknown-tag", {"on": ["mars"]}),
+    ("on-empty", {"on": []}),
+    ("unknown-key", {"on": ["darwin"], "nope": 1}),
+    ("override-of-on", {"on": ["darwin"], "overrides": [{"when": "linux", "on": ["linux"]}]}),
+    ("bad-via", {"on": ["darwin"], "via": "pip"}),
+]
+
+
+@pytest.mark.parametrize("package", [pytest.param(p, id=i) for i, p in SCHEMA_REJECTS])
+def test_packages_schema_rejects_what_the_types_reject(package: Mapping[str, Any]):
+    with pytest.raises(InventoryError):
+        inventory({"foo": package})
+    assert not schema_for("packages.toml").is_valid({"packages": {"foo": package}})
 
 
 # --- the consumers: scripts and configs that embed the artifacts --------------------------------

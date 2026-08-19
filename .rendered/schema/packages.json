@@ -1,0 +1,440 @@
+{
+  "$defs": {
+    "Cask": {
+      "additionalProperties": false,
+      "properties": {
+        "cask": {
+          "minLength": 1,
+          "title": "Cask",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cask"
+      ],
+      "title": "Cask",
+      "type": "object"
+    },
+    "CoprRpm": {
+      "additionalProperties": false,
+      "description": "From a COPR repo (owner/project), enabled first.",
+      "properties": {
+        "copr": {
+          "minLength": 1,
+          "title": "Copr",
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "copr"
+      ],
+      "title": "CoprRpm",
+      "type": "object"
+    },
+    "Formula": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "default": null,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "title": "Formula",
+      "type": "object"
+    },
+    "Mise": {
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Components",
+          "type": "array"
+        },
+        "name": {
+          "default": null,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "default": "latest",
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "title": "Mise",
+      "type": "object"
+    },
+    "MisePackage": {
+      "additionalProperties": false,
+      "properties": {
+        "completions": {
+          "additionalProperties": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "default": {},
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "Completions",
+          "type": "object"
+        },
+        "mise": {
+          "$ref": "#/$defs/Mise",
+          "default": {
+            "components": [],
+            "name": null,
+            "version": "latest"
+          }
+        },
+        "on": {
+          "items": {
+            "description": "a machine tag: an OS, or os/arch",
+            "enum": [
+              "darwin",
+              "linux",
+              "darwin/arm64",
+              "darwin/amd64",
+              "linux/arm64",
+              "linux/amd64"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "On",
+          "type": "array"
+        },
+        "overrides": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Override"
+          },
+          "title": "Overrides",
+          "type": "array"
+        },
+        "via": {
+          "const": "mise",
+          "title": "Via",
+          "type": "string"
+        }
+      },
+      "required": [
+        "on",
+        "via"
+      ],
+      "title": "MisePackage",
+      "type": "object"
+    },
+    "Override": {
+      "additionalProperties": false,
+      "description": "`{ when = <tag>, <field> = <value>, \u2026 }`: a patch on the how, deep-merged over the\npackage on machines the tag matches, in list order. Any of via/brew/dnf/mise/uv;\nnever on/completions/overrides. Switching `via` drops the previous backend's block.",
+      "properties": {
+        "brew": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Formula"
+            },
+            {
+              "$ref": "#/$defs/Cask"
+            }
+          ],
+          "default": null,
+          "title": "Brew"
+        },
+        "dnf": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rpm"
+            },
+            {
+              "$ref": "#/$defs/CoprRpm"
+            },
+            {
+              "$ref": "#/$defs/RepofileRpm"
+            }
+          ],
+          "default": null,
+          "title": "Dnf"
+        },
+        "mise": {
+          "$ref": "#/$defs/Mise",
+          "default": null
+        },
+        "uv": {
+          "$ref": "#/$defs/Uv",
+          "default": null
+        },
+        "via": {
+          "default": null,
+          "enum": [
+            "system",
+            "mise",
+            "uv"
+          ],
+          "title": "Via",
+          "type": "string"
+        },
+        "when": {
+          "description": "a machine tag: an OS, or os/arch",
+          "enum": [
+            "darwin",
+            "linux",
+            "darwin/arm64",
+            "darwin/amd64",
+            "linux/arm64",
+            "linux/amd64"
+          ],
+          "title": "When",
+          "type": "string"
+        }
+      },
+      "required": [
+        "when"
+      ],
+      "title": "Override",
+      "type": "object"
+    },
+    "RepofileRpm": {
+      "additionalProperties": false,
+      "description": "From a third-party repo whose .repo file (URL) is added first.",
+      "properties": {
+        "name": {
+          "default": null,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "repofile": {
+          "minLength": 1,
+          "title": "Repofile",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repofile"
+      ],
+      "title": "RepofileRpm",
+      "type": "object"
+    },
+    "Rpm": {
+      "additionalProperties": false,
+      "description": "From Fedora's standard repos.",
+      "properties": {
+        "name": {
+          "default": null,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "title": "Rpm",
+      "type": "object"
+    },
+    "SystemPackage": {
+      "additionalProperties": false,
+      "properties": {
+        "brew": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Formula"
+            },
+            {
+              "$ref": "#/$defs/Cask"
+            }
+          ],
+          "default": {
+            "name": null
+          },
+          "title": "Brew"
+        },
+        "completions": {
+          "additionalProperties": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "default": {},
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "Completions",
+          "type": "object"
+        },
+        "dnf": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rpm"
+            },
+            {
+              "$ref": "#/$defs/CoprRpm"
+            },
+            {
+              "$ref": "#/$defs/RepofileRpm"
+            }
+          ],
+          "default": {
+            "name": null
+          },
+          "title": "Dnf"
+        },
+        "on": {
+          "items": {
+            "description": "a machine tag: an OS, or os/arch",
+            "enum": [
+              "darwin",
+              "linux",
+              "darwin/arm64",
+              "darwin/amd64",
+              "linux/arm64",
+              "linux/amd64"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "On",
+          "type": "array"
+        },
+        "overrides": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Override"
+          },
+          "title": "Overrides",
+          "type": "array"
+        },
+        "via": {
+          "const": "system",
+          "default": "system",
+          "title": "Via",
+          "type": "string"
+        }
+      },
+      "required": [
+        "on"
+      ],
+      "title": "SystemPackage",
+      "type": "object"
+    },
+    "Uv": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "default": null,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "default": null,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "title": "Uv",
+      "type": "object"
+    },
+    "UvPackage": {
+      "additionalProperties": false,
+      "properties": {
+        "completions": {
+          "additionalProperties": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "default": {},
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "Completions",
+          "type": "object"
+        },
+        "on": {
+          "items": {
+            "description": "a machine tag: an OS, or os/arch",
+            "enum": [
+              "darwin",
+              "linux",
+              "darwin/arm64",
+              "darwin/amd64",
+              "linux/arm64",
+              "linux/amd64"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "On",
+          "type": "array"
+        },
+        "overrides": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Override"
+          },
+          "title": "Overrides",
+          "type": "array"
+        },
+        "uv": {
+          "$ref": "#/$defs/Uv",
+          "default": {
+            "name": null,
+            "version": null
+          }
+        },
+        "via": {
+          "const": "uv",
+          "title": "Via",
+          "type": "string"
+        }
+      },
+      "required": [
+        "on",
+        "via"
+      ],
+      "title": "UvPackage",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "packages": {
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/SystemPackage"
+          },
+          {
+            "$ref": "#/$defs/MisePackage"
+          },
+          {
+            "$ref": "#/$defs/UvPackage"
+          }
+        ]
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Packages",
+      "type": "object"
+    }
+  },
+  "required": [
+    "packages"
+  ],
+  "title": "PackagesDoc",
+  "type": "object"
+}

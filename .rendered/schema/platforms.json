@@ -1,0 +1,51 @@
+{
+  "$defs": {
+    "Platform": {
+      "additionalProperties": false,
+      "description": "A kind of machine: its OS and the package manager that comes with it.",
+      "properties": {
+        "os": {
+          "enum": [
+            "darwin",
+            "linux"
+          ],
+          "title": "Os",
+          "type": "string"
+        },
+        "system": {
+          "enum": [
+            "brew",
+            "dnf"
+          ],
+          "title": "System",
+          "type": "string"
+        }
+      },
+      "required": [
+        "os",
+        "system"
+      ],
+      "title": "Platform",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "platforms": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Platform"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Platforms",
+      "type": "object"
+    }
+  },
+  "required": [
+    "platforms"
+  ],
+  "title": "PlatformsDoc",
+  "type": "object"
+}

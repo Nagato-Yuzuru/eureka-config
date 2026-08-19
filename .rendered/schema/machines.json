@@ -1,0 +1,48 @@
+{
+  "$defs": {
+    "Machine": {
+      "additionalProperties": false,
+      "description": "One render target. Keyed `<os>-<arch>` today; a specific device is one more entry.",
+      "properties": {
+        "arch": {
+          "enum": [
+            "arm64",
+            "amd64"
+          ],
+          "title": "Arch",
+          "type": "string"
+        },
+        "platform": {
+          "minLength": 1,
+          "title": "Platform",
+          "type": "string"
+        }
+      },
+      "required": [
+        "platform",
+        "arch"
+      ],
+      "title": "Machine",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "machines": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Machine"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Machines",
+      "type": "object"
+    }
+  },
+  "required": [
+    "machines"
+  ],
+  "title": "MachinesDoc",
+  "type": "object"
+}

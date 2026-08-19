@@ -1,5 +1,7 @@
+#:schema ../.rendered/schema/packages.json
 # Everything installed on a machine, one table per package, whatever the backend.
-# The types in tools/inventory/model.py are the schema; `uv run render` compiles
+# The types in tools/inventory/model.py are the schema (the #:schema line above is
+# their JSON Schema, for the editor); `uv run render` compiles
 # this (with platforms.toml and machines.toml) into .rendered/<machine>/, which
 # chezmoi includes — ~/.Brewfile, mise's [tools], the install script's dnf and uv
 # halves, the completion recipes. Bad data fails the render naming the entry.
