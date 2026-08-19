@@ -125,15 +125,14 @@ def _no_null(node: Any) -> Any:
 
 
 def schemas() -> dict[str, str]:
-    """JSON Schema (draft 2020-12) per data file, straight from the types — the editor's
-    view of the same constraints `render` enforces."""
+    """`<data file stem>.json` -> JSON Schema (draft 2020-12), straight from the document
+    types — the editor's view of the same constraints `render` enforces. Needs no data,
+    so it can be regenerated while a data file is still broken."""
     out = {}
     for name, doc in DOCS.items():
         schema = _no_null(doc.model_json_schema())
         schema = {"$schema": "https://json-schema.org/draft/2020-12/schema", **schema}
-        out[f"{SCHEMA_DIR}/{Path(name).stem}.json"] = (
-            json.dumps(schema, indent=2, sort_keys=True) + "\n"
-        )
+        out[f"{Path(name).stem}.json"] = json.dumps(schema, indent=2, sort_keys=True) + "\n"
     return out
 
 
@@ -144,7 +143,7 @@ def render_tree(inv: Inventory, data_dir: Path) -> dict[str, str]:
         for mid in inv.machines
         for name, text in render_machine(inv, mid).items()
     }
-    files.update(schemas())
+    files.update({f"{SCHEMA_DIR}/{rel}": text for rel, text in schemas().items()})
     files[STAMP] = stamp(data_dir) + "\n"
     return files
 

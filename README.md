@@ -216,7 +216,8 @@ the eBPF section of `packages.toml` takes the BTF/CO-RE path throughout.
 ## Development
 
 ```sh
-uv run render            # after editing .chezmoidata/{packages,platforms,machines}.toml; commit .rendered/ with it
+uv run render            # after editing .chezmoidata/*.toml or tools/inventory; commit .rendered/ with it
+uv run render schema     # only .rendered/schema/ — from the types alone, works while a data file is broken
 uv run render --check    # what prek runs: fails on a stale tree
 uv run pytest            # everything, ~15 s
 prek install             # the git hooks in .pre-commit-config.yaml

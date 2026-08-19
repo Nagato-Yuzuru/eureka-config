@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 from jsonschema import Draft202012Validator
 
+from inventory.cli import main
 from inventory.inventory import DATA_FILES, Inventory, InventoryError, load_data
 from inventory.model import DOCS
 from inventory.render import ARTIFACTS, RENDERED_DIR, render, render_tree, stale
@@ -847,6 +848,20 @@ def test_packages_schema_rejects_what_the_types_reject(package: Mapping[str, Any
     with pytest.raises(InventoryError):
         inventory({"foo": package})
     assert not schema_for("packages.toml").is_valid({"packages": {"foo": package}})
+
+
+def test_render_schema_needs_no_valid_data(tmp_path: Path):
+    """`uv run render schema` comes from the types alone: it still works — and `all` does not —
+    while a data file is broken, which is when the editor needs the schema most."""
+    src = _source_copy(tmp_path)
+    with (src / ".chezmoidata" / "packages.toml").open("a") as f:
+        f.write('\n[packages.oops]\non = ["mars"]\n')
+    assert main(["all", "--root", str(src)]) == 2
+    assert main(["schema", "--root", str(src)]) == 0
+    assert main(["schema", "--check", "--root", str(src)]) == 0
+    assert sorted(p.name for p in (src / RENDERED_DIR / "schema").iterdir()) == sorted(
+        f"{Path(n).stem}.json" for n in DOCS
+    )
 
 
 # --- the consumers: scripts and configs that embed the artifacts --------------------------------

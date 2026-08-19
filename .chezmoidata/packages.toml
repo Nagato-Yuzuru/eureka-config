@@ -352,6 +352,12 @@ mise = { name = "go:github.com/prometheus-community/promql-langserver/cmd/promql
 on = ["darwin"]
 via = "mise"
 
+# TOML language server + linter: reads the #:schema line of each .chezmoidata file
+# (.rendered/schema/, `uv run render schema`). No completion generator to declare.
+[packages.taplo]
+on = ["darwin"]
+via = "mise"
+
 [packages.typescript]
 on = ["darwin"]
 via = "mise"
