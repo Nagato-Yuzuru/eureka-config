@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-#MISE description="regenerate the zsh completions no package manager ships (mise tools, casks)"
+#MISE description="regenerate the zsh completions no package manager ships (mise tools, uv tools, casks)"
 # Rendered by chezmoi from the `completions` field of .chezmoidata/packages.yaml.
-# Runs from mise's postinstall hook (~/.config/mise/config.toml) and by hand.
+# Runs from mise's postinstall hook (~/.config/mise/config.toml), from chezmoi's
+# run_onchange_after_refresh-completions when this machine's recipe list changes,
+# and by hand.
 #
 # The output dir is rebuilt from scratch on every run, so a tool that leaves
 # packages.yaml, or is not installed on this machine, leaves no file behind. It

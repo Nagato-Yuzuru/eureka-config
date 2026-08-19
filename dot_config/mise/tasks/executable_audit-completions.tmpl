@@ -5,7 +5,8 @@
 #   1. system packages (brew|dnf): the zsh completions each package itself installs;
 #      for one that installs none, who covers each of its commands — or nobody
 #   2. mise tools: every command mise puts on PATH and who completes it
-#   3. recipes: who provides each recipe command's completer — anything but
+#   3. uv tools: every entry point of each declared tool and who completes it
+#   4. recipes: who provides each recipe command's completer — anything but
 #      "generated" means the recipe is redundant on this machine (harmless)
 emulate -L zsh
 setopt extended_glob null_glob pipe_fail
@@ -123,7 +124,30 @@ for dir in "${(@f)$(mise bin-paths 2>/dev/null)}"; do
     done
 done
 
-# --- 3. recipes ---------------------------------------------------------------------------
+# --- 3. uv tools --------------------------------------------------------------------------
+print
+print "== uv tools: entry points and who completes them =="
+# `uv tool list` prints `<tool> v<ver>` then one `- <entry point>` line per command.
+typeset -A uvbins
+cur=
+for line in "${(@f)$(uv tool list 2>/dev/null)}"; do
+    if [[ $line == '- '* ]]; then uvbins[$cur]+="${line#- } "
+    else cur=${line%% *}; uvbins[$cur]=${uvbins[$cur]:-}
+    fi
+done
+while read -r spec; do
+    [[ -n $spec ]] || continue
+    tool=${spec%%@*}
+    if (( ${+uvbins[$tool]} )); then
+        report_bins "$tool" ${=uvbins[$tool]}
+    else
+        row "$tool" "-" "(not installed)"
+    fi
+done <<'UVTOOLS'
+{{ template "uv-tools" . }}
+UVTOOLS
+
+# --- 4. recipes ---------------------------------------------------------------------------
 print
 print "== recipes (packages.yaml completions): who provides each command's completer =="
 print "   generated = this recipe is what completes here; anything else = redundant here"

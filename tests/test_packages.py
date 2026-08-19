@@ -22,6 +22,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = REPO_ROOT / ".chezmoitemplates"
 INSTALL_SCRIPT = REPO_ROOT / "run_onchange_before_install-packages.sh.tmpl"
+REFRESH_SCRIPT = REPO_ROOT / "run_onchange_after_refresh-completions.sh.tmpl"
 MISE_TASKS = REPO_ROOT / "dot_config" / "mise" / "tasks"
 GOLDEN = Path(__file__).parent / "golden"
 
@@ -30,7 +31,7 @@ MACHINES = {
     "darwin-amd64": ("darwin", "amd64"),
     "linux-arm64": ("linux", "arm64"),
 }
-RENDERERS = ("brewfile", "mise-tools", "dnf-list", "dnf-repos", "completions")
+RENDERERS = ("brewfile", "mise-tools", "dnf-list", "dnf-repos", "uv-tools", "completions")
 
 # --- harness ------------------------------------------------------------------------------------
 
@@ -107,9 +108,39 @@ RENDER_CASES = [
         },
     ),
     RenderCase(
+        "via-uv-renders-only-into-uv-tools",
+        {"ruff": {"on": ["darwin", "linux"], "via": "uv"}},
+        {
+            ("uv-tools", "darwin-arm64"): ["ruff"],
+            ("uv-tools", "linux-arm64"): ["ruff"],
+            ("brewfile", "darwin-arm64"): [],
+            ("dnf-list", "linux-arm64"): [],
+            ("mise-tools", "darwin-arm64"): [],
+        },
+    ),
+    RenderCase(
         "version-is-emitted-for-mise",
         {"rust": {"on": ["darwin"], "via": "mise", "version": "stable"}},
         {("mise-tools", "darwin-arm64"): ['"rust" = "stable"']},
+    ),
+    RenderCase(
+        "uv-spells-name-and-version-as-name-at-version",  # one `version` field; each renderer spells it
+        {"foo": {"on": ["darwin"], "via": "uv", "uv": "foo-cli", "version": "1.2"}},
+        {("uv-tools", "darwin-arm64"): ["foo-cli@1.2"]},
+    ),
+    RenderCase(
+        "uv-version-override-pins-only-that-machine",
+        {
+            "foo": {
+                "on": ["darwin", "linux"],
+                "via": "uv",
+                "overrides": [{"$when": "linux", "version": "1"}],
+            }
+        },
+        {
+            ("uv-tools", "darwin-arm64"): ["foo"],
+            ("uv-tools", "linux-arm64"): ["foo@1"],
+        },
     ),
     RenderCase(
         "components-render-an-inline-table",
@@ -381,6 +412,21 @@ RENDER_CASES = [
             ("brewfile", "darwin-arm64"): ['cask "1password-cli"'],
         },
     ),
+    RenderCase(
+        "completions-on-a-uv-tool-render-where-it-installs",
+        {
+            "ruff": {
+                "on": ["linux"],
+                "via": "uv",
+                "completions": {"ruff": "ruff generate-shell-completion zsh"},
+            }
+        },
+        {
+            ("completions", "linux-arm64"): ["ruff ruff generate-shell-completion zsh"],
+            ("completions", "darwin-arm64"): [],
+            ("uv-tools", "linux-arm64"): ["ruff"],
+        },
+    ),
 ]
 
 
@@ -410,12 +456,17 @@ REJECTS = [
     (
         "via-invalid",
         {"foo": {"on": ["darwin"], "via": "pip"}},
-        "packages.foo: via must be system|mise",
+        "packages.foo: via must be system|mise|uv",
     ),
     (
         "name-field-is-a-map",
         {"foo": {"on": ["darwin"], "mise": {"darwin": "x"}}},
         "packages.foo.mise: must be a string",
+    ),
+    (
+        "uv-name-field-is-a-list",
+        {"foo": {"on": ["darwin"], "via": "uv", "uv": ["foo-cli"]}},
+        "packages.foo.uv: must be a string",
     ),
     (
         "overrides-not-a-list",
@@ -440,7 +491,7 @@ REJECTS = [
     (
         "override-via-invalid",
         {"foo": {"on": ["darwin"], "overrides": [{"$when": "linux", "via": "pip"}]}},
-        "packages.foo.overrides[linux]: via must be system|mise",
+        "packages.foo.overrides[linux]: via must be system|mise|uv",
     ),
     (
         "override-value-not-string",
@@ -557,6 +608,17 @@ INVARIANTS = [
     Invariant("uv-from-dnf", "dnf-list", "linux-arm64", contains=["uv"]),
     Invariant("mac-installs-nothing-via-dnf", "dnf-list", "darwin-arm64", exact=[]),
     Invariant("linux-has-no-brewfile", "brewfile", "linux-arm64", exact=[]),
+    # Python CLIs ride uv on every machine, never a system package or mise.
+    Invariant("ruff-and-ty-via-uv-on-mac", "uv-tools", "darwin-arm64", contains=["ruff", "ty"]),
+    Invariant("ruff-and-ty-via-uv-on-linux", "uv-tools", "linux-arm64", contains=["ruff", "ty"]),
+    Invariant("ruff-not-in-mise", "mise-tools", "darwin-arm64", excludes=['"ruff" = "latest"']),
+    Invariant("ruff-not-in-brew", "brewfile", "darwin-arm64", excludes=['brew "ruff"']),
+    Invariant(
+        "uv-tools-declare-their-completions",
+        "completions",
+        "linux-arm64",
+        contains=["ruff ruff generate-shell-completion zsh", "ty ty generate-shell-completion zsh"],
+    ),
     # The two system tools Fedora's repos ship no zsh completion for; brew's copy wins on a Mac.
     Invariant(
         "mise-and-starship-recipes-reach-linux",
@@ -613,33 +675,6 @@ def test_real_data_has_no_duplicate_lines(renderer: str, machine: str):
     assert len(lines) == len(set(lines)), sorted(ln for ln in lines if lines.count(ln) > 1)
 
 
-@pytest.mark.parametrize("machine", MACHINES)
-def test_install_script_renders_to_valid_shell(machine: str, tmp_path: Path):
-    os_, arch = MACHINES[machine]
-    proc = subprocess.run(
-        [
-            "chezmoi", "execute-template", "--source", str(REPO_ROOT),
-            "--override-data", json.dumps({"chezmoi": {"os": os_, "arch": arch}}),
-            "--file", str(INSTALL_SCRIPT),
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
-    )  # fmt: skip
-    assert proc.returncode == 0, proc.stderr
-    script = tmp_path / "install-packages.sh"
-    script.write_text(proc.stdout)
-    if os_ == "darwin":
-        assert "brew bundle install --file=-" in proc.stdout
-        assert "dnf" not in proc.stdout
-    else:
-        assert "xargs -r sudo dnf -y install" in proc.stdout
-        assert "brew" not in proc.stdout
-    subprocess.run(["bash", "-n", str(script)], check=True)
-    if shutil.which("shellcheck"):
-        subprocess.run(["shellcheck", str(script)], check=True)
-
-
 def render_file(path: Path, machine: str) -> str:
     os_, arch = MACHINES[machine]
     proc = subprocess.run(
@@ -656,17 +691,62 @@ def render_file(path: Path, machine: str) -> str:
     return proc.stdout
 
 
+def heredoc(text: str, tag: str) -> list[str]:
+    """Non-blank lines of the first `<<'TAG' ... TAG` block in a rendered script."""
+    body = text.split(f"<<'{tag}'\n", 1)[1].split(f"\n{tag}\n", 1)[0]
+    return [ln for ln in body.splitlines() if ln.strip()]
+
+
+def check_shell(script: Path, shell: str = "bash") -> None:
+    subprocess.run([shell, "-n", str(script)], check=True)
+    if shell == "bash" and shutil.which("shellcheck"):
+        subprocess.run(["shellcheck", str(script)], check=True)
+
+
+@pytest.mark.parametrize("machine", MACHINES)
+def test_install_script_renders_to_valid_shell(machine: str, tmp_path: Path):
+    """System packages through this machine's package manager only, then the uv tools."""
+    os_, _ = MACHINES[machine]
+    rendered = render_file(INSTALL_SCRIPT, machine)
+    script = tmp_path / "install-packages.sh"
+    script.write_text(rendered)
+    if os_ == "darwin":
+        assert "brew bundle install --file=-" in rendered
+        assert "dnf" not in rendered
+    else:
+        assert "xargs -r sudo dnf -y install" in rendered
+        assert "brew" not in rendered
+    assert rendered.index("uv tool install") > rendered.index("<<'EOF'"), "uv tools come after uv"
+    check_shell(script)
+    uv_block = rendered.split("uv tool install", 1)[1]
+    assert heredoc(uv_block, "EOF") == render_lines("uv-tools", source=REPO_ROOT, machine=machine)
+
+
 @pytest.mark.parametrize("machine", MACHINES)
 def test_refresh_completions_task_renders_to_valid_bash(machine: str, tmp_path: Path):
     """The recipe heredoc is `read` line by line: one `<cmd> <recipe>` per line, no blank cmd."""
     script = tmp_path / "refresh-completions"
-    script.write_text(render_file(MISE_TASKS / "executable_refresh-completions.tmpl", machine))
-    subprocess.run(["bash", "-n", str(script)], check=True)
-    if shutil.which("shellcheck"):
-        subprocess.run(["shellcheck", str(script)], check=True)
-    body = script.read_text().split("<<'RECIPES'\n", 1)[1].split("\nRECIPES\n", 1)[0]
-    recipes = [ln for ln in body.splitlines() if ln.strip()]
-    assert recipes == render_lines("completions", source=REPO_ROOT, machine=machine)
+    rendered = render_file(MISE_TASKS / "executable_refresh-completions.tmpl", machine)
+    script.write_text(rendered)
+    check_shell(script)
+    assert heredoc(rendered, "RECIPES") == render_lines(
+        "completions", source=REPO_ROOT, machine=machine
+    )
+
+
+@pytest.mark.parametrize("machine", MACHINES)
+def test_onchange_refresh_script_keys_on_this_machines_recipes(machine: str, tmp_path: Path):
+    """chezmoi re-runs it when its rendered content changes, so the recipe list is rendered
+    into it verbatim; the toolset gate defers to mise's postinstall hook on a new machine."""
+    script = tmp_path / "refresh-completions.sh"
+    rendered = render_file(REFRESH_SCRIPT, machine)
+    script.write_text(rendered)
+    check_shell(script)
+    assert "mise ls --missing" in rendered
+    assert rendered.index("mise ls --missing") < rendered.index("mise run refresh-completions")
+    assert heredoc(rendered, "RECIPES") == render_lines(
+        "completions", source=REPO_ROOT, machine=machine
+    )
 
 
 @pytest.mark.parametrize("machine", MACHINES)
@@ -674,10 +754,13 @@ def test_audit_completions_task_renders_to_valid_zsh(machine: str, tmp_path: Pat
     script = tmp_path / "audit-completions"
     rendered = render_file(MISE_TASKS / "executable_audit-completions.tmpl", machine)
     script.write_text(rendered)
-    subprocess.run(["zsh", "-n", str(script)], check=True)
+    check_shell(script, "zsh")
     os_, _ = MACHINES[machine]
     assert ("brew packages" in rendered) == (os_ == "darwin")
     assert ("rpm -ql" in rendered) == (os_ == "linux")
+    assert heredoc(rendered, "UVTOOLS") == render_lines(
+        "uv-tools", source=REPO_ROOT, machine=machine
+    )
 
 
 @pytest.mark.parametrize("machine", MACHINES)

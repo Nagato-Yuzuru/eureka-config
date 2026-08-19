@@ -1,0 +1,22 @@
+#!/bin/bash
+# Regenerates the zsh completions when this machine's recipe list changes:
+# chezmoi re-runs this whenever the rendered content changes, and the list at the
+# bottom is rendered in for exactly that. The other cause of a stale set — a tool
+# binary changing — is mise's postinstall hook's (~/.config/mise/config.toml).
+#
+# On a new machine this runs before `mise install` has: the toolset is incomplete
+# and the hook owns the first generation, so defer to it instead of failing the
+# apply on generators that are not there yet.
+set -euo pipefail
+
+if [ -n "$(mise ls --missing 2>/dev/null)" ]; then
+    echo "refresh-completions: mise toolset incomplete, deferring to mise install's postinstall hook" >&2
+    exit 0
+fi
+mise run refresh-completions
+
+# This machine's recipes, one `<command> <recipe>` per line. Never executed; here
+# so the rendered content — and with it chezmoi's re-run — changes when they do.
+: <<'RECIPES'
+{{ template "completions" . }}
+RECIPES

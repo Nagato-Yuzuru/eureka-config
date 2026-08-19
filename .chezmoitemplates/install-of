@@ -1,5 +1,5 @@
 {{- /* How one package installs on this machine. Outputs JSON
-       {"backend": "system"|"mise"|"", "name": <name on that backend>, "item": <effective fields>}
+       {"backend": "system"|"mise"|"uv"|"", "name": <name on that backend>, "item": <effective fields>}
        — backend "" means it does not install here. Args: item, key, os, arch.
        Fields are scalars; each entry of item.overrides whose $when tag equals
        os or os/arch is merged over the item, in list order. */ -}}
@@ -11,7 +11,8 @@
 {{- $backend := "" }}{{ $name := "" -}}
 {{- if or (has $osarch (get $eff "on")) (has .os (get $eff "on")) -}}
   {{- $backend = get $eff "via" | default "system" -}}
-  {{- $field := ternary "mise" (ternary "brew" "dnf" (eq .os "darwin")) (eq $backend "mise") -}}
+  {{- /* the field that renames the package on this backend: system's is the package manager's */ -}}
+  {{- $field := ternary (ternary "brew" "dnf" (eq .os "darwin")) $backend (eq $backend "system") -}}
   {{- $name = get $eff $field | default .key -}}
 {{- end -}}
 {{- dict "backend" $backend "name" $name "item" $eff | toJson -}}

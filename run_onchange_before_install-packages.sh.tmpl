@@ -1,7 +1,7 @@
 #!/bin/bash
-# System packages for this machine, rendered from .chezmoidata/packages.yaml.
-# chezmoi re-runs this whenever the rendered content changes, i.e. whenever
-# this machine's package set changes.
+# System packages and uv tools for this machine, rendered from
+# .chezmoidata/packages.yaml. chezmoi re-runs this whenever the rendered content
+# changes, i.e. whenever this machine's package set changes.
 set -euo pipefail
 
 {{ if eq .chezmoi.os "darwin" -}}
@@ -38,3 +38,14 @@ xargs -r sudo dnf -y install <<'EOF'
 {{ template "dnf-list" . }}
 EOF
 {{- end }}
+
+# Python CLIs, one venv each under `uv tool dir`, entry points in ~/.local/bin.
+# uv is a system package installed above. `uv tool install` is idempotent: an
+# already-installed tool is left alone (upgrades are `uv tool upgrade`, by hand,
+# like the system packages'); a `name@version` line re-pins it when the pin moves.
+while read -r spec; do
+    [ -n "$spec" ] || continue
+    uv tool install "$spec"
+done <<'EOF'
+{{ template "uv-tools" . }}
+EOF

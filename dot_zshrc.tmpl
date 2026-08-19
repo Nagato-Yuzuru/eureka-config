@@ -66,11 +66,6 @@ fpath=(
 
 fpath=(${(u)fpath})
 
-# mise's postinstall hook keeps the generated set current; this covers the first
-# shell after the config lands and a wiped cache. Once: the dir exists afterwards
-# even when a recipe failed.
-[[ -d "${XDG_CACHE_HOME}/{{ .zsh.generatedCompletions }}" ]] || mise run refresh-completions
-
 autoload -Uz compinit
 
 if [[ -n ${ZDOTDIR:-$HOME}/.zcompdump(#qNmh+24) ]]; then

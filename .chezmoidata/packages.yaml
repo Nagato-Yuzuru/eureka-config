@@ -5,22 +5,27 @@
 #   key       package id; also its name on every backend unless overridden
 #   on        list of machine tags it installs on.
 #             Tags: darwin, linux, or os/arch (darwin/amd64, ...).
-#   via       system (default: brew on darwin, dnf on linux) | mise
-#             Rule: one global version -> system; multi-version -> mise.
-#   version   mise version spec (default latest)
+#   via       system (default: brew on darwin, dnf on fedora) | mise | uv
+#             Rule: one global version -> system; multi-version -> mise;
+#             a Python CLI -> uv (`uv tool install`, uv itself being a system
+#             package, so the install script can run it right after brew/dnf).
+#   version   version spec, in the backend's own syntax (mise: lts | stable |
+#             1.2; uv: 0.15.21). Default latest. How each backend spells it into
+#             its command is the renderer's business, not the declaration's.
 #   components list of extra components mise installs with the tool
 #   completions map of command -> sh command whose stdout is that command's zsh
 #             completion. Rendered per machine into ~/.config/mise/tasks/
-#             refresh-completions (run by mise's postinstall hook); the files it
+#             refresh-completions (run by mise's postinstall hook, and by
+#             chezmoi whenever this machine's recipe list changes); the files it
 #             writes sit LAST on fpath, so a completion the package manager
 #             ships (brew formula, Fedora rpm, zsh itself) always wins and a
-#             recipe only ever fills a gap. Declare it on every mise tool that
-#             has a generator (nothing else ships those), and on a system tool
-#             only where some backend was seen to ship none — say which, in a
-#             comment. `mise run audit-completions` shows who provides what.
+#             recipe only ever fills a gap. Declare it on every mise or uv tool
+#             that has a generator (nothing else ships those), and on a system
+#             tool only where some backend was seen to ship none — say which, in
+#             a comment. `mise run audit-completions` shows who provides what.
 #             `clap_stub <cmd> '<gen>'` wraps a clap dynamic completer
 #             (`COMPLETE=zsh <cmd>`) so it works as an fpath file.
-#   brew, dnf, mise   name on that backend when it differs from the key
+#   brew, dnf, mise, uv   name on that backend when it differs from the key
 #   cask      macOS cask (brew backend, cask flavour)
 #   copr      Fedora COPR repo (owner/project) that ships the package
 #   repofile  URL of a third-party .repo file to add before dnf install
@@ -174,6 +179,12 @@ packages:
   oxlint: { on: [darwin, linux], via: mise }
   oxfmt: { on: [darwin, linux], via: mise }
   hcloud: { on: [darwin, linux], via: mise, completions: { hcloud: "hcloud completion zsh" } }
+
+  # -- Python CLIs (uv) ---------------------------------------------------------
+  # `uv tool install`, one isolated venv each, entry points in ~/.local/bin.
+  ruff:
+    { on: [darwin, linux], via: uv, completions: { ruff: "ruff generate-shell-completion zsh" } }
+  ty: { on: [darwin, linux], via: uv, completions: { ty: "ty generate-shell-completion zsh" } }
 
   # -- eBPF lab, linux only (system) --------------------------------------------
   # kernel-devel never matches OrbStack's kernel, so everything here takes the

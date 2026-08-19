@@ -20,9 +20,10 @@ identity beyond os and arch yet; the three machines happen to differ there.
 | `.chezmoitemplates/`                | the package renderers and validator                                                        |
 | `.chezmoiexternal.toml.tmpl`        | oh-my-tmux and (linux) antidote as git clones under `$XDG_DATA_HOME`                       |
 | `.chezmoiignore`                    | what a non-Mac never gets: Brewfile, ghostty, wezterm, 1Password                           |
-| `run_onchange_before_install-*.sh`  | installs the system packages (brew bundle / dnf) whenever this machine's set changes       |
+| `run_onchange_before_install-*.sh`  | installs the system packages (brew bundle / dnf) and uv tools whenever this machine's set changes |
 | `run_once_after_setup-linux.sh`     | Fedora bootstrap: login shell, git include and identity                                    |
 | `run_onchange_after_install-yazi-*` | `ya pkg install` whenever yazi's `package.toml` (a rev+hash lockfile) changes              |
+| `run_onchange_after_refresh-*.sh`   | regenerates the zsh completions whenever this machine's recipe list changes (below)        |
 | `dot_config/mise/tasks/`            | mise file tasks rendered per machine: `refresh-completions`, `audit-completions` (below)   |
 | `dot_claude/`                       | Claude Code: CLAUDE.md, hooks, skills, and the managed-settings fragments (last section)    |
 | `tests/`                            | pytest for the package model and the settings merge engine; never deployed                 |
@@ -37,17 +38,23 @@ fd:      { on: [darwin, linux], dnf: fd-find }
 ghostty: { on: [darwin], cask: ghostty }
 rust:    { on: [darwin, linux], via: mise, version: stable, components: [rust-analyzer] }
 pnpm:    { on: [darwin, linux], via: mise, overrides: [{ $when: darwin/amd64, mise: "npm:pnpm" }] }
+ruff:    { on: [darwin, linux], via: uv, completions: { ruff: "ruff generate-shell-completion zsh" } }
 ```
 
 - `on` is a list of machine tags: `darwin`, `linux`, or `os/arch`.
 - `via` picks the backend. `system` (the default) means brew on a Mac and dnf
-  on Fedora; `mise` puts the tool in mise's `[tools]`. The rule I use: one
-  global version, system package; multiple versions, mise. uv is a system
-  package on both, it never needs more than one version and chezmoi's own
-  scripts need it before mise has installed anything.
-- `brew` / `dnf` / `mise` override the name on that backend when it differs
-  from the key. `copr` and `repofile` add the Fedora repo the package needs.
-- `version` and `components` are mise-only: the version spec, and the extra
+  on Fedora; `mise` puts the tool in mise's `[tools]`; `uv` is `uv tool install`
+  (a venv per tool, entry points in `~/.local/bin`). The rule I use: one global
+  version, system package; multiple versions, mise; a Python CLI, uv. uv itself
+  is a system package on both, it never needs more than one version and
+  chezmoi's own scripts need it before mise has installed anything — which is
+  also what lets the install script run `uv tool install` right after brew/dnf.
+- `brew` / `dnf` / `mise` / `uv` override the name on that backend when it
+  differs from the key. `copr` and `repofile` add the Fedora repo the package
+  needs.
+- `version` is the version spec in the backend's own syntax (`stable`, `lts`,
+  `0.15.21`); declaring it and spelling it into a command are separate jobs,
+  the second is each renderer's. `components` is mise-only: the extra
   components installed alongside the tool. rust-analyzer and rust-src ride on
   the rust toolchain that way — rustup's default profile ships neither, so
   without the line a new machine gets no language server.
@@ -58,14 +65,18 @@ pnpm:    { on: [darwin, linux], via: mise, overrides: [{ $when: darwin/amd64, mi
   completion (`kubectl: "kubectl completion zsh"`). See the next section.
 
 From that one file chezmoi renders `~/.Brewfile`, the `[tools]` block of
-`~/.config/mise/config.toml`, the dnf half of the install script, and the
-recipe list inside `~/.config/mise/tasks/refresh-completions`. Bad data fails
-the render with a message naming the entry. `tests/golden/<machine>/` holds the
-rendered lists per machine, so a diff there shows exactly which machine an edit
-touched.
+`~/.config/mise/config.toml`, the dnf and uv halves of the install script, and
+the recipe list inside `~/.config/mise/tasks/refresh-completions`. Bad data
+fails the render with a message naming the entry. `tests/golden/<machine>/`
+holds the rendered lists per machine, so a diff there shows exactly which
+machine an edit touched.
 
-chezmoi installs the system packages but never runs `mise install`; that is a
-manual step and stays one.
+Each layer has one owner and one trigger: chezmoi installs the system packages
+and uv tools when this machine's set changes; `mise install` is a manual step
+and stays one. Not modelled yet: pnpm globals. When the first one is declared,
+`via: pnpm` takes the same shape — a rendered mise task run by hand after
+`mise install` (pnpm is a mise tool), `depends_post` on `refresh-completions`,
+no hook.
 
 ## Zsh completions
 
@@ -74,11 +85,13 @@ zsh's own compsys (`_git _tmux _jq`), what brew formulae and Fedora rpms
 install alongside the tool (`_gh _bat _fd _rg _uv …`), what the tool generates
 itself (`kubectl completion zsh`, `COMPLETE=zsh prek`), and
 zsh-users/zsh-completions (`_golang _node _tsc _cmake`). The third layer is the
-only one nobody installs for us — mise tools, casks — and `packages.yaml`
-carries its recipes:
+only one nobody installs for us — mise tools, uv tools, casks — and
+`packages.yaml` carries its recipes. A tool that is not in `packages.yaml` has
+no completion here, and should not need one:
 
 ```yaml
 kubectl: { on: [darwin], via: mise, completions: { kubectl: "kubectl completion zsh" } }
+ruff:    { on: [darwin, linux], via: uv, completions: { ruff: "ruff generate-shell-completion zsh" } }
 mise:    { on: [darwin, linux], …,   completions: { mise: "mise completion zsh" } }  # jdx's rpm ships none
 ```
 
@@ -87,8 +100,15 @@ mise:    { on: [darwin, linux], …,   completions: { mise: "mise completion zsh
   skips commands not installed, runs each recipe with stdin closed, checks the
   output starts with `#compdef`, then swaps the directory in and drops
   `~/.zcompdump`. A tool that leaves `packages.yaml` leaves no file behind.
-  mise's `postinstall` hook runs it after every `mise install` / `mise up`; the
-  first shell after a fresh clone or a wiped cache runs it once too.
+- Two things make the generated set stale, and each has its own trigger: a
+  tool binary changed — mise's `postinstall` hook runs the task after every
+  `mise install` / `mise up`; the recipe list changed — chezmoi's
+  `run_onchange_after_refresh-completions` runs it whenever this machine's
+  rendered recipes differ (the list is rendered into the script for that
+  alone). On a new machine that script runs before `mise install` has, sees an
+  incomplete toolset and defers to the hook. Nothing runs at shell startup. A
+  wiped `$XDG_CACHE_HOME` is a `mise run refresh-completions` by hand — it is a
+  cache.
 - `.zshrc` puts that directory **last** on fpath. compinit takes the first
   `_<cmd>` it finds, so a completion the package manager ships always beats a
   generated one — which is what makes a recipe safe to declare on any tool:
@@ -99,9 +119,10 @@ mise:    { on: [darwin, linux], …,   completions: { mise: "mise completion zsh
 - `clap_stub <cmd> '<generator>'` in a recipe wraps a clap dynamic completer
   (`COMPLETE=zsh prek`) whose script must be sourced, so it works from a file.
 - `mise run audit-completions` reports, for this machine, which packages ship
-  their own completion, who completes every command mise puts on PATH, and
-  whether each recipe is what actually completes here or is shadowed —
-  the check to run before adding or doubting a recipe.
+  their own completion, who completes every command mise puts on PATH and
+  every entry point of the uv tools, and whether each recipe is what actually
+  completes here or is shadowed — the check to run before adding or doubting a
+  recipe.
 - Not files: terraform/tofu only speak bash's `complete -C` protocol and are
   wired through bashcompinit in `.zshrc`; `sg` borrows `_ast-grep` there too.
 - `~/.local/share/zsh/site-functions` stays first on fpath for anything dropped
