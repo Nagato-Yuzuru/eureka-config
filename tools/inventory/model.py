@@ -107,6 +107,11 @@ SelectorField = Annotated[
 # --- install: how -------------------------------------------------------------------------------
 
 
+# Every block's `name` is the package's name on that backend when it differs from the
+# key; absent means the key. A block with nothing set is the plain install and the
+# default (`git: { on: [...] }` is a Formula() on macos, an Rpm() on fedora).
+
+
 class Formula(Strict):
     name: NonEmpty | None = None
 
@@ -118,21 +123,38 @@ class Cask(Strict):
 Brew = Formula | Cask  # brew's two flavours are two variants, not two optional fields
 
 
-class Dnf(Strict):
+class Rpm(Strict):
+    """From Fedora's standard repos."""
+
     name: NonEmpty | None = None
-    copr: NonEmpty | None = None  # Fedora COPR repo (owner/project) that ships the package
-    repofile: NonEmpty | None = None  # URL of a third-party .repo file to add first
+
+
+class CoprRpm(Strict):
+    """From a COPR repo (owner/project), enabled first."""
+
+    name: NonEmpty | None = None
+    copr: NonEmpty
+
+
+class RepofileRpm(Strict):
+    """From a third-party repo whose .repo file (URL) is added first."""
+
+    name: NonEmpty | None = None
+    repofile: NonEmpty
+
+
+Dnf = Rpm | CoprRpm | RepofileRpm  # where dnf gets it: exactly one source
 
 
 class Mise(Strict):
     name: NonEmpty | None = None  # mise's name, incl. backend prefix ("npm:pnpm", "go:…")
     version: NonEmpty = "latest"
-    components: list[NonEmpty] | None = None  # extra components installed with the tool
+    components: list[NonEmpty] = []  # extra components installed with the tool
 
     @field_validator("components")
     @classmethod
-    def _non_empty(cls, v: list[str] | None) -> list[str] | None:
-        if v is not None and not v:
+    def _non_empty(cls, v: list[str]) -> list[str]:
+        if not v:
             raise ValueError("must be a non-empty list")
         return v
 
@@ -142,7 +164,7 @@ class Uv(Strict):
     version: NonEmpty | None = None  # spelled `name@version` for `uv tool install`
 
 
-Spec = Formula | Cask | Dnf | Mise | Uv
+Spec = Brew | Dnf | Mise | Uv
 
 
 class Override(BaseModel):
@@ -183,7 +205,7 @@ class _Package(Strict):
 class SystemPackage(_Package):
     via: Literal["system"] = "system"
     brew: Brew = Formula()
-    dnf: Dnf = Dnf()
+    dnf: Dnf = Rpm()
 
 
 class MisePackage(_Package):

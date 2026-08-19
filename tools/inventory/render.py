@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
 from inventory.inventory import DATA_FILES, Inventory
-from inventory.model import Cask, Dnf, Mise, Resolved, Uv
+from inventory.model import Cask, CoprRpm, Mise, RepofileRpm, Resolved, Uv
 
 RENDERED_DIR = ".rendered"
 STAMP = "STAMP"
@@ -40,11 +40,11 @@ def dnf_repos(rs: Iterable[Resolved]) -> list[str]:
     package (the install script's commands are idempotent)."""
     out = []
     for r in rs:
-        if r.backend == "dnf" and isinstance(r.spec, Dnf):
-            if r.spec.copr:
-                out.append(f"copr {r.spec.copr}")
-            if r.spec.repofile:
-                out.append(f"repofile {r.spec.repofile}")
+        match r.spec:
+            case CoprRpm(copr=copr):
+                out.append(f"copr {copr}")
+            case RepofileRpm(repofile=url):
+                out.append(f"repofile {url}")
     return out
 
 
@@ -55,7 +55,7 @@ def mise_tools(rs: Iterable[Resolved]) -> list[str]:
     for r in rs:
         if r.backend == "mise" and isinstance(r.spec, Mise):
             name, version = json.dumps(r.name), json.dumps(r.spec.version)
-            if r.spec.components is None:
+            if not r.spec.components:
                 out.append(f"{name} = {version}")
             else:
                 comps = ", ".join(json.dumps(c) for c in r.spec.components)

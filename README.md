@@ -62,7 +62,8 @@ ruff:      { on: [darwin, linux], via: uv, completions: { ruff: "ruff generate-s
   own scripts need it before mise has installed anything, and that is what
   lets the install script run `uv tool install` right after brew/dnf.
 - The blocks carry what only that backend understands: `brew: { name | cask }`,
-  `dnf: { name | copr | repofile }`, `mise: { name | version | components }`,
+  `dnf: { name }` plus at most one source (`copr` | `repofile`),
+  `mise: { name | version | components }`,
   `uv: { name | version }`. `name` is the name on that backend when it differs
   from the key. `version` is in the backend's own syntax (`stable`, `lts`,
   `0.15.21`); declaring it and spelling it into a command are separate jobs,

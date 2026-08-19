@@ -15,9 +15,10 @@
 #             after brew/dnf).
 #   brew      { name | cask }        system only; read on macos. A cask is a cask,
 #                                    not a formula with a flag.
-#   dnf       { name | copr | repofile }   system only; read on fedora. copr is a
-#                                    COPR repo (owner/project), repofile a
-#                                    third-party .repo URL, both added first.
+#   dnf       { name } + one source     system only; read on fedora. The source is
+#             { copr | repofile }        the standard repos (nothing), a COPR repo
+#                                    (owner/project) or a third-party .repo URL,
+#                                    enabled/added first.
 #   mise      { name | version | components }   via: mise only. name incl. the
 #                                    backend prefix ("npm:pnpm"); version in mise's
 #                                    syntax (default latest); components the extra

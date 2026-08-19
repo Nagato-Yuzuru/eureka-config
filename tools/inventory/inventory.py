@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import yaml
 from pydantic import TypeAdapter, ValidationError
@@ -21,7 +21,9 @@ from inventory.model import (
     BACKENDS,
     PACKAGE,
     VIAS,
+    Brew,
     Cask,
+    Dnf,
     Machine,
     MisePackage,
     OsArchSel,
@@ -40,6 +42,17 @@ DATA_FILES = ("machines.yaml", "packages.yaml", "platforms.yaml")
 _PLATFORMS = TypeAdapter(dict[str, Platform])
 _MACHINES = TypeAdapter(dict[str, Machine])
 _PACKAGES = TypeAdapter(dict[str, Any])  # shape only; each line is parsed on its own below
+
+
+# The blocks that are unions: the variants' names as pydantic spells them in an error
+# location, the fields any variant knows, and the one-line statement of the choice.
+_UNIONS = {"brew": get_args(Brew), "dnf": get_args(Dnf)}
+_VARIANTS = {b: {v.__name__ for v in vs} for b, vs in _UNIONS.items()}
+_FIELDS = {b: {f for v in vs for f in v.model_fields} for b, vs in _UNIONS.items()}
+_CHOICES = {
+    "brew": "a formula ({ name }) or a cask ({ cask }), not both",
+    "dnf": "the standard repos ({ name }), a COPR ({ copr }) or a .repo file ({ repofile }), one",
+}
 
 
 class InventoryError(ValueError):
@@ -80,9 +93,11 @@ def _explain(prefix: str, err: ValidationError, tags: Sequence[str] = ()) -> str
                 msg = "must be a map"
             case "extra_forbidden" if tag and loc and loc[-1] in BACKENDS:
                 msg = f"no {loc[-1]} block on a `via: {tag}` package"
-        if "Formula" in loc or "Cask" in loc:  # the Brew union: report it once, as one choice
-            loc = loc[: loc.index("brew") + 1] if "brew" in loc else loc
-            msg = "a formula ({ name }) or a cask ({ cask }), not both"
+        if len(loc) >= 2 and loc[1] in _VARIANTS.get(loc[0], ()):  # inside a block's union
+            if e["type"] == "extra_forbidden" and loc[2] not in _FIELDS[loc[0]]:
+                del loc[1]  # a key no variant has: name it, not the choice
+            else:
+                loc, msg = loc[:1], _CHOICES[loc[0]]
         if len(loc) >= 2 and loc[0] == "overrides" and loc[1].isdigit():
             i = int(loc[1])
             loc[0:2] = [f"overrides[{tags[i] if i < len(tags) else '?'}]"]
@@ -90,6 +105,10 @@ def _explain(prefix: str, err: ValidationError, tags: Sequence[str] = ()) -> str
         line = f"{path}: {msg}"
         if line not in lines:
             lines.append(line)
+    # a key no variant has explains a block by itself; the choice line would only add noise
+    for block, choice in _CHOICES.items():
+        if any(ln.startswith(f"{prefix}.{block}.") for ln in lines):
+            lines = [ln for ln in lines if ln != f"{prefix}.{block}: {choice}"]
     return "\n".join(lines)
 
 

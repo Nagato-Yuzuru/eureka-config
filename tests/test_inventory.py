@@ -526,6 +526,17 @@ REJECTS = [
         "packages.foo.brew: a formula ({ name }) or a cask ({ cask }), not both",
     ),
     Reject(
+        "dnf-has-one-source",
+        {"foo": {"on": ["linux"], "dnf": {"copr": "a/b", "repofile": "https://x/y.repo"}}},
+        "packages.foo.dnf: the standard repos ({ name }), a COPR ({ copr }) or a .repo file"
+        " ({ repofile }), one",
+    ),
+    Reject(
+        "unknown-key-inside-a-union-block-is-named",
+        {"foo": {"on": ["linux"], "dnf": {"nope": "1"}}},
+        "packages.foo.dnf.nope: Extra inputs are not permitted",
+    ),
+    Reject(
         "overrides-not-a-list",
         {"foo": {"on": ["darwin"], "overrides": {"$when": "linux"}}},
         "packages.foo.overrides: Input should be a valid list",
