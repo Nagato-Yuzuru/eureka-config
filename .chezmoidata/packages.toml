@@ -1,4 +1,4 @@
-# Everything installed on a machine, one line per package, whatever the backend.
+# Everything installed on a machine, one table per package, whatever the backend.
 # The types in tools/inventory/model.py are the schema; `uv run render` compiles
 # this (with platforms.toml and machines.toml) into .rendered/<machine>/, which
 # chezmoi includes — ~/.Brewfile, mise's [tools], the install script's dnf and uv
@@ -44,162 +44,378 @@
 #             `via` and the blocks only — not `on`, not `completions` (fpath order
 #             arbitrates per-backend differences).
 #
-# An entry is one inline table, or dotted keys when it would not fit on a line
-# (TOML 1.0 has no multi-line inline tables). Sections are just comments.
+# One [packages.<key>] table per package, one field per line; `completions` is
+# inline when short, its own [packages.<key>.completions] table when not. The
+# `# -- … --` lines only group; order is by hand.
 #
 # Not on linux on purpose (lab VM is a curated subset): git-cliff, ast-grep,
 # duckdb, antidote (git-repo external, see .chezmoiexternal.toml.tmpl).
 
-[packages]
 # -- shell & core -----------------------------------------------------------
-git = { on = ["darwin", "linux"] }
-zsh = { on = ["linux"] }
-tmux = { on = ["darwin", "linux"] }
-neovim = { on = ["darwin", "linux"] }
+[packages.git]
+on = ["darwin", "linux"]
+
+[packages.zsh]
+on = ["linux"]
+
+[packages.tmux]
+on = ["darwin", "linux"]
+
+[packages.neovim]
+on = ["darwin", "linux"]
+
 # completions: atim's COPR rpm ships none; brew's formula does.
-starship.on = ["darwin", "linux"]
-starship.dnf = { copr = "atim/starship" }
-starship.completions.starship = "starship completions zsh"
-antidote = { on = ["darwin"] }
+[packages.starship]
+on = ["darwin", "linux"]
+dnf = { copr = "atim/starship" }
+completions = { starship = "starship completions zsh" }
+
+[packages.antidote]
+on = ["darwin"]
+
 # completions: jdx's rpm ships none; brew's formula does. Needs `usage` (below) at completion time.
-mise.on = ["darwin", "linux"]
-mise.dnf = { repofile = "https://mise.jdx.dev/rpm/mise.repo" }
-mise.completions.mise = "mise completion zsh"
+[packages.mise]
+on = ["darwin", "linux"]
+dnf = { repofile = "https://mise.jdx.dev/rpm/mise.repo" }
+completions = { mise = "mise completion zsh" }
+
 # always latest, never multi-version — and needed by chezmoi's own scripts before mise tools exist
-uv = { on = ["darwin", "linux"] }
-make = { on = ["darwin", "linux"] }
-glibc-langpack-en = { on = ["linux"] }
+[packages.uv]
+on = ["darwin", "linux"]
+
+[packages.make]
+on = ["darwin", "linux"]
+
+[packages.glibc-langpack-en]
+on = ["linux"]
 
 # -- cli tools --------------------------------------------------------------
-ripgrep = { on = ["darwin", "linux"] }
-fd = { on = ["darwin", "linux"], dnf = { name = "fd-find" } }
-jq = { on = ["darwin", "linux"] }
-yq = { on = ["darwin", "linux"] }
-jd = { on = ["darwin"] }  # Fedora's "jd" is JDim, a 2ch browser — not the JSON diff tool
-bat = { on = ["darwin", "linux"] }
-delta = { on = ["darwin", "linux"], dnf = { name = "git-delta" } }
-zoxide = { on = ["darwin", "linux"] }
-fzf = { on = ["darwin", "linux"] }
-tree = { on = ["darwin", "linux"] }
-bottom = { on = ["darwin", "linux"], dnf = { copr = "atim/bottom" } }
-lazygit = { on = ["darwin", "linux"], dnf = { copr = "atim/lazygit" } }
-yazi = { on = ["darwin", "linux"], dnf = { copr = "lihaohong/yazi" } }
-gh = { on = ["darwin", "linux"] }
-shellcheck = { on = ["darwin", "linux"], dnf = { name = "ShellCheck" } }
-git-cliff = { on = ["darwin"] }
-ast-grep = { on = ["darwin"] }
-duckdb = { on = ["darwin"] }
-cowsay = { on = ["darwin", "linux"] }
-figlet = { on = ["darwin", "linux"] }
-lolcat = { on = ["darwin", "linux"] }
+[packages.ripgrep]
+on = ["darwin", "linux"]
+
+[packages.fd]
+on = ["darwin", "linux"]
+dnf = { name = "fd-find" }
+
+[packages.jq]
+on = ["darwin", "linux"]
+
+[packages.yq]
+on = ["darwin", "linux"]
+
+[packages.jd] # Fedora's "jd" is JDim, a 2ch browser — not the JSON diff tool
+on = ["darwin"]
+
+[packages.bat]
+on = ["darwin", "linux"]
+
+[packages.delta]
+on = ["darwin", "linux"]
+dnf = { name = "git-delta" }
+
+[packages.zoxide]
+on = ["darwin", "linux"]
+
+[packages.fzf]
+on = ["darwin", "linux"]
+
+[packages.tree]
+on = ["darwin", "linux"]
+
+[packages.bottom]
+on = ["darwin", "linux"]
+dnf = { copr = "atim/bottom" }
+
+[packages.lazygit]
+on = ["darwin", "linux"]
+dnf = { copr = "atim/lazygit" }
+
+[packages.yazi]
+on = ["darwin", "linux"]
+dnf = { copr = "lihaohong/yazi" }
+
+[packages.gh]
+on = ["darwin", "linux"]
+
+[packages.shellcheck]
+on = ["darwin", "linux"]
+dnf = { name = "ShellCheck" }
+
+[packages.git-cliff]
+on = ["darwin"]
+
+[packages.ast-grep]
+on = ["darwin"]
+
+[packages.duckdb]
+on = ["darwin"]
+
+[packages.cowsay]
+on = ["darwin", "linux"]
+
+[packages.figlet]
+on = ["darwin", "linux"]
+
+[packages.lolcat]
+on = ["darwin", "linux"]
 
 # -- macOS: GNU userland & system --------------------------------------------
-gawk = { on = ["darwin"] }
-grep = { on = ["darwin"] }
-gnu-sed = { on = ["darwin"] }
-coreutils = { on = ["darwin"] }
-macism = { on = ["darwin"], brew = { name = "laishulu/homebrew/macism" } }
-imagemagick = { on = ["darwin"] }
-docker = { on = ["darwin"] }
+[packages.gawk]
+on = ["darwin"]
+
+[packages.grep]
+on = ["darwin"]
+
+[packages.gnu-sed]
+on = ["darwin"]
+
+[packages.coreutils]
+on = ["darwin"]
+
+[packages.macism]
+on = ["darwin"]
+brew = { name = "laishulu/homebrew/macism" }
+
+[packages.imagemagick]
+on = ["darwin"]
+
+[packages.docker]
+on = ["darwin"]
 
 # -- macOS apps ---------------------------------------------------------------
-ghostty = { on = ["darwin"], brew = { cask = "ghostty" } }
+[packages.ghostty]
+on = ["darwin"]
+brew = { cask = "ghostty" }
+
 # wezterm = { on = ["darwin"], brew = { cask = "wezterm@nightly" } }
-raycast = { on = ["darwin"], brew = { cask = "raycast" } }
+[packages.raycast]
+on = ["darwin"]
+brew = { cask = "raycast" }
+
 # completions: casks ship none.
-1password-cli.on = ["darwin"]
-1password-cli.brew = { cask = "1password-cli" }
-1password-cli.completions.op = "op completion zsh"
-orbstack = { on = ["darwin"], brew = { cask = "orbstack" } }
-istat-menus = { on = ["darwin"], brew = { cask = "istat-menus" } }
-karabiner-elements = { on = ["darwin"], brew = { cask = "karabiner-elements" } }
-iina = { on = ["darwin"], brew = { cask = "iina" } }
-tailscale.on = ["darwin"]
-tailscale.brew = { cask = "tailscale-app" }
-tailscale.completions.tailscale = "tailscale completion zsh"
+[packages.1password-cli]
+on = ["darwin"]
+brew = { cask = "1password-cli" }
+completions = { op = "op completion zsh" }
+
+[packages.orbstack]
+on = ["darwin"]
+brew = { cask = "orbstack" }
+
+[packages.istat-menus]
+on = ["darwin"]
+brew = { cask = "istat-menus" }
+
+[packages.karabiner-elements]
+on = ["darwin"]
+brew = { cask = "karabiner-elements" }
+
+[packages.iina]
+on = ["darwin"]
+brew = { cask = "iina" }
+
+[packages.tailscale]
+on = ["darwin"]
+brew = { cask = "tailscale-app" }
+completions = { tailscale = "tailscale completion zsh" }
 
 # -- dev toolchains (mise) ----------------------------------------------------
 # No completions on go, node, cmake, typescript: zsh-users/zsh-completions ships
 # _golang _node _cmake _tsc. None on usage, gopls, oxlint, oxfmt, actionlint, the
 # language servers: nothing to generate.
-go = { on = ["darwin", "linux"], via = "mise" }
+[packages.go]
+on = ["darwin", "linux"]
+via = "mise"
+
 # components: rustup's default profile ships neither, and both are what the
 # editor needs (rust-src for std completion).
-rust.on = ["darwin", "linux"]
-rust.via = "mise"
-rust.mise = { version = "stable", components = ["rust-analyzer", "rust-src"] }
-rust.completions.rustup = "rustup completions zsh rustup"
+[packages.rust]
+on = ["darwin", "linux"]
+via = "mise"
+mise = { version = "stable", components = ["rust-analyzer", "rust-src"] }
+
+[packages.rust.completions]
+rustup = "rustup completions zsh rustup"
 # nightly's engine (rust-lang/cargo#14520) is dynamic — completes -p/--bin/
 # --features from the workspace — and its script must be sourced, hence the
 # stub; without a nightly toolchain, the toolchain's static _cargo.
-rust.completions.cargo = "rustup toolchain list | grep -q '^nightly' && clap_stub cargo 'CARGO_COMPLETE=zsh cargo +nightly' || rustup completions zsh cargo"
-deno = { on = ["darwin", "linux"], via = "mise", completions = { deno = "deno completions zsh" } }
-node = { on = ["darwin", "linux"], via = "mise", mise = { version = "lts" } }
-pnpm.on = ["darwin", "linux"]
-pnpm.via = "mise"
-pnpm.overrides = [{ when = "darwin/amd64", mise = { name = "npm:pnpm" } }]
-pnpm.completions.pnpm = "pnpm completion zsh"
-golangci-lint.on = ["darwin", "linux"]
-golangci-lint.via = "mise"
-golangci-lint.completions.golangci-lint = "golangci-lint completion zsh"
-usage = { on = ["darwin", "linux"], via = "mise" }
-cmake = { on = ["darwin", "linux"], via = "mise" }
-just = { on = ["darwin", "linux"], via = "mise", completions = { just = "just --completions zsh" } }
-prek.on = ["darwin", "linux"]
-prek.via = "mise"
-prek.completions.prek = "clap_stub prek 'COMPLETE=zsh prek'"
-gopls = { on = ["darwin", "linux"], via = "mise", mise = { name = "go:golang.org/x/tools/gopls" } }
+cargo = "rustup toolchain list | grep -q '^nightly' && clap_stub cargo 'CARGO_COMPLETE=zsh cargo +nightly' || rustup completions zsh cargo"
+
+[packages.deno]
+on = ["darwin", "linux"]
+via = "mise"
+completions = { deno = "deno completions zsh" }
+
+[packages.node]
+on = ["darwin", "linux"]
+via = "mise"
+mise = { version = "lts" }
+
+[packages.pnpm]
+on = ["darwin", "linux"]
+via = "mise"
+overrides = [{ when = "darwin/amd64", mise = { name = "npm:pnpm" } }]
+completions = { pnpm = "pnpm completion zsh" }
+
+[packages.golangci-lint]
+on = ["darwin", "linux"]
+via = "mise"
+completions = { golangci-lint = "golangci-lint completion zsh" }
+
+[packages.usage]
+on = ["darwin", "linux"]
+via = "mise"
+
+[packages.cmake]
+on = ["darwin", "linux"]
+via = "mise"
+
+[packages.just]
+on = ["darwin", "linux"]
+via = "mise"
+completions = { just = "just --completions zsh" }
+
+[packages.prek]
+on = ["darwin", "linux"]
+via = "mise"
+completions = { prek = "clap_stub prek 'COMPLETE=zsh prek'" }
+
+[packages.gopls]
+on = ["darwin", "linux"]
+via = "mise"
+mise = { name = "go:golang.org/x/tools/gopls" }
 
 # -- dev tools, workstation only (mise) ---------------------------------------
 # terraform/opentofu: bash-protocol completion only (`complete -C`), wired in .zshrc.
-terraform = { on = ["darwin"], via = "mise" }
-opentofu = { on = ["darwin"], via = "mise" }
-kubectl = { on = ["darwin"], via = "mise", completions = { kubectl = "kubectl completion zsh" } }
-k9s = { on = ["darwin"], via = "mise", completions = { k9s = "k9s completion zsh" } }
-buf = { on = ["darwin"], via = "mise", completions = { buf = "buf completion zsh" } }
+[packages.terraform]
+on = ["darwin"]
+via = "mise"
+
+[packages.opentofu]
+on = ["darwin"]
+via = "mise"
+
+[packages.kubectl]
+on = ["darwin"]
+via = "mise"
+completions = { kubectl = "kubectl completion zsh" }
+
+[packages.k9s]
+on = ["darwin"]
+via = "mise"
+completions = { k9s = "k9s completion zsh" }
+
+[packages.buf]
+on = ["darwin"]
+via = "mise"
+completions = { buf = "buf completion zsh" }
+
 # act reads ~/.config/act/actrc even for `completion`, and its -P lines make it
 # bail with "unknown shorthand flag" — point it at an empty config home.
-act.on = ["darwin"]
-act.via = "mise"
-act.completions.act = "XDG_CONFIG_HOME=/var/empty act completion zsh"
-wrangler = { on = ["darwin"], via = "mise", completions = { wrangler = "wrangler complete zsh" } }
-hugo-extended = { on = ["darwin"], via = "mise", completions = { hugo = "hugo completion zsh" } }
-vacuum = { on = ["darwin"], via = "mise", completions = { vacuum = "vacuum completion zsh" } }
-actionlint = { on = ["darwin"], via = "mise" }
-trivy = { on = ["darwin"], via = "mise", completions = { trivy = "trivy completion zsh" } }
-promql-langserver.on = ["darwin"]
-promql-langserver.via = "mise"
-promql-langserver.mise = { name = "go:github.com/prometheus-community/promql-langserver/cmd/promql-langserver" }
-lua-language-server = { on = ["darwin"], via = "mise" }
-typescript = { on = ["darwin"], via = "mise", mise = { name = "npm:typescript" } }
-oxlint = { on = ["darwin", "linux"], via = "mise" }
-oxfmt = { on = ["darwin", "linux"], via = "mise" }
-hcloud.on = ["darwin", "linux"]
-hcloud.via = "mise"
-hcloud.completions.hcloud = "hcloud completion zsh"
+[packages.act]
+on = ["darwin"]
+via = "mise"
+completions = { act = "XDG_CONFIG_HOME=/var/empty act completion zsh" }
+
+[packages.wrangler]
+on = ["darwin"]
+via = "mise"
+completions = { wrangler = "wrangler complete zsh" }
+
+[packages.hugo-extended]
+on = ["darwin"]
+via = "mise"
+completions = { hugo = "hugo completion zsh" }
+
+[packages.vacuum]
+on = ["darwin"]
+via = "mise"
+completions = { vacuum = "vacuum completion zsh" }
+
+[packages.actionlint]
+on = ["darwin"]
+via = "mise"
+
+[packages.trivy]
+on = ["darwin"]
+via = "mise"
+completions = { trivy = "trivy completion zsh" }
+
+[packages.promql-langserver]
+on = ["darwin"]
+via = "mise"
+mise = { name = "go:github.com/prometheus-community/promql-langserver/cmd/promql-langserver" }
+
+[packages.lua-language-server]
+on = ["darwin"]
+via = "mise"
+
+[packages.typescript]
+on = ["darwin"]
+via = "mise"
+mise = { name = "npm:typescript" }
+
+[packages.oxlint]
+on = ["darwin", "linux"]
+via = "mise"
+
+[packages.oxfmt]
+on = ["darwin", "linux"]
+via = "mise"
+
+[packages.hcloud]
+on = ["darwin", "linux"]
+via = "mise"
+completions = { hcloud = "hcloud completion zsh" }
 
 # -- Python CLIs (uv) ---------------------------------------------------------
 # `uv tool install`, one isolated venv each, entry points in ~/.local/bin.
-ruff.on = ["darwin", "linux"]
-ruff.via = "uv"
-ruff.completions.ruff = "ruff generate-shell-completion zsh"
-ty.on = ["darwin", "linux"]
-ty.via = "uv"
-ty.completions.ty = "ty generate-shell-completion zsh"
+[packages.ruff]
+on = ["darwin", "linux"]
+via = "uv"
+completions = { ruff = "ruff generate-shell-completion zsh" }
+
+[packages.ty]
+on = ["darwin", "linux"]
+via = "uv"
+completions = { ty = "ty generate-shell-completion zsh" }
 
 # -- eBPF lab, linux only (system) --------------------------------------------
 # kernel-devel never matches OrbStack's kernel, so everything here takes the
 # BTF/CO-RE path. clang because libbpf's headers and `bpftool gen skeleton` are
 # written against clang's BPF backend; gcc's is a separate cross compiler.
-clang = { on = ["linux"] }
-llvm = { on = ["linux"] }  # llvm-strip -g, the DWARF strip every libbpf build ends with
-libbpf-devel = { on = ["linux"] }
-bpftool = { on = ["linux"] }  # vmlinux.h, skeleton codegen, `feature probe`
-bpftrace = { on = ["linux"] }
-pahole = { on = ["linux"], dnf = { name = "dwarves" } }
-elfutils-libelf-devel = { on = ["linux"] }  # libbpf links against libelf and zlib
+[packages.clang]
+on = ["linux"]
+
+[packages.llvm] # llvm-strip -g, the DWARF strip every libbpf build ends with
+on = ["linux"]
+
+[packages.libbpf-devel]
+on = ["linux"]
+
+[packages.bpftool] # vmlinux.h, skeleton codegen, `feature probe`
+on = ["linux"]
+
+[packages.bpftrace]
+on = ["linux"]
+
+[packages.pahole]
+on = ["linux"]
+dnf = { name = "dwarves" }
+
+[packages.elfutils-libelf-devel] # libbpf links against libelf and zlib
+on = ["linux"]
+
 # Fedora 44 has no zlib-devel
-zlib-devel = { on = ["linux"], dnf = { name = "zlib-ng-compat-devel" } }
-kernel-headers = { on = ["linux"] }  # UAPI linux/bpf.h; need not match the running kernel
-strace = { on = ["linux"] }  # loaders fail in userspace, before the verifier sees anything
-gdb = { on = ["linux"] }
+[packages.zlib-devel]
+on = ["linux"]
+dnf = { name = "zlib-ng-compat-devel" }
+
+[packages.kernel-headers] # UAPI linux/bpf.h; need not match the running kernel
+on = ["linux"]
+
+[packages.strace] # loaders fail in userspace, before the verifier sees anything
+on = ["linux"]
+
+[packages.gdb]
+on = ["linux"]

@@ -14,7 +14,7 @@ identity beyond os and arch yet; the three machines happen to differ there.
 
 | Path                                | What                                                                                       |
 | ----------------------------------- | ------------------------------------------------------------------------------------------ |
-| `.chezmoidata/packages.toml`        | every tool, one line each, whatever installs it (see below)                                |
+| `.chezmoidata/packages.toml`        | every tool, one table each, whatever installs it (see below)                               |
 | `.chezmoidata/platforms.toml`       | kinds of machine: OS and the system package manager that comes with it                     |
 | `.chezmoidata/machines.toml`        | the render targets, `<os>-<arch>` today; a specific device would be one more entry         |
 | `.chezmoidata/xdg.toml`             | XDG base dirs; `.zshenv` exports them, externals and symlinks derive their paths from them |
@@ -34,25 +34,41 @@ identity beyond os and arch yet; the three machines happen to differ there.
 
 ## Packages
 
-`packages.toml` is the inventory. One line per tool answers three questions:
+`packages.toml` is the inventory. One table per tool answers three questions:
 where it goes (`on`), how it gets there (`via` and that backend's block), and
 which zsh completions it generates (`completions`).
 
 ```toml
-[packages]
-git = { on = ["darwin", "linux"] }
-fd = { on = ["darwin", "linux"], dnf = { name = "fd-find" } }
-ghostty = { on = ["darwin"], brew = { cask = "ghostty" } }
-kubectl = { on = ["darwin"], via = "mise", completions = { kubectl = "kubectl completion zsh" } }
-node = { on = ["darwin", "linux"], via = "mise", mise = { version = "lts" } }
-ruff = { on = ["darwin", "linux"], via = "uv", completions = { ruff = "ruff generate-shell-completion zsh" } }
-# dotted keys when one line will not do (TOML 1.0 has no multi-line inline tables)
-starship.on = ["darwin", "linux"]
-starship.dnf = { copr = "atim/starship" }
-starship.completions.starship = "starship completions zsh"
-pnpm.on = ["darwin", "linux"]
-pnpm.via = "mise"
-pnpm.overrides = [{ when = "darwin/amd64", mise = { name = "npm:pnpm" } }]
+[packages.git]
+on = ["darwin", "linux"]
+
+[packages.fd]
+on = ["darwin", "linux"]
+dnf = { name = "fd-find" }
+
+[packages.starship]
+on = ["darwin", "linux"]
+dnf = { copr = "atim/starship" }
+completions = { starship = "starship completions zsh" }
+
+[packages.ghostty]
+on = ["darwin"]
+brew = { cask = "ghostty" }
+
+[packages.rust]
+on = ["darwin", "linux"]
+via = "mise"
+mise = { version = "stable", components = ["rust-analyzer", "rust-src"] }
+
+[packages.pnpm]
+on = ["darwin", "linux"]
+via = "mise"
+overrides = [{ when = "darwin/amd64", mise = { name = "npm:pnpm" } }]
+
+[packages.ruff]
+on = ["darwin", "linux"]
+via = "uv"
+completions = { ruff = "ruff generate-shell-completion zsh" }
 ```
 
 - `on` is a list of machine tags: `darwin`, `linux`, or `os/arch`. (An open
