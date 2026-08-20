@@ -16,10 +16,11 @@
 "opentofu" = "latest"
 "oxfmt" = "latest"
 "oxlint" = "latest"
-"pnpm" = "latest"
+"npm:pnpm" = "latest"
 "prek" = "latest"
 "go:github.com/prometheus-community/promql-langserver/cmd/promql-langserver" = "latest"
 "rust" = { version = "stable", components = ["rust-analyzer", "rust-src"] }
+"taplo" = "latest"
 "terraform" = "latest"
 "trivy" = "latest"
 "npm:typescript" = "latest"

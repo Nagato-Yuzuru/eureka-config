@@ -32,14 +32,14 @@ repos:
         entry: uv run ruff check --fix
         language: system
         pass_filenames: false
-        files: ^(tests/.*\.py|dot_claude/modify_settings\.json|run_onchange_after_snapshot-claude-managed\.py\.tmpl|pyproject\.toml)$
+        files: ^(tests/.*\.py|tools/.*\.py|dot_claude/modify_settings\.json|run_onchange_after_snapshot-claude-managed\.py\.tmpl|pyproject\.toml)$
 
       - id: ruff-format
         name: ruff format
         entry: uv run ruff format
         language: system
         pass_filenames: false
-        files: ^(tests/.*\.py|dot_claude/modify_settings\.json|run_onchange_after_snapshot-claude-managed\.py\.tmpl|pyproject\.toml)$
+        files: ^(tests/.*\.py|tools/.*\.py|dot_claude/modify_settings\.json|run_onchange_after_snapshot-claude-managed\.py\.tmpl|pyproject\.toml)$
 
       - id: shellcheck
         name: shellcheck
@@ -53,7 +53,7 @@ repos:
         name: oxfmt
         entry: oxfmt --write
         language: system
-        files: ^(\.chezmoidata/.*\.ya?ml|\.pre-commit-config\.yaml|\.yamllint\.yaml)$
+        files: ^(\.chezmoidata/.*\.toml|\.pre-commit-config\.yaml|\.yamllint\.yaml)$
 
       - id: yamllint
         name: yamllint
@@ -61,9 +61,17 @@ repos:
         language: system
         files: \.ya?ml$
 
+      # The inventory compiler: .chezmoidata -> .rendered/ must be committed together.
+      - id: render
+        name: render --check
+        entry: uv run render --check
+        language: system
+        pass_filenames: false
+        files: ^(\.chezmoidata/|\.rendered/|tools/|pyproject\.toml|uv\.lock)
+
       - id: pytest
         name: pytest
         entry: uv run pytest -q
         language: system
         pass_filenames: false
-        files: ^(tests/|\.chezmoitemplates/|\.chezmoidata/|run_onchange_before_install-packages\.sh\.tmpl|dot_claude/(modify_settings\.json|exact_claude-managed\.d/)|run_onchange_after_snapshot-claude-managed\.py\.tmpl|dot_config/mise/config\.toml\.tmpl|dot_Brewfile\.tmpl)
+        files: ^(tests/|tools/|\.rendered/|\.chezmoitemplates/|\.chezmoidata/|pyproject\.toml|uv\.lock|run_onchange_before_install-packages\.sh\.tmpl|run_onchange_after_refresh-completions\.sh\.tmpl|dot_claude/(modify_settings\.json|exact_claude-managed\.d/)|run_onchange_after_snapshot-claude-managed\.py\.tmpl|dot_config/mise/(config\.toml\.tmpl|tasks/)|dot_Brewfile\.tmpl)

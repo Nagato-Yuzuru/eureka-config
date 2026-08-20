@@ -1,0 +1,31 @@
+{
+  "$defs": {
+    "Zsh": {
+      "additionalProperties": false,
+      "properties": {
+        "generatedCompletions": {
+          "minLength": 1,
+          "title": "Generatedcompletions",
+          "type": "string"
+        }
+      },
+      "required": [
+        "generatedCompletions"
+      ],
+      "title": "Zsh",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "zsh": {
+      "$ref": "#/$defs/Zsh"
+    }
+  },
+  "required": [
+    "zsh"
+  ],
+  "title": "ZshDoc",
+  "type": "object"
+}

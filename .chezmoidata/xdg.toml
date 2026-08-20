@@ -1,10 +1,11 @@
+#:schema ../.rendered/schema/xdg.json
 # XDG base directories, relative to $HOME. chezmoi templates derive from here:
 # .zshenv exports them, .chezmoiexternal / symlink_ targets reference them.
 # Non-template files (tmux.conf.local, ghostty config, ...) can only spell the
 # literal paths, so changing a value here means checking those by hand.
 # XDG_CONFIG_HOME is deliberately absent: chezmoi's dot_config/ source tree
 # pins it to ~/.config.
-xdg:
-  dataHome: .local/share
-  stateHome: .local/state
-  cacheHome: .cache
+[xdg]
+dataHome = ".local/share"
+stateHome = ".local/state"
+cacheHome = ".cache"

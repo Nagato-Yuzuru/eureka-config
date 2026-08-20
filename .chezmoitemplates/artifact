@@ -1,0 +1,16 @@
+{{- /* This machine's copy of one compiled artifact — brewfile, dnf-list, dnf-repos,
+       mise-tools, uv-tools or completions — from .rendered/<os>-<arch>/, the tree
+       `uv run render` (tools/inventory) compiles from .chezmoidata/{platforms,
+       machines,packages}.toml. Args: name, plus the root data (`merge (dict "name" …) .`).
+       Refuses a tree compiled from other data than what is here now, and a machine
+       machines.toml does not declare. */ -}}
+{{- $machine := printf "%s-%s" .chezmoi.os .chezmoi.arch -}}
+{{- if not (hasKey .machines $machine) -}}
+  {{- fail (printf "machines.toml: %s is not declared, nothing is rendered for it" $machine) -}}
+{{- end -}}
+{{- $want := printf "%s%s%s" (include ".chezmoidata/machines.toml") (include ".chezmoidata/packages.toml") (include ".chezmoidata/platforms.toml") | sha256sum -}}
+{{- $have := include ".rendered/STAMP" | trim -}}
+{{- if ne $want $have -}}
+  {{- fail ".rendered/ is stale: .chezmoidata changed since the last `uv run render` (prek runs it; commit the result)" -}}
+{{- end -}}
+{{- include (printf ".rendered/%s/%s" $machine .name) -}}
