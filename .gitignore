@@ -329,3 +329,8 @@ cython_debug/
 ### Project
 # pytest sandbox for tests/test_path_gate.py (a root the path gate calls foreign)
 .pytest-sandbox/
+
+# The compiled inventory. chezmoi's read-source-state hook runs `make`, which builds it
+# before anything reads it, so it is a build product. .schema/ is committed instead: the
+# editor reads that one, and nothing builds it before you open a file.
+.rendered/

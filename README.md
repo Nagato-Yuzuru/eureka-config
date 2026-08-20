@@ -20,7 +20,7 @@ identity beyond os and arch yet; the four machines happen to differ there.
 | `.chezmoidata/xdg.toml`             | XDG base dirs; `.zshenv` exports them, externals and symlinks derive their paths from them |
 | `.chezmoidata/zsh.toml`             | the generated-completions dir, declared once for `.zshrc` and both mise tasks              |
 | `tools/inventory/`                  | the inventory compiler: types, resolution, renderers; `uv run render` writes `.rendered/`  |
-| `.rendered/<machine>/`              | the compiled artifacts chezmoi includes (Brewfile lines, mise tools, recipes …), committed |
+| `.rendered/<machine>/`              | the compiled artifacts chezmoi includes (Brewfile lines, mise tools, recipes …), gitignored |
 | `.schema/`                          | JSON Schema per data file, from the same types; each `.toml` names its own, committed      |
 | `Makefile`                          | rebuilds the two generated trees when an input moved; chezmoi's hook runs it               |
 | `.chezmoitemplates/artifact`        | includes this machine's artifact; refuses a stale tree or an undeclared machine            |
@@ -114,14 +114,15 @@ plus a `STAMP` (the hash of the three data files), and the same types into
 `#:schema` line at the top of each `.toml` points at, so a TOML language
 server (taplo, tombi) completes and checks the file with the constraints
 `render` enforces (`deno run npm:@taplo/cli lint .chezmoidata/*.toml` does
-the same from a shell). The tree is committed, and `prek` refuses a commit
-where it is stale. chezmoi never runs Python: its
-templates `include` the file for `<os>-<arch>` through `.chezmoitemplates/artifact`,
+the same from a shell). chezmoi builds `.rendered/` itself, so it is gitignored:
+the read-source-state hook runs `make`, which reruns `render` when a data file or
+the compiler moved. `.schema/` is committed instead, because the editor reads it
+before anything has had a chance to run. Templates then
+`include` the file for `<os>-<arch>` through `.chezmoitemplates/artifact`,
 which recomputes the hash and fails on a tree compiled from other data than
 what is checked out, or on a machine `machines.toml` does not declare. Bad data
 fails `render` with a message naming the entry (`packages.rust.mise.components:
-must be a non-empty list`). A diff under `.rendered/` shows exactly which
-machine an edit touched.
+must be a non-empty list`).
 
 Each layer has one owner and one trigger: chezmoi installs the system packages
 and uv tools when this machine's set changes; `mise install` is a manual step
