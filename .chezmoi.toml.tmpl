@@ -3,3 +3,10 @@ command = "nvim"
 args = ["-d", "{{ "{{ .Destination }}" }}", "{{ "{{ .Source }}" }}", "{{ "{{ .Target }}" }}"]
 [diff]
 pager = "delta --dark --line-numbers --side-by-side"
+
+# Compile the inventory before chezmoi reads it, so an edit to .chezmoidata/ takes effect
+# on the next chezmoi command. A failure here aborts chezmoi, which is intended: better
+# than applying a package list that no longer matches the declaration.
+[hooks.read-source-state.pre]
+command = "sh"
+args = ["-c", 'exec make -C "$CHEZMOI_SOURCE_DIR" -s .rendered/STAMP']

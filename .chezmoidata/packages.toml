@@ -1,4 +1,4 @@
-#:schema ../.rendered/schema/packages.json
+#:schema ../.schema/packages.json
 # Everything installed on a machine, one table per package, whatever the backend.
 # The types in tools/inventory/model.py are the schema (the #:schema line above is
 # their JSON Schema, for the editor); `uv run render` compiles
@@ -353,7 +353,7 @@ on = ["darwin"]
 via = "mise"
 
 # TOML language server + linter: reads the #:schema line of each .chezmoidata file
-# (.rendered/schema/, `uv run render schema`). No completion generator to declare.
+# (.schema/, `uv run render schema`). No completion generator to declare.
 [packages.taplo]
 on = ["darwin"]
 via = "mise"

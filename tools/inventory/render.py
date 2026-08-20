@@ -21,9 +21,7 @@ from inventory.model import DOCS, Cask, CoprRpm, Mise, RepofileRpm, Resolved, Uv
 
 RENDERED_DIR = ".rendered"
 STAMP = "STAMP"
-SCHEMA_DIR = (
-    "schema"  # <RENDERED_DIR>/schema/<data file stem>.json, what each `#:schema` line names
-)
+SCHEMA_DIR = ".schema"  # .schema/<data file stem>.json, what each `#:schema` line names
 
 
 def brewfile(rs: Iterable[Resolved]) -> list[str]:
@@ -136,13 +134,13 @@ def schemas() -> dict[str, str]:
 
 
 def render_tree(inv: Inventory, data_dir: Path) -> dict[str, str]:
-    """Relative path -> content for the whole `.rendered/` tree."""
+    """Relative path -> content for the whole `.rendered/` tree. The JSON Schemas are a
+    separate tree: the editor reads them, not chezmoi, and they come from the types."""
     files = {
         f"{mid}/{name}": text
         for mid in inv.machines
         for name, text in render_machine(inv, mid).items()
     }
-    files.update({f"{SCHEMA_DIR}/{rel}": text for rel, text in schemas().items()})
     files[STAMP] = stamp(data_dir) + "\n"
     return files
 

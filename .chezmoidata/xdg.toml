@@ -1,4 +1,4 @@
-#:schema ../.rendered/schema/xdg.json
+#:schema ../.schema/xdg.json
 # XDG base directories, relative to $HOME. chezmoi templates derive from here:
 # .zshenv exports them, .chezmoiexternal / symlink_ targets reference them.
 # Non-template files (tmux.conf.local, ghostty config, ...) can only spell the

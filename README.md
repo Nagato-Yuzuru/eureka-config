@@ -8,7 +8,7 @@ repo.
 
 Everything renders per machine from `.chezmoi.os` / `.chezmoi.arch`, so the
 same commit produces a Mac and a Fedora home directory. There is no machine
-identity beyond os and arch yet; the three machines happen to differ there.
+identity beyond os and arch yet; the four machines happen to differ there.
 
 ## Layout
 
@@ -21,7 +21,8 @@ identity beyond os and arch yet; the three machines happen to differ there.
 | `.chezmoidata/zsh.toml`             | the generated-completions dir, declared once for `.zshrc` and both mise tasks              |
 | `tools/inventory/`                  | the inventory compiler: types, resolution, renderers; `uv run render` writes `.rendered/`  |
 | `.rendered/<machine>/`              | the compiled artifacts chezmoi includes (Brewfile lines, mise tools, recipes …), committed |
-| `.rendered/schema/`                 | JSON Schema per data file, generated from the same types; each `.toml` names its own       |
+| `.schema/`                          | JSON Schema per data file, from the same types; each `.toml` names its own, committed      |
+| `Makefile`                          | rebuilds the two generated trees when an input moved; chezmoi's hook runs it               |
 | `.chezmoitemplates/artifact`        | includes this machine's artifact; refuses a stale tree or an undeclared machine            |
 | `.chezmoiexternal.toml.tmpl`        | oh-my-tmux and (linux) antidote as git clones under `$XDG_DATA_HOME`                       |
 | `.chezmoiignore`                    | what a non-Mac never gets: Brewfile, ghostty, wezterm, 1Password                           |
@@ -109,7 +110,7 @@ what a table may contain, `inventory.py` resolves it per machine, `render.py`
 turns the resolved list into text. `uv run render` compiles every machine in
 `machines.toml` into `.rendered/<machine>/{brewfile,dnf-list,dnf-repos,mise-tools,uv-tools,completions}`
 plus a `STAMP` (the hash of the three data files), and the same types into
-`.rendered/schema/<file>.json` — a JSON Schema per data file, which the
+`.schema/<file>.json` — a JSON Schema per data file, which the
 `#:schema` line at the top of each `.toml` points at, so a TOML language
 server (taplo, tombi) completes and checks the file with the constraints
 `render` enforces (`deno run npm:@taplo/cli lint .chezmoidata/*.toml` does
@@ -218,12 +219,15 @@ the eBPF section of `packages.toml` takes the BTF/CO-RE path throughout.
 ## Development
 
 ```sh
-uv run render            # after editing .chezmoidata/*.toml or tools/inventory; commit .rendered/ with it
-uv run render schema     # only .rendered/schema/ — from the types alone, works while a data file is broken
+make                     # rebuild .rendered/ and .schema/, if an input moved
+uv run render schema     # only .schema/ — from the types alone, works while a data file is broken
 uv run render --check    # what prek runs: fails on a stale tree
-uv run pytest            # everything, ~15 s
+uv run pytest            # everything, ~20 s
 prek install             # the git hooks in .pre-commit-config.yaml
 ```
+
+chezmoi runs `make` itself before every command that reads the source state, so
+editing `.chezmoidata/` and running `chezmoi apply` is the whole loop.
 
 What another machine gets is a file: `cat .rendered/darwin-amd64/mise-tools`.
 

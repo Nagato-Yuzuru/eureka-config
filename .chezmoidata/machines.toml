@@ -1,4 +1,4 @@
-#:schema ../.rendered/schema/machines.json
+#:schema ../.schema/machines.json
 # The render targets: `uv run render` compiles .rendered/<id>/ for each, and chezmoi
 # includes the one whose id is `<os>-<arch>` (.chezmoitemplates/artifact). Today that
 # is the only id chezmoi can pick, so an entry per os/arch is all this can hold; a

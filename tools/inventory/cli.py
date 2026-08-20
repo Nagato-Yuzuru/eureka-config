@@ -1,6 +1,6 @@
 """`uv run render [all|schema] [--check] [--root DIR]`: compile .chezmoidata/{platforms,
 machines,packages}.toml into .rendered/<machine>/<artifact> for every declared machine plus
-the JSON Schemas under .rendered/schema/ (`all`, the default), or only the schemas
+the JSON Schemas under .schema/ (`all`, the default), or only the schemas
 (`schema` — from the types alone, so it works while a data file is still broken). With
 --check, report what would change instead (exit 1) — the pre-commit hook, so a data or
 model edit never lands without its render. Bad data prints the message naming the entry
@@ -28,25 +28,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--root", type=Path, default=REPO_ROOT, help="chezmoi source dir")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
-    data_dir, out_dir = args.root / ".chezmoidata", args.root / RENDERED_DIR
-    if args.what == "schema":
-        files, out_dir, shown = schemas(), out_dir / SCHEMA_DIR, f"{RENDERED_DIR}/{SCHEMA_DIR}"
-    else:
+    data_dir = args.root / ".chezmoidata"
+    # `schema` comes from the types alone, so it works while a data file is broken;
+    # `all` writes neither tree when the data does not parse.
+    trees = [(schemas(), args.root / SCHEMA_DIR, SCHEMA_DIR)]
+    if args.what == "all":
         try:
-            files = render_tree(Inventory.load(data_dir), data_dir)
+            rendered = render_tree(Inventory.load(data_dir), data_dir)
         except InventoryError as e:
             log.error("%s", e)
             return 2
-        shown = RENDERED_DIR
-    changed = stale(files, out_dir)
-    if args.check:
-        for rel in changed:
-            log.error("stale: %s/%s", shown, rel)
-        if changed:
-            log.error("run `uv run render` and commit the result")
-        return 1 if changed else 0
-    for rel in write_tree(files, out_dir):
-        log.info("%s %s/%s", "wrote" if rel in files else "removed", shown, rel)
+        trees.append((rendered, args.root / RENDERED_DIR, RENDERED_DIR))
+    found_stale = False
+    for files, out_dir, shown in trees:
+        if args.check:
+            for rel in stale(files, out_dir):
+                log.error("stale: %s/%s", shown, rel)
+                found_stale = True
+        else:
+            for rel in write_tree(files, out_dir):
+                log.info("%s %s/%s", "wrote" if rel in files else "removed", shown, rel)
+    if found_stale:
+        log.error("run `uv run render` and commit the result")
+        return 1
     return 0
 
 

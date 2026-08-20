@@ -15,6 +15,7 @@ nobody declared.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
 import tomllib
@@ -29,11 +30,20 @@ from jsonschema import Draft202012Validator
 from inventory.cli import main
 from inventory.inventory import DATA_FILES, Inventory, InventoryError, load_data
 from inventory.model import DOCS
-from inventory.render import ARTIFACTS, RENDERED_DIR, render, render_tree, stale, write_tree
+from inventory.render import (
+    ARTIFACTS,
+    RENDERED_DIR,
+    SCHEMA_DIR,
+    render,
+    render_tree,
+    stale,
+    write_tree,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA = REPO_ROOT / ".chezmoidata"
 RENDERED = REPO_ROOT / RENDERED_DIR
+SCHEMA = REPO_ROOT / SCHEMA_DIR
 MISE_TASKS = REPO_ROOT / "dot_config" / "mise" / "tasks"
 INSTALL_SCRIPT = REPO_ROOT / "run_onchange_before_install-packages.sh.tmpl"
 REFRESH_SCRIPT = REPO_ROOT / "run_onchange_after_refresh-completions.sh.tmpl"
@@ -861,7 +871,7 @@ def test_artifact_template_serves_this_machines_file(artifact: str, machine: str
 def _source_copy(tmp_path: Path) -> Path:
     src = tmp_path / "source"
     src.mkdir()
-    for d in (".chezmoidata", ".chezmoitemplates", RENDERED_DIR):
+    for d in (".chezmoidata", ".chezmoitemplates", RENDERED_DIR, SCHEMA_DIR):
         shutil.copytree(REPO_ROOT / d, src / d)
     return src
 
@@ -899,7 +909,7 @@ def test_artifact_template_refuses_an_undeclared_machine(tmp_path: Path):
 
 
 def schema_for(name: str) -> Any:  # jsonschema ships no types; a Draft202012Validator
-    schema = json.loads((RENDERED / "schema" / f"{Path(name).stem}.json").read_text())
+    schema = json.loads((SCHEMA / f"{Path(name).stem}.json").read_text())
     Draft202012Validator.check_schema(schema)
     return Draft202012Validator(schema)
 
@@ -908,7 +918,7 @@ def schema_for(name: str) -> Any:  # jsonschema ships no types; a Draft202012Val
 def test_each_data_file_validates_against_its_schema(name: str):
     """The `#:schema` line at the top of each .chezmoidata file names this file."""
     first = (DATA / name).read_text().splitlines()[0]
-    assert first == f"#:schema ../.rendered/schema/{Path(name).stem}.json"
+    assert first == f"#:schema ../{SCHEMA_DIR}/{Path(name).stem}.json"
     schema_for(name).validate(load_data(DATA / name))
 
 
@@ -946,6 +956,38 @@ def test_write_tree_only_touches_what_changed_and_removes_what_left(tmp_path: Pa
     assert stale(smaller, out) == []
 
 
+DIRTY = [
+    ("all", f"{RENDERED_DIR}/linux-amd64/dnf-list", 1),
+    ("all", f"{SCHEMA_DIR}/machines.json", 1),
+    ("schema", f"{SCHEMA_DIR}/machines.json", 1),
+    ("schema", f"{RENDERED_DIR}/linux-amd64/dnf-list", 0),  # `schema` owns only its own tree
+]
+
+
+@pytest.mark.parametrize(("what", "victim", "rc"), DIRTY, ids=lambda v: str(v))
+def test_check_exits_1_and_names_every_stale_file(
+    what: str, victim: str, rc: int, tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    """What prek runs before every commit. `all` covers both trees, `schema` only its own."""
+    src = _source_copy(tmp_path)
+    assert main([what, "--check", "--root", str(src)]) == 0
+    (src / victim).write_text("not what the types compile to\n")
+    with caplog.at_level(logging.ERROR, logger="inventory"):
+        assert main([what, "--check", "--root", str(src)]) == rc
+    assert (f"stale: {victim}" in caplog.text) is (rc == 1)
+
+
+def test_all_writes_both_trees(tmp_path: Path):
+    """One `render` restores whatever was clobbered, in .rendered/ and .schema/ alike."""
+    src = _source_copy(tmp_path)
+    dirty = (f"{RENDERED_DIR}/linux-amd64/dnf-list", f"{SCHEMA_DIR}/machines.json")
+    for rel in dirty:
+        (src / rel).write_text("clobbered\n")
+    assert main(["all", "--root", str(src)]) == 0
+    for rel in dirty:
+        assert (src / rel).read_text() == (REPO_ROOT / rel).read_text()
+
+
 def test_render_schema_needs_no_valid_data(tmp_path: Path):
     """`uv run render schema` comes from the types alone: it still works — and `all` does not —
     while a data file is broken, which is when the editor needs the schema most."""
@@ -955,7 +997,7 @@ def test_render_schema_needs_no_valid_data(tmp_path: Path):
     assert main(["all", "--root", str(src)]) == 2
     assert main(["schema", "--root", str(src)]) == 0
     assert main(["schema", "--check", "--root", str(src)]) == 0
-    assert sorted(p.name for p in (src / RENDERED_DIR / "schema").iterdir()) == sorted(
+    assert sorted(p.name for p in (src / SCHEMA_DIR).iterdir()) == sorted(
         f"{Path(n).stem}.json" for n in DOCS
     )
 

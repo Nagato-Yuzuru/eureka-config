@@ -27,3 +27,4 @@ uv.lock
 
 # Repo-only: the inventory compiler (uv run render)
 tools/
+Makefile
