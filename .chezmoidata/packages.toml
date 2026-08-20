@@ -349,8 +349,12 @@ via = "mise"
 mise = { name = "go:github.com/prometheus-community/promql-langserver/cmd/promql-langserver" }
 
 [packages.lua-language-server]
-on = ["darwin"]
+on = ["darwin", "linux"]
 via = "mise"
+
+[packages.luarocks]
+on = ["darwin", "linux"]
+via = "system"
 
 # TOML language server + linter: reads the #:schema line of each .chezmoidata file
 # (.schema/, `uv run render schema`). No completion generator to declare.
