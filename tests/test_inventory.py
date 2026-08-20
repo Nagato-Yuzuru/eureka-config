@@ -882,7 +882,9 @@ def test_artifact_template_refuses_an_undeclared_machine(tmp_path: Path):
     proc = subprocess.run(
         [
             "chezmoi", "execute-template", "--source", str(REPO_ROOT),
-            "--override-data", json.dumps({"chezmoi": {"os": "linux", "arch": "amd64"}}),
+            # 386 is a real GOARCH that model.py's Arch literal cannot spell, so no
+            # machines.toml entry can ever make this machine a declared one.
+            "--override-data", json.dumps({"chezmoi": {"os": "linux", "arch": "386"}}),
             "--file", str(tmpl),
         ],
         text=True,
@@ -890,7 +892,7 @@ def test_artifact_template_refuses_an_undeclared_machine(tmp_path: Path):
         check=False,
     )  # fmt: skip
     assert proc.returncode != 0
-    assert "linux-amd64 is not declared" in proc.stderr
+    assert "linux-386 is not declared" in proc.stderr
 
 
 # --- JSON Schemas: the types, for the editor ------------------------------------------------------

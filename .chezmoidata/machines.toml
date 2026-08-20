@@ -8,3 +8,4 @@
 darwin-arm64 = { platform = "macos", arch = "arm64" }
 darwin-amd64 = { platform = "macos", arch = "amd64" }
 linux-arm64 = { platform = "fedora", arch = "arm64" }
+linux-amd64 = { platform = "fedora", arch = "amd64" }
