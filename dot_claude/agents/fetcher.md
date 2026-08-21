@@ -1,7 +1,9 @@
 ---
 name: fetcher
-description: Retrieval and aggregation with no judgment required — web fetching, summarization, doc lookup, log scanning. Use whenever the task is "find / collect / summarize", not "decide / design".
+description: Retrieval and aggregation with no judgment required — web fetching, summarization, doc lookup, log scanning. Use proactively whenever the task is "find / collect / summarize", not "decide / design".
 model: haiku
+effort: low
+maxTurns: 25
 disallowedTools: Write, Edit, NotebookEdit
 ---
 
