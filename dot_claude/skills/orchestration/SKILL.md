@@ -29,6 +29,8 @@ Five tests. T1/T2 detect where separation is a mechanism; T3–T5 decide whether
 
 Shapes compose, and the ticket graph carries all of them: blocking edges encode the chain, blocker-free tickets are the parallel frontier.
 
+**Small-task floor.** When T3 rules out full decomposition — the change fits one file or class — the minimal flow that still honors T1 is one implementer, then linus-reviewer, then oracle post-hoc on the falsifiable findings. Reserve the judge panel for decisions with a genuine second plausible shape (one both candidates would dismiss in five lines is not one), and stop the panel at convergence: two independent candidates agreeing is the answer, not a reason to fund a third.
+
 ## Slice and ticket
 
 Slice into **tracer-bullet tickets**: each a vertical cut through every layer that is verifiable on its own, sized so one fresh context window can execute it. Each ticket declares its **blocking edges** — the tickets that must land first; blocker-free tickets form the parallel frontier. Present the breakdown for a granularity-and-edges check before publishing, then publish one unit per ticket, wherever tickets live here (task list, tracker issues, local files). If the skill listing offers a ticketing capability that implements this, use it — these criteria still govern the result.

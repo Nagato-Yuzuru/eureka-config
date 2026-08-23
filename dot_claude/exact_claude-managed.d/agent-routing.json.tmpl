@@ -24,6 +24,16 @@
         ]
       },
       {
+        "matcher": "^(Write|Edit|NotebookEdit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/scope-explore-writes.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "^Workflow$",
         "hooks": [
           {

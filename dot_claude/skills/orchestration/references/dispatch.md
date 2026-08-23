@@ -27,3 +27,5 @@ A fork inherits the whole conversation: use it for work that needs the discussio
 ## Collection
 
 Verify by artifact, not by the worker's summary — a delegate's "done" is a claim, and claims route to oracle (principle-prove-it-works). Check cross-unit conflicts before integrating; the same file touched by two units means T5 was violated at slicing time, so fix the slicing, not the merge. A node used repeatedly deserves a measured error profile: grade a sample of its output against ground truth once, rather than trusting its style forever.
+
+Delegates do not commit; the owner commits per verified unit, so history records only artifact-checked states. (Headless delegates also cannot commit under GUI commit-signing agents — the oracle's own branch is the one exception, with its signing fallback.)

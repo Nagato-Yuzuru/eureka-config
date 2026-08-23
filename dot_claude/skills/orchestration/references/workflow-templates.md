@@ -35,7 +35,12 @@ export const meta = {
   phases: [{ title: 'Acceptance' }, { title: 'Build' }],
 }
 const oracle = await agent(`Build the executable acceptance oracle for this spec: ${args.spec}.
-Return the artifact path and rerun command.`, { phase: 'Acceptance', model: 'opus', schema: ORACLE })
+Return the artifact path, the rerun command, and the commit SHA on your oracle/<slug> branch.`,
+                           { phase: 'Acceptance', model: 'opus', schema: ORACLE })
+// the oracle lands on a worktree branch (see oracle.md); the builder cannot see it until
+// it is merged into the working branch — merge first, and confirm the suite is red
+await agent(`In ${args.repo}: git cherry-pick ${oracle.commit}; confirm the oracle files exist and ${oracle.rerun} is red.`,
+            { phase: 'Acceptance', model: 'haiku', effort: 'low' })
 let verdict = null
 for (let i = 0; i < 4 && verdict?.pass !== true; i++) {
   const build = await agent(`Implement to pass ${oracle.path} (never modify it). Brief: ${args.brief}`,
@@ -68,4 +73,16 @@ return {
   confirmed: verdicts.filter(Boolean).filter(f => f.verdict.confirmed),
   for_owner: deduped.filter(f => !f.falsifiable),             // judgment claims: unfiltered, owner adjudicates
 }
+```
+
+## Gates decide by code, not by reading
+
+A gate agent reports evidence; the script decides. Ambiguous evidence — an empty variable, a missing line — gets judged inconsistently by cheap models, so make the evidence unambiguous and portable (`$?` after each command; zsh has no `PIPESTATUS`) and compute pass/fail in script code:
+
+```javascript
+const GATE = { type: 'object', properties: { exit_codes: { type: 'object' }, output_tail: { type: 'string' } },
+               required: ['exit_codes', 'output_tail'] }
+const evidence = await agent(`Run exactly:\ncd ${REPO} && pytest -q; echo EXIT_TEST=$?; ruff check; echo EXIT_LINT=$?\nCopy every EXIT_* line verbatim into exit_codes (name → number) and the last 25 lines into output_tail. Change nothing.`,
+                             { phase, model: 'haiku', effort: 'low', schema: GATE })
+const pass = Object.values(evidence.exit_codes).every(c => c === 0)   // the script decides, not the agent
 ```
