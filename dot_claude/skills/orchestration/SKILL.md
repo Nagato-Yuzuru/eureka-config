@@ -33,7 +33,7 @@ Shapes compose, and the ticket graph carries all of them: blocking edges encode 
 
 ## Slice and ticket
 
-Slice into **tracer-bullet tickets**: each a vertical cut through every layer that is verifiable on its own, sized so one fresh context window can execute it. Each ticket declares its **blocking edges** — the tickets that must land first; blocker-free tickets form the parallel frontier. Present the breakdown for a granularity-and-edges check before publishing, then publish one unit per ticket, wherever tickets live here (task list, tracker issues, local files). If the skill listing offers a ticketing capability that implements this, use it — these criteria still govern the result.
+Slice into **tracer-bullet tickets**: each a vertical cut through every layer that is verifiable on its own, sized so one fresh context window can execute it. Each ticket declares its **blocking edges** — the tickets that must land first; blocker-free tickets form the parallel frontier. Present the breakdown for a granularity-and-edges check, and in the same exchange ask the owner where tickets land this run: a tracker this project owns (Linear, GitHub/GitLab issues on our own repos) or a local file outside version control. Publish one unit per ticket to exactly the destination the owner named. A defect found in a third-party or OSS project becomes an internal ticket and climbs principle-fix-root-causes' escalation ladder; an upstream issue is an outward action the owner approves case by case — duplicate-checked, minimal repro attached — never a slicing output. If the skill listing offers a ticketing capability that implements this, use it — these criteria still govern the result.
 
 The ticket rules:
 
