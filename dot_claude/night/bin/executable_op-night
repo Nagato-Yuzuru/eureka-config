@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# op-night — op answering as the night-vault service account, per-invocation.
+# For sessions already running when night mode was flipped on. Items outside
+# the night vault error instantly ("not granted tonight") instead of hanging
+# on the locked desktop app.
+
+set -euo pipefail
+
+CONFIG="$HOME/.claude/night/config.json"
+SA_SVC=$(jq -r '.keychain.sa_token // "claude-night.op-sa-token"' "$CONFIG" 2> /dev/null || echo claude-night.op-sa-token)
+
+OP_SERVICE_ACCOUNT_TOKEN=$(security find-generic-password -s "$SA_SVC" -w 2> /dev/null) \
+    || { echo "op-night: no service-account token in keychain '$SA_SVC' — run the setup wizard" >&2; exit 1; }
+export OP_SERVICE_ACCOUNT_TOKEN
+
+exec op "$@"

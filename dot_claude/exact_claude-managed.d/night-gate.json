@@ -1,0 +1,31 @@
+{
+  "$merge": {
+    "hooks.*": "keyed"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|mcp__.+)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/yuzuru/.claude/hooks/night-gate.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/yuzuru/.claude/hooks/night-gate.sh session-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

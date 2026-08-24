@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# claude-night — launch a night-shift Claude Code session.
+# Night mode is a PROPERTY OF THE PROCESS, not of the machine: capabilities
+# are narrowed at birth and nothing global changes. Mid-task transition is
+# `claude-night --continue` — same conversation, new (restricted) process.
+#
+# What a night session gets:
+#   GH_TOKEN            tonight's fine-grained PAT (gh downscopes itself: CI
+#                       reads + contents pushes work, pr/issue creation 403s)
+#   OP_SERVICE_ACCOUNT  every `op` call answers as the service account —
+#                       night vault only, instant errors instead of hanging
+#                       on the locked desktop app
+#   SSH_AUTH_SOCK=""    ssh fails in seconds (no identities), never hangs
+#   GIT_CONFIG_*        signing off; github ssh remotes read as https; git
+#                       credentials come from gh (i.e. the night PAT)
+#   --settings          ~/.claude/night/settings.json overlay: claude.ai
+#                       connectors off, guardrail deny rules, night context
+#
+# Nightly PAT ritual: if the stored PAT is missing or dead, this prints the
+# exact mint recipe (repos from config, Contents: RW, expire tomorrow), opens
+# the mint page, and stores what you paste. Minting while awake IS the
+# authorization; expiry is the auto-revoke.
+
+set -euo pipefail
+
+NIGHT_DIR="$HOME/.claude/night"
+CONFIG="$NIGHT_DIR/config.json"
+
+die() {
+    echo "claude-night: $*" >&2
+    exit 1
+}
+
+[[ -s "$CONFIG" ]] || die "missing $CONFIG — run the setup wizard first"
+cfg() { jq -r --arg d "$2" "$1 // \$d" "$CONFIG"; }
+
+SA_SVC=$(cfg '.keychain.sa_token' 'claude-night.op-sa-token')
+PAT_SVC=$(cfg '.keychain.gh_pat' 'claude-night.gh-pat')
+
+# --- service account (provisioned once by the wizard) ------------------------
+SA=$(security find-generic-password -s "$SA_SVC" -w 2> /dev/null) \
+    || die "no service-account token in keychain '$SA_SVC' — run the setup wizard"
+
+# --- tonight's PAT -----------------------------------------------------------
+pat_alive() { # TOKEN
+    [[ -n "$1" ]] || return 1
+    GH_TOKEN="$1" timeout 15 gh api user -q .login > /dev/null 2>&1
+}
+
+PAT=$(security find-generic-password -s "$PAT_SVC" -w 2> /dev/null || true)
+if ! pat_alive "$PAT"; then
+    echo "night PAT missing or expired — mint tonight's:"
+    echo "  name:        claude-night ($(/bin/date +%F))"
+    echo "  expiration:  custom → tomorrow"
+    echo "  repositories: Only select repositories →"
+    jq -r '.push_allowlist[] | "                 " + sub("^github\\.com/"; "")' "$CONFIG"
+    echo "  permissions: Repository permissions → Contents: Read and write. Nothing else."
+    open "https://github.com/settings/personal-access-tokens/new" 2> /dev/null || true
+    printf 'paste the token (hidden): '
+    read -rs PAT
+    printf '\n'
+    pat_alive "$PAT" || die "that token doesn't authenticate — aborting"
+    security add-generic-password -a "$USER" -s "$PAT_SVC" -w "$PAT" -U
+    echo "stored in keychain ($PAT_SVC)"
+fi
+
+# --- the night environment ---------------------------------------------------
+export NIGHT_SESSION=1   # the global night-gate hook stands down for this process tree
+export OP_SERVICE_ACCOUNT_TOKEN="$SA"
+export GH_TOKEN="$PAT"
+export SSH_AUTH_SOCK=""
+export GIT_TERMINAL_PROMPT=0
+export GIT_CONFIG_COUNT=5
+export GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false
+export GIT_CONFIG_KEY_1=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_1=git@github.com:
+export GIT_CONFIG_KEY_2=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_2=ssh://git@github.com/
+export GIT_CONFIG_KEY_3=credential.helper GIT_CONFIG_VALUE_3=
+export GIT_CONFIG_KEY_4=credential.helper GIT_CONFIG_VALUE_4='!gh auth git-credential'
+
+# --- preflight, then hand over -----------------------------------------------
+"$HOME/.claude/hooks/night-gate.sh" preflight || die "preflight failed — not starting the shift"
+mkdir -p "$NIGHT_DIR/queue/$(/bin/date +%F)"
+exec claude --settings "$NIGHT_DIR/settings.json" "$@"
