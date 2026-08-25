@@ -5,11 +5,22 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^(Bash|mcp__.+)$",
+        "matcher": "^mcp__.+$",
         "hooks": [
           {
             "type": "command",
             "command": "{{ .chezmoi.homeDir }}/.claude/hooks/night-gate.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/night-gate.sh user-prompt",
             "timeout": 10
           }
         ]

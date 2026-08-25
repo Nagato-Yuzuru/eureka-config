@@ -1,58 +1,57 @@
 #!/usr/bin/env bash
-# night-gate v4 — authority gate + night-mode operations for Claude Code.
+# night-gate v5 — night-mode operations + the tool-name gate.
 #
 # Night mode's entire state is one byte: ~/.claude/night/active.json exists
-# or it doesn't. Three channels enforce it, all driven by that flag:
+# or it doesn't. Enforcement lives ONLY where mediation is complete:
 #
-#   hook (this file; permanently registered, inert without the flag) — the
-#     AUTHORITY layer: outbound speech, irreversibles, connectors, browser
-#     writes, and the authorization surface itself;
-#   ~/.zshenv sourcing night/env.sh — the HYGIENE layer (signing off, gh
-#     isolation, empty ssh agent, headless fnox), hot for every Claude shell
-#     and transitive to every descendant process;
-#   fnox night profile via bin/night — the CREDENTIAL layer: what is declared
-#     there is the complete night capability surface.
+#   ISSUANCE (GitHub server side; fnox night profile) — the night App's
+#     permissions and installation list ARE the authority boundary: 8h
+#     device-flow lease, Contents RW only, no PR/issue/workflow perms,
+#     keyring_cache=false discards the refresh token. What is not issued
+#     cannot be done; a 403 is the tier working.
+#   SHIM ARGV (~/.claude/night/bin/night) — the one surviving command
+#     inspection, on real argv at the credential injection point: the
+#     within-Contents:write delta (force-push, ref deletes, default-branch
+#     pushes, release writes, mutating gh api).
+#   HYGIENE (zshenv -> night/env.sh; ssh-night.conf) — subtractive env, hot
+#     per command, transitive: signing off, gh isolated, ssh agent gone, op
+#     sentinel. Credential-shaped bare commands die in milliseconds with the
+#     real error — the FEEDBACK layer; the night-shift skill teaches how to
+#     read it (a denial is a capability not granted tonight: park it).
+#   TOOL NAMES (this hook) — the only ambient authority no lease can starve:
+#     browser sessions and claude.ai connectors. Tool names cannot be
+#     respelled, so allowlists here are a real boundary.
 #
-# Threat model: DRIFT (a confused-but-compliant agent), not an adversary —
-# command strings can always smuggle past a parser, so this gate never
-# pretends to be that boundary. The real teeth are capability starvation
-# (the layers above) and server-side rulesets. The gate's duties, in order:
-#   1. never false-deny legitimate T0 work;
-#   2. reroute shapes that would hang on the locked 1Password agent;
-#   3. give a predictable, honest nudge on obvious T3 / authorization moves.
-# A miss is acceptable; lying or being unpredictable is not.
-#
-# The Bash rule model: the command string is split into segments (; && || |
-# newlines — quote- and heredoc-aware, so arguments and heredoc bodies are
-# never mistaken for programs), each segment is stripped of prefixes (VAR=x
-# assignments, env/command/sudo, shell keywords, backslash escapes), and the
-# BASENAME OF THE PROGRAM POSITION is looked up in one rule table. Wrapped
-# strings (sh -c, eval, substitutions, variables) are deliberately not
-# chased — known leaks under the drift model. Decisions are pure bash + jq:
-# no external tool's absence can fail open.
+# Bash strings are NEVER parsed. v4's 600-line lexer is gone: a hook sees
+# the actor's own description of an action, not the action — rules there
+# are either theater or false-deny generators (B1). The drift threat model
+# (confused-but-compliant agent, not an adversary) is unchanged; what
+# changed is WHERE honesty lives: real errors from real boundaries instead
+# of simulated denials from a parser.
 #
 # Modes:
 #   (no args)      PreToolUse gate: inert unless the flag exists
-#   on [--mode full|local-only] [--scope csv]
-#                  flip the flag (owner's call; /night on orchestrates
-#                  preflight + lease mint + scope confirm first)
+#   user-prompt    UserPromptSubmit: once per session, tell a live session
+#                  the flag is on and to load the night-shift skill
+#   session-start  SessionStart context while the flag is on
+#   on [--mode full|local-only] [--scope csv]   flip the flag
 #   off            end the night
 #   status         flag / mode / scope / queue at a glance
 #   preflight      three-verdict: exit 0 PASS / 2 DEGRADE (local-only) / 1 FAIL
-#   session-start  SessionStart context while the flag is on
 
 set -euo pipefail
 
 NIGHT_DIR="${NIGHT_DIR:-$HOME/.claude/night}"
 ACTIVE="$NIGHT_DIR/active.json"
 QUEUE_DIR="$NIGHT_DIR/queue"
+SESSIONS_DIR="$NIGHT_DIR/sessions"
 NIGHT_SHIM="$NIGHT_DIR/bin/night"
 
 # presence-only flag: manual on/off, no time semantics. A corrupt flag file
 # is still a file: fail-closed.
 is_active() { [[ -e "$ACTIVE" ]]; }
 
-# --- hook mode ---------------------------------------------------------------
+# --- hook mode (PreToolUse) --------------------------------------------------
 
 # Fail-closed backstop: a crash mid-decision must deny, not ask — at night
 # nobody answers an ask, and a deny lets the agent park and move on.
@@ -81,634 +80,16 @@ allow() {
     exit 0
 }
 
-# ---- Bash command model -----------------------------------------------------
-
-declare -a NF=() # collect_nonflags output
-collect_nonflags() {
-    NF=()
-    local a
-    for a in "$@"; do
-        if [[ "$a" != -* ]]; then NF+=("$a"); fi
-    done
-}
-
-# scan_paren/scan_backtick: find the end of a $()/`` substitution so segment
-# splitting stays correct (a ';' inside it is not a boundary). The body is
-# kept verbatim in the word, never classified — see the drift note above.
-SUB_END=0
-scan_paren() { # STRING INDEX-AFTER-OPENER
-    local s="$1" i="$2" pdepth=1 c
-    local n=${#s}
-    while ((i < n)); do
-        c="${s:i:1}"
-        case "$c" in
-            \\) i=$((i + 2)); continue ;;
-            \')
-                i=$((i + 1))
-                while ((i < n)) && [[ "${s:i:1}" != \' ]]; do i=$((i + 1)); done
-                ;;
-            \")
-                i=$((i + 1))
-                while ((i < n)); do
-                    c="${s:i:1}"
-                    if [[ "$c" == "\\" ]]; then
-                        i=$((i + 2))
-                    elif [[ "$c" == '"' ]]; then
-                        break
-                    else
-                        i=$((i + 1))
-                    fi
-                done
-                ;;
-            '(') pdepth=$((pdepth + 1)) ;;
-            ')')
-                pdepth=$((pdepth - 1))
-                if ((pdepth == 0)); then break; fi
-                ;;
-        esac
-        i=$((i + 1))
-    done
-    SUB_END=$((i + 1))
-}
-
-scan_backtick() { # STRING INDEX-AFTER-OPENER
-    local s="$1" i="$2" c
-    local n=${#s}
-    while ((i < n)); do
-        c="${s:i:1}"
-        if [[ "$c" == "\\" ]]; then
-            i=$((i + 2))
-        elif [[ "$c" == '`' ]]; then
-            break
-        else
-            i=$((i + 1))
-        fi
-    done
-    SUB_END=$((i + 1))
-}
-
-# lex_command helpers — mutate lex_command's locals via dynamic scope.
-finish_word() {
-    if ((has_cur)); then
-        if ((skip_target)); then
-            skip_target=0 # redirection target: a filename, not an argument
-        else
-            words+=("$cur")
-        fi
-    fi
-    cur=''
-    has_cur=0
-}
-
-end_segment() {
-    finish_word
-    skip_target=0
-    if ((${#words[@]})); then
-        gate_segment "${words[@]}"
-        words=()
-    fi
-}
-
-lex_command() { # STRING — split into segments, gate each
-    local s="$1"
-    local n=${#s} i=0 c
-    local cur='' has_cur=0 skip_target=0
-    local -a words=() heredocs=()
-
-    while ((i < n)); do
-        c="${s:i:1}"
-        case "$c" in
-            \')
-                i=$((i + 1))
-                while ((i < n)) && [[ "${s:i:1}" != \' ]]; do
-                    cur+="${s:i:1}"
-                    i=$((i + 1))
-                done
-                i=$((i + 1))
-                has_cur=1
-                ;;
-            \")
-                i=$((i + 1))
-                while ((i < n)); do
-                    c="${s:i:1}"
-                    if [[ "$c" == "\\" ]]; then
-                        cur+="${s:i + 1:1}"
-                        i=$((i + 2))
-                    elif [[ "$c" == '"' ]]; then
-                        i=$((i + 1))
-                        break
-                    elif [[ "$c" == '$' && "${s:i + 1:1}" == '(' ]]; then
-                        scan_paren "$s" $((i + 2))
-                        cur+="${s:i:SUB_END - i}"
-                        i=$SUB_END
-                    elif [[ "$c" == '`' ]]; then
-                        scan_backtick "$s" $((i + 1))
-                        cur+="${s:i:SUB_END - i}"
-                        i=$SUB_END
-                    else
-                        cur+="$c"
-                        i=$((i + 1))
-                    fi
-                done
-                has_cur=1
-                ;;
-            "\\")
-                # escape: next char literal (this is how \gh sheds its alias)
-                if ((i + 1 < n)); then
-                    if [[ "${s:i + 1:1}" != $'\n' ]]; then
-                        cur+="${s:i + 1:1}"
-                        has_cur=1
-                    fi
-                    i=$((i + 2))
-                else
-                    cur+="\\"
-                    has_cur=1
-                    i=$((i + 1))
-                fi
-                ;;
-            '$')
-                if [[ "${s:i + 1:1}" == '(' ]]; then
-                    scan_paren "$s" $((i + 2))
-                    cur+="${s:i:SUB_END - i}"
-                    has_cur=1
-                    i=$SUB_END
-                else
-                    cur+='$'
-                    has_cur=1
-                    i=$((i + 1))
-                fi
-                ;;
-            '`')
-                scan_backtick "$s" $((i + 1))
-                cur+="${s:i:SUB_END - i}"
-                has_cur=1
-                i=$SUB_END
-                ;;
-            ';')
-                i=$((i + 1))
-                while ((i < n)) && [[ "${s:i:1}" == ';' || "${s:i:1}" == '&' ]]; do
-                    i=$((i + 1)) # ;; ;& ;;& — same boundary either way
-                done
-                end_segment
-                ;;
-            '&')
-                if [[ "${s:i + 1:1}" == '>' ]]; then
-                    finish_word # &> / &>> redirection
-                    i=$((i + 2))
-                    if [[ "${s:i:1}" == '>' ]]; then i=$((i + 1)); fi
-                    skip_target=1
-                else
-                    i=$((i + 1))
-                    if [[ "${s:i:1}" == '&' ]]; then i=$((i + 1)); fi
-                    end_segment
-                fi
-                ;;
-            '|')
-                i=$((i + 1))
-                if [[ "${s:i:1}" == '|' || "${s:i:1}" == '&' ]]; then i=$((i + 1)); fi
-                end_segment
-                ;;
-            '(' | ')')
-                end_segment # subshell / function-def grouping
-                i=$((i + 1))
-                ;;
-            '<')
-                if [[ "${s:i + 1:1}" == '(' ]]; then
-                    scan_paren "$s" $((i + 2))
-                    cur+="${s:i:SUB_END - i}"
-                    has_cur=1
-                    i=$SUB_END
-                elif [[ "${s:i + 1:2}" == '<<' ]]; then
-                    finish_word # <<< herestring: operator + one data word
-                    i=$((i + 3))
-                    skip_target=1
-                elif [[ "${s:i + 1:1}" == '<' ]]; then
-                    # heredoc: parse the delimiter; the body is DATA — skipped
-                    # wholesale at the newline, never matched against rules
-                    finish_word
-                    i=$((i + 2))
-                    if [[ "${s:i:1}" == '-' ]]; then i=$((i + 1)); fi
-                    while ((i < n)) && [[ "${s:i:1}" == ' ' || "${s:i:1}" == $'\t' ]]; do
-                        i=$((i + 1))
-                    done
-                    local delim=''
-                    while ((i < n)); do
-                        c="${s:i:1}"
-                        case "$c" in
-                            \')
-                                i=$((i + 1))
-                                while ((i < n)) && [[ "${s:i:1}" != \' ]]; do
-                                    delim+="${s:i:1}"
-                                    i=$((i + 1))
-                                done
-                                i=$((i + 1))
-                                ;;
-                            \")
-                                i=$((i + 1))
-                                while ((i < n)) && [[ "${s:i:1}" != \" ]]; do
-                                    delim+="${s:i:1}"
-                                    i=$((i + 1))
-                                done
-                                i=$((i + 1))
-                                ;;
-                            "\\")
-                                delim+="${s:i + 1:1}"
-                                i=$((i + 2))
-                                ;;
-                            ' ' | $'\t' | $'\n' | ';' | '&' | '|' | '<' | '>' | '(' | ')') break ;;
-                            *)
-                                delim+="$c"
-                                i=$((i + 1))
-                                ;;
-                        esac
-                    done
-                    if [[ -n "$delim" ]]; then heredocs+=("$delim"); fi
-                else
-                    if ((has_cur)) && [[ "$cur" =~ ^[0-9]+$ ]]; then
-                        cur=''
-                        has_cur=0 # fd number glued to the operator
-                    fi
-                    finish_word
-                    i=$((i + 1))
-                    if [[ "${s:i:1}" == '>' || "${s:i:1}" == '&' ]]; then i=$((i + 1)); fi
-                    skip_target=1
-                fi
-                ;;
-            '>')
-                if [[ "${s:i + 1:1}" == '(' ]]; then
-                    scan_paren "$s" $((i + 2))
-                    cur+="${s:i:SUB_END - i}"
-                    has_cur=1
-                    i=$SUB_END
-                else
-                    if ((has_cur)) && [[ "$cur" =~ ^[0-9]+$ ]]; then
-                        cur=''
-                        has_cur=0 # fd number glued to the operator
-                    fi
-                    finish_word
-                    i=$((i + 1))
-                    if [[ "${s:i:1}" == '>' || "${s:i:1}" == '|' ]]; then i=$((i + 1)); fi
-                    if [[ "${s:i:1}" == '&' ]]; then
-                        i=$((i + 1))
-                        if [[ "${s:i:1}" == [0-9-] ]]; then
-                            while ((i < n)) && [[ "${s:i:1}" == [0-9-] ]]; do
-                                i=$((i + 1)) # >&2 fd dup: no filename follows
-                            done
-                        else
-                            skip_target=1
-                        fi
-                    else
-                        skip_target=1
-                    fi
-                fi
-                ;;
-            '#')
-                if ((has_cur)); then
-                    cur+='#'
-                    i=$((i + 1))
-                else
-                    while ((i < n)) && [[ "${s:i:1}" != $'\n' ]]; do
-                        i=$((i + 1)) # comment
-                    done
-                fi
-                ;;
-            $'\n')
-                i=$((i + 1))
-                finish_word
-                while ((${#heredocs[@]})); do
-                    local d="${heredocs[0]}" line rest
-                    heredocs=("${heredocs[@]:1}")
-                    while ((i < n)); do
-                        rest="${s:i}"
-                        line="${rest%%$'\n'*}"
-                        i=$((i + ${#line} + 1))
-                        if ((i > n)); then i=$n; fi
-                        if [[ "${line#"${line%%[!$'\t']*}"}" == "$d" ]]; then break; fi
-                    done
-                done
-                end_segment
-                ;;
-            ' ' | $'\t')
-                finish_word
-                i=$((i + 1))
-                ;;
-            *)
-                cur+="$c"
-                has_cur=1
-                i=$((i + 1))
-                ;;
-        esac
-    done
-    end_segment
-}
-
-# ---- tier rules: one segment = (program, argv) ------------------------------
-
-gate_gh() { # ARGV after 'gh' — shim context (bare gh never gets here)
-    local -a a=("$@")
-    local x subcmd='' method='' fields=0
-    while ((${#a[@]})); do
-        x="${a[0]}"
-        a=("${a[@]:1}")
-        case "$x" in
-            -X | --method)
-                method="${a[0]:-}"
-                a=("${a[@]:1}")
-                ;;
-            -X*) method="${x#-X}" ;;
-            --method=*) method="${x#--method=}" ;;
-            -f | -F | --field | --raw-field | --input)
-                fields=1
-                a=("${a[@]:1}")
-                ;;
-            -f* | -F* | --field=* | --raw-field=* | --input=*) fields=1 ;;
-            -R | --repo | --hostname) a=("${a[@]:1}") ;;
-            -*) : ;;
-            *) if [[ -z "$subcmd" ]]; then subcmd="$x"; fi ;;
-        esac
-    done
-    if [[ "$subcmd" == release ]]; then
-        emit_deny "night T3: mutating GitHub state beyond pushes (releases live under the Contents permission). T2-shaped speech goes in the queue; T3 is a shift-report proposal."
-    fi
-    if [[ "$subcmd" == api ]]; then
-        local m=""
-        m=$(printf '%s' "$method" | tr '[:lower:]' '[:upper:]')
-        case "$m" in
-            POST | PUT | PATCH | DELETE)
-                emit_deny "night T3: mutating GitHub API call ($m). T2-shaped speech goes in the queue; T3 is a shift-report proposal." ;;
-        esac
-        if ((fields)) && [[ "$m" != GET ]]; then
-            emit_deny "night T3: gh api with body fields defaults to POST. For a read, make the method explicit: gh api -X GET ... -f key=value."
-        fi
-    fi
-    return 0
-}
-
-gate_git() { # ARGV after 'git'
-    local -a a=("$@")
-    while ((${#a[@]})); do
-        case "${a[0]}" in
-            -C | -c | --git-dir | --work-tree | --namespace | --config-env) a=("${a[@]:2}") ;;
-            --git-dir=* | --work-tree=* | --namespace=* | --config-env=* | -c*) a=("${a[@]:1}") ;;
-            -*) a=("${a[@]:1}") ;;
-            *) break ;;
-        esac
-    done
-    if [[ "${a[0]:-}" != push ]]; then
-        return 0
-    fi
-    # Only the unmistakable history-rewrite flags. Destination discipline
-    # (claude/* only, no default branches) is the server-side ruleset's job —
-    # a bare `git push` on a claude/* branch is legitimate T0.
-    local x
-    for x in "${a[@]:1}"; do
-        case "$x" in
-            --force | --force-with-lease* | -f | --delete | -d | --mirror)
-                emit_deny "night T3: git push with '$x' rewrites or removes published refs. Push plain fast-forwards to claude/*; propose anything stronger in the shift report." ;;
-        esac
-    done
-    return 0
-}
-
-gate_segment() { # WORD... — deny exits; return 0 = this segment is fine
-    local -a w=("$@")
-    local shim=0 t base verb a
-
-    while ((${#w[@]})); do
-        t="${w[0]}"
-
-        # environment-assignment prefixes (VAR=x cmd). Redirecting the fnox
-        # profile is an authorization-surface change wherever it appears.
-        if [[ "$t" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
-            if [[ "$t" == FNOX_PROFILE=* ]]; then
-                emit_deny "night: direct fnox use is frozen — credentialed commands go through ~/.claude/night/bin/night <cmd>; secrets and grants change only while the owner is awake."
-            fi
-            w=("${w[@]:1}")
-            continue
-        fi
-
-        # shell keywords in command position (`do gh ...` still reroutes)
-        case "$t" in
-            if | then | elif | else | fi | for | while | until | do | done | time | '!' | '{' | '}')
-                w=("${w[@]:1}")
-                continue
-                ;;
-        esac
-
-        base="${t##*/}"
-        case "$base" in
-            # ---- transparent wrappers: strip, then re-classify ----------
-            env)
-                w=("${w[@]:1}")
-                while ((${#w[@]})); do
-                    case "${w[0]}" in
-                        -u | -C | -S) w=("${w[@]:2}") ;;
-                        -*) w=("${w[@]:1}") ;;
-                        *) break ;;
-                    esac
-                done
-                continue
-                ;;
-            command)
-                if [[ "${w[1]:-}" == -v || "${w[1]:-}" == -V ]]; then
-                    return 0 # lookup, not execution
-                fi
-                w=("${w[@]:1}")
-                if [[ "${w[0]:-}" == -p ]]; then w=("${w[@]:1}"); fi
-                continue
-                ;;
-            sudo)
-                w=("${w[@]:1}")
-                while ((${#w[@]})); do
-                    case "${w[0]}" in
-                        -u | -g | -h | -p) w=("${w[@]:2}") ;;
-                        -*) w=("${w[@]:1}") ;;
-                        *) break ;;
-                    esac
-                done
-                continue
-                ;;
-
-            # ---- the sanctioned credential path -------------------------
-            night)
-                # the shim execs real binaries with tonight's lease; classify
-                # what it runs, in shim context — shim-shaped T3 still denies
-                shim=1
-                w=("${w[@]:1}")
-                continue
-                ;;
-
-            # ---- authorization surface: frozen while the owner sleeps ---
-            fnox)
-                emit_deny "night: direct fnox use is frozen — credentialed commands go through ~/.claude/night/bin/night <cmd>; secrets and grants change only while the owner is awake." ;;
-            security)
-                emit_deny "night T3: the keychain is off the night surface entirely — dump/unlock/export read it as surely as add/delete/find. Propose changes in the shift report." ;;
-            path-gate.sh)
-                collect_nonflags "${w[@]:1}"
-                verb="${NF[0]:-}"
-                if [[ "$verb" == grant || "$verb" == revoke ]]; then
-                    emit_deny "night T3: the authorization surface (path grants) is frozen while the owner sleeps. Propose changes in the shift report."
-                fi
-                return 0
-                ;;
-
-            # ---- ssh-shaped: the locked 1Password agent hangs -----------
-            ssh | scp | sftp)
-                emit_deny "night: ssh goes through the locked 1Password agent (ssh_config IdentityAgent — env cannot override it) and would hang until morning. git already talks https via the hygiene env; anything else ssh-shaped: park it and record it in the shift report." ;;
-            rsync)
-                for a in "${w[@]:1}"; do
-                    if [[ "$a" == -e || "$a" == --rsh || "$a" == --rsh=* || "$a" == rsync://* ]] \
-                        || { [[ "$a" != -* && "$a" == *:* ]] && [[ "${a%%:*}" != */* ]]; }; then
-                        emit_deny "night: remote rsync rides ssh through the locked 1Password agent and would hang until morning. Local rsync is fine; park the remote copy in the shift report."
-                    fi
-                done
-                return 0
-                ;;
-
-            # ---- 1Password shell-plugin binaries ------------------------
-            gh)
-                if ((shim == 0)); then
-                    emit_deny "night: bare gh runs through the locked 1Password plugin and hangs. Use ~/.claude/night/bin/night <same command> — real binary, tonight's lease. A 403 there is a capability the owner deliberately did not grant tonight: park it and record it."
-                fi
-                gate_gh "${w[@]:1}"
-                return 0
-                ;;
-            hcloud)
-                if ((shim == 0)); then
-                    emit_deny "night: bare hcloud runs through the locked 1Password plugin and hangs. Use ~/.claude/night/bin/night <same command> — real binary, tonight's lease."
-                fi
-                return 0
-                ;;
-            op)
-                if ((shim == 0)); then
-                    emit_deny "night: interactive op hits the locked desktop app and hangs. Use ~/.claude/night/bin/night op <args> — answers as the night-vault service account; an item outside that vault is unavailable tonight: park it."
-                fi
-                return 0
-                ;;
-
-            # ---- T3 irreversibles / high-risk, by program+verb ----------
-            git)
-                gate_git "${w[@]:1}"
-                return 0
-                ;;
-            npm | pnpm | yarn)
-                collect_nonflags "${w[@]:1}"
-                if [[ "${NF[0]:-}" == publish ]]; then
-                    emit_deny "night T3: publishing a package is irreversible. Write it up as a proposal in the shift report; the owner runs it awake."
-                fi
-                return 0
-                ;;
-            cargo)
-                collect_nonflags "${w[@]:1}"
-                if [[ "${NF[0]:-}" == publish ]]; then
-                    emit_deny "night T3: publishing a crate is irreversible. Write it up as a proposal in the shift report; the owner runs it awake."
-                fi
-                return 0
-                ;;
-            gem)
-                collect_nonflags "${w[@]:1}"
-                if [[ "${NF[0]:-}" == push ]]; then
-                    emit_deny "night T3: publishing a gem is irreversible. Write it up as a proposal in the shift report; the owner runs it awake."
-                fi
-                return 0
-                ;;
-            docker)
-                collect_nonflags "${w[@]:1}"
-                verb="${NF[0]:-}"
-                if [[ "$verb" == push ]]; then
-                    emit_deny "night T3: pushing an image publishes it. Write it up as a proposal in the shift report; the owner runs it awake."
-                fi
-                if [[ "$verb" == buildx ]]; then
-                    for a in "${w[@]:1}"; do
-                        if [[ "$a" == --push ]]; then
-                            emit_deny "night T3: buildx --push publishes the image. Build without --push; propose the push in the shift report."
-                        fi
-                    done
-                fi
-                return 0
-                ;;
-            terraform)
-                collect_nonflags "${w[@]:1}"
-                case "${NF[0]:-}" in
-                    apply | destroy)
-                        emit_deny "night T3: terraform ${NF[0]} mutates real infrastructure. Plan is fine; propose the apply in the shift report." ;;
-                esac
-                return 0
-                ;;
-            kubectl)
-                collect_nonflags "${w[@]:1}"
-                case "${NF[0]:-}" in
-                    apply | delete | create | replace | patch | scale | edit)
-                        emit_deny "night T3: kubectl ${NF[0]} mutates the cluster. Reads are fine; propose mutations in the shift report." ;;
-                esac
-                return 0
-                ;;
-            wrangler)
-                collect_nonflags "${w[@]:1}"
-                case "${NF[0]:-}" in
-                    deploy | publish)
-                        emit_deny "night T3: wrangler ${NF[0]} ships to production. Write it up as a proposal in the shift report." ;;
-                    versions)
-                        if [[ "${NF[1]:-}" == upload ]]; then
-                            emit_deny "night T3: wrangler versions upload ships code to Cloudflare. Write it up as a proposal in the shift report."
-                        fi
-                        ;;
-                esac
-                return 0
-                ;;
-            flyctl | fly)
-                collect_nonflags "${w[@]:1}"
-                if [[ "${NF[0]:-}" == deploy ]]; then
-                    emit_deny "night T3: flyctl deploy ships to production. Write it up as a proposal in the shift report."
-                fi
-                for a in "${w[@]:1}"; do
-                    if [[ "$a" == destroy ]]; then
-                        emit_deny "night T3: flyctl destroy is irreversible. Write it up as a proposal in the shift report."
-                    fi
-                done
-                return 0
-                ;;
-            vercel)
-                collect_nonflags "${w[@]:1}"
-                if [[ "${NF[0]:-}" == deploy ]]; then
-                    emit_deny "night T3: vercel deploy ships to production. Write it up as a proposal in the shift report."
-                fi
-                for a in "${w[@]:1}"; do
-                    if [[ "$a" == --prod ]]; then
-                        emit_deny "night T3: vercel --prod ships to production. Write it up as a proposal in the shift report."
-                    fi
-                done
-                return 0
-                ;;
-
-            # ---- no nested CLI sessions ---------------------------------
-            claude)
-                emit_deny "night: no nested CLI sessions. Use the Agent tool (subagents inherit this gate) or park the task." ;;
-
-            *) return 0 ;; # T0 — everything else stays free at night
-        esac
-    done
-    return 0 # bare assignments / keywords only
-}
-
-gate_bash() { # CMD
-    local LC_ALL=C # byte-indexed scanning, locale-independent
-    lex_command "$1"
-    allow
-}
-
 gate_mcp() { # TOOL_NAME
     local t="$1"
     case "$t" in
         mcp__linear-server__*)
-            # Linear is the night task tracker — but allow-listed, not open:
+            # Linear is the night task tracker — allow-listed, not open:
             # reads plus private task state. save_issue/save_comment are T0
             # (Linear-internal notes, the skill's own queue/report mirror),
             # NOT the T2 "comment" of the tier table — that means public
             # GitHub PR/issue speech. Merging diffs, submitting reviews and
-            # publishing issues act on the world: deny. Unlike Bash strings,
-            # tool names cannot be respelled — this allow-list is a real
-            # boundary, so it stays strict.
+            # publishing issues act on the world: deny.
             case "${t#mcp__linear-server__}" in
                 list_* | get_* | search_documentation | extract_images | save_issue | save_comment) allow ;;
                 *)
@@ -717,10 +98,23 @@ gate_mcp() { # TOOL_NAME
             ;;
         mcp__claude_ai_*)
             emit_deny "night: claude.ai connectors are off the night surface entirely — reads included (unattended reading of mail/files is a prompt-injection channel). Night task tracking is Linear." ;;
-        mcp__claude-in-chrome__computer | mcp__claude-in-chrome__javascript_tool | mcp__claude-in-chrome__form_input | mcp__claude-in-chrome__file_upload | mcp__claude-in-chrome__upload_image | mcp__claude-in-chrome__browser_batch | mcp__claude-in-chrome__shortcuts_execute)
-            emit_deny "night T2: browser write/execute under logged-in sessions can post anywhere. Browsing is read-only at night (navigate, read_page, get_page_text, find, screenshots)." ;;
-        mcp__plugin_playwright_playwright__browser_click | mcp__plugin_playwright_playwright__browser_type | mcp__plugin_playwright_playwright__browser_fill_form | mcp__plugin_playwright_playwright__browser_file_upload | mcp__plugin_playwright_playwright__browser_run_code_unsafe | mcp__plugin_playwright_playwright__browser_evaluate | mcp__plugin_playwright_playwright__browser_press_key | mcp__plugin_playwright_playwright__browser_drag | mcp__plugin_playwright_playwright__browser_drop | mcp__plugin_playwright_playwright__browser_select_option | mcp__plugin_playwright_playwright__browser_handle_dialog | mcp__plugin_playwright_playwright__browser_network_request)
-            emit_deny "night T2: browser write/execute. Browsing is read-only at night." ;;
+        mcp__claude-in-chrome__*)
+            # Browser sessions are ambient authority no lease can starve, so
+            # the browser surface is a read ALLOWLIST: a tool this list has
+            # never seen — new, or write-class — is denied by default.
+            case "${t#mcp__claude-in-chrome__}" in
+                navigate | go_back | go_forward | read_page | get_page_text | find | screenshot | tabs_context_mcp | read_console_messages) allow ;;
+                *)
+                    emit_deny "night: browsing is read-only (browser sessions are logged-in ambient authority). '$t' is not on the read allowlist — write-class or unknown: park it and record it." ;;
+            esac
+            ;;
+        mcp__plugin_playwright_playwright__*)
+            case "${t#mcp__plugin_playwright_playwright__}" in
+                browser_snapshot | browser_navigate | browser_navigate_back | browser_take_screenshot | browser_console_messages | browser_network_requests | browser_find | browser_wait_for | browser_tabs | browser_resize | browser_close) allow ;;
+                *)
+                    emit_deny "night: browsing is read-only. '$t' is not on the read allowlist — write-class or unknown: park it and record it." ;;
+            esac
+            ;;
     esac
     allow
 }
@@ -736,14 +130,33 @@ hook_mode() {
     IFS= read -r -d '' input || : # read to EOF; no external cat
     tool=$(jq -r '.tool_name // ""' <<< "$input")
     case "$tool" in
-        Bash)
-            gate_bash "$(jq -r '.tool_input.command // ""' <<< "$input")"
-            ;;
-        mcp__*)
-            gate_mcp "$tool"
-            ;;
+        mcp__*) gate_mcp "$tool" ;;
     esac
+    # Bash included: zero string parsing, by design (see header).
     allow
+}
+
+# --- user-prompt (UserPromptSubmit) ------------------------------------------
+
+# A session alive when the flag falls has no SessionStart moment; its first
+# prompt afterwards gets one injection pointing at the night-shift skill.
+# Marker per session_id: exactly once, per session, per night.
+cmd_user_prompt() {
+    is_active || exit 0
+    local input='' sid
+    IFS= read -r -d '' input || :
+    sid=$(jq -r '.session_id // ""' <<< "$input" | tr -cd 'A-Za-z0-9_-')
+    [[ -n "$sid" ]] || exit 0
+    [[ -e "$SESSIONS_DIR/$sid" ]] && exit 0
+    mkdir -p "$SESSIONS_DIR"
+    : > "$SESSIONS_DIR/$sid"
+    jq -n '{
+        hookSpecificOutput: {
+            hookEventName: "UserPromptSubmit",
+            additionalContext: "NIGHT MODE is on (machine-wide flag; ends only when the owner runs /night off). The owner is asleep. Before acting on this prompt, load the night-shift skill and follow it: hygiene is already ambient in every shell, credentialed commands go through ~/.claude/night/bin/night <cmd>, outbound speech is queued, and a 403 or fast credential error is a capability deliberately not granted tonight — park it and record it, never work around it."
+        }
+    }'
+    exit 0
 }
 
 # --- session-start -----------------------------------------------------------
@@ -756,7 +169,7 @@ cmd_session_start() {
     jq -n --arg extra "$extra" '{
         hookSpecificOutput: {
             hookEventName: "SessionStart",
-            additionalContext: ("NIGHT MODE is on (machine-wide flag; ends only when the owner runs /night off). The owner is asleep: load the night-shift skill before any work. Hygiene is automatic in every shell (signing off, ssh dead, gh isolated); credentialed commands go through ~/.claude/night/bin/night <cmd>. A 403 or deny is a capability the owner deliberately did not grant tonight: park it and record it, never work around it." + $extra)
+            additionalContext: ("NIGHT MODE is on (machine-wide flag; ends only when the owner runs /night off). The owner is asleep: load the night-shift skill before any work. Hygiene is automatic in every shell (signing off, ssh dead, gh isolated, op sentinel); credentialed commands go through ~/.claude/night/bin/night <cmd>. A 403, deny, or fast credential error is a capability the owner deliberately did not grant tonight: park it and record it, never work around it." + $extra)
         }
     }'
     exit 0
@@ -792,7 +205,10 @@ cmd_on() {
     local today ts
     today=$(date -u +%F)
     ts=$(date -u +%FT%TZ) # ISO in the flag: portable to read back anywhere
-    mkdir -p "$NIGHT_DIR" "$QUEUE_DIR/$today" "$NIGHT_DIR/reports"
+    mkdir -p "$NIGHT_DIR" "$QUEUE_DIR/$today" "$NIGHT_DIR/reports" "$SESSIONS_DIR"
+    # day daemon caches must not cross the boundary; idempotent, best-effort
+    # (fnox absent or no daemon running is not an arming failure)
+    command -v fnox > /dev/null 2>&1 && fnox daemon clear > /dev/null 2>&1 || true
     jq -n --arg m "$mode" --argjson s "$scope" --arg ts "$ts" \
         '{since: $ts, mode: $m, scope: $s, confirmed_at: $ts}' > "$ACTIVE"
     echo "night mode ON ($mode) — every Claude session on this machine is now governed; ends only with 'off'"
@@ -801,9 +217,10 @@ cmd_on() {
 
 cmd_off() {
     command rm -f "$ACTIVE"
+    command rm -rf "$SESSIONS_DIR" # next night re-notifies every session
     echo "night mode OFF"
     local n
-    n=$(find "$QUEUE_DIR" -name '*.md' -not -path '*/done/*' -not -path '*/rejected/*' 2> /dev/null | wc -l | tr -d ' ')
+    n=$(find "$QUEUE_DIR" -name '*.md' -not -path '*/done/*' -not -path '*/rejected/*' 2> /dev/null | wc -l | tr -d ' ' || true)
     ((n > 0)) && echo "queued entries awaiting review: $n — run /night review"
     exit 0
 }
@@ -819,13 +236,16 @@ cmd_status() {
             echo "night mode: ON ($mode)"
         fi
         echo "scope (arm-time snapshot, record not truth): $(jq -c '.scope // []' "$ACTIVE" 2> /dev/null || echo '[]')"
+        if command -v fnox > /dev/null 2>&1; then
+            echo "lease: $(fnox -c "$HOME/.config/fnox/config.toml" -P night lease list --active 2> /dev/null | tail -n +2 | head -3 || echo '?')"
+        fi
     else
         echo "night mode: off"
     fi
     echo "queue entries (all dates): $(find "$QUEUE_DIR" -name '*.md' 2> /dev/null | wc -l | tr -d ' ')"
 }
 
-# Three-verdict preflight. FAIL = the fabric is broken (gate, hygiene,
+# Three-verdict preflight. FAIL = the fabric is broken (hook, hygiene,
 # keychain, shim) — do not start a shift. DEGRADE = only the GitHub lease is
 # unavailable — a local-only night is possible. Verifies real channels and
 # the enforcement machinery itself, never proxies.
@@ -843,9 +263,9 @@ cmd_preflight() {
 
     echo "night preflight:"
 
-    # the gate itself: registered with a matcher that covers both tool
-    # classes, executable, and both decision paths fire on the REGISTERED
-    # hook command (not this file — a stale deployment must show up here)
+    # the hook: registered for the two events that matter, executable, and
+    # both decision paths fire on the REGISTERED hook command (not this
+    # file — a stale deployment must show up here)
     local entry hookcmd='' matcher=''
     entry=$(jq -c '[.hooks.PreToolUse[]? | select([.hooks[]?.command // empty] | any(test("night-gate")))] | .[0] // empty' "$HOME/.claude/settings.json" 2> /dev/null || true)
     if [[ -n "$entry" ]]; then
@@ -856,29 +276,34 @@ cmd_preflight() {
         else
             bad "night-gate registered but not executable ($hookcmd)"
         fi
-        if [[ "Bash" =~ $matcher ]] && [[ "mcp__linear-server__get_issue" =~ $matcher ]]; then
-            ok "matcher covers Bash and mcp__ tools"
+        if [[ "mcp__linear-server__get_issue" =~ $matcher ]]; then
+            ok "PreToolUse matcher covers mcp__ tools"
         else
-            bad "matcher '$matcher' does not cover both Bash and mcp__ tools"
+            bad "matcher '$matcher' does not cover mcp__ tools"
         fi
     else
-        bad "night-gate not registered in ~/.claude/settings.json"
+        bad "night-gate not registered for PreToolUse in ~/.claude/settings.json"
+    fi
+    if jq -e '[.hooks.UserPromptSubmit[]? | select([.hooks[]?.command // empty] | any(test("night-gate")))] | length > 0' "$HOME/.claude/settings.json" > /dev/null 2>&1; then
+        ok "user-prompt notifier registered (live sessions learn the flag fell)"
+    else
+        bad "night-gate user-prompt not registered for UserPromptSubmit"
     fi
     if [[ -n "$hookcmd" ]]; then
         local fire
-        fire=$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"fnox get X"}}' \
+        fire=$(printf '%s' '{"tool_name":"mcp__claude_ai_Gmail__get_message","tool_input":{}}' \
             | NIGHT_DIR="$NIGHT_DIR" NIGHT_GATE_FORCE=1 bash -c "$hookcmd" 2> /dev/null || true)
-        if jq -e '(.hookSpecificOutput.permissionDecision == "deny") and (.hookSpecificOutput.permissionDecisionReason | test("fnox"))' <<< "$fire" > /dev/null 2>&1; then
-            ok "gate live-fire denies with the fnox rule (registered hook, forced on)"
+        if jq -e '(.hookSpecificOutput.permissionDecision == "deny") and (.hookSpecificOutput.permissionDecisionReason | test("connector"))' <<< "$fire" > /dev/null 2>&1; then
+            ok "gate live-fire denies a connector tool (registered hook, forced on)"
         else
             bad "gate live-fire deny failed — the registered hook's deny path is broken"
         fi
-        fire=$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"echo hi"}}' \
+        fire=$(printf '%s' '{"tool_name":"mcp__linear-server__list_issues","tool_input":{}}' \
             | NIGHT_DIR="$NIGHT_DIR" NIGHT_GATE_FORCE=1 bash -c "$hookcmd" 2> /dev/null || true)
         if [[ -z "$fire" ]]; then
-            ok "gate live-fire allows T0 (silent on 'echo hi')"
+            ok "gate live-fire allows Linear reads (silent)"
         else
-            bad "gate live-fire allow path broken — T0 command produced output"
+            bad "gate live-fire allow path broken — allowed tool produced output"
         fi
     fi
 
@@ -889,11 +314,34 @@ cmd_preflight() {
     local hy
     # shellcheck disable=SC2016  # the zsh script must expand in zsh, not here
     hy=$(env -i HOME="$HOME" PATH="$PATH" CLAUDECODE=1 zsh -c \
-        'source "$HOME/.claude/night/env.sh"; print -r -- "$GH_CONFIG_DIR|$FNOX_NON_INTERACTIVE|$SSH_AUTH_SOCK|$(git config --get commit.gpgsign)|$(git config --get tag.gpgsign)|$(git config --get core.sshCommand)"' 2> /dev/null || true)
-    if [[ "$hy" == "$HOME/.claude/night/gh-null|1||false|false|/usr/bin/false" ]]; then
-        ok "hygiene env sources clean: gh isolated, fnox headless, ssh agent dead, signing off, git-over-ssh killed"
+        'source "$HOME/.claude/night/env.sh"; print -r -- "$GH_CONFIG_DIR|$FNOX_NON_INTERACTIVE|$SSH_AUTH_SOCK|${OP_SERVICE_ACCOUNT_TOKEN%%_*}|$(git config --get commit.gpgsign)|$(git config --get tag.gpgsign)|$(git config --get core.sshCommand)"' 2> /dev/null || true)
+    if [[ "$hy" == "$HOME/.claude/night/gh-null|1||ops|false|false|/usr/bin/false" ]]; then
+        ok "hygiene env sources clean: gh isolated, fnox headless, ssh agent dead, op sentinel armed, signing off, git-over-ssh killed"
     else
         bad "hygiene env content wrong when sourced (got '$hy')"
+    fi
+    # feedback layer, really exercised: credential-shaped bare commands must
+    # die fast (not hang on anything lockable) with a readable error
+    if command -v gh > /dev/null 2>&1; then
+        if timeout 5 env GH_CONFIG_DIR="$HOME/.claude/night/gh-null" GH_TOKEN= GITHUB_TOKEN= gh api user > /dev/null 2>&1; then
+            bad "bare gh with the night config dir unexpectedly SUCCEEDED (day auth leaking in)"
+        else
+            ok "bare gh dies fast under night gh isolation"
+        fi
+    fi
+    if command -v op > /dev/null 2>&1; then
+        if timeout 5 env OP_SERVICE_ACCOUNT_TOKEN="ops_NIGHT_SENTINEL_invalid_on_purpose_use_night_op" op vault list > /dev/null 2>&1; then
+            bad "op with the sentinel token unexpectedly SUCCEEDED"
+        else
+            ok "op dies fast on the sentinel token (no desktop-app hang path)"
+        fi
+    fi
+    # ssh: the Match-exec include must be wired at the TOP of ~/.ssh/config
+    if [[ -f "$HOME/.claude/night/ssh-night.conf" ]]; then ok "ssh-night.conf present"; else bad "ssh-night.conf missing"; fi
+    if head -5 "$HOME/.ssh/config" 2> /dev/null | grep -q 'night/ssh-night.conf'; then
+        ok "ssh config Includes ssh-night.conf near the top"
+    else
+        bad "ssh config at \$HOME/.ssh/config does not Include night/ssh-night.conf in its first lines (ssh keeps the FIRST value — the Include must come before any IdentityAgent)"
     fi
     # regression: on-disk private keys would let night ssh succeed as the owner
     if grep -lE -- '-----BEGIN .*PRIVATE KEY' "$HOME"/.ssh/* 2> /dev/null | grep -q .; then
@@ -975,5 +423,6 @@ case "$cmd" in
     status) cmd_status ;;
     preflight) cmd_preflight ;;
     session-start) cmd_session_start ;;
-    *) die "unknown command '$cmd' (on | off | status | preflight | session-start, or no args for hook mode)" ;;
+    user-prompt) cmd_user_prompt ;;
+    *) die "unknown command '$cmd' (on | off | status | preflight | session-start | user-prompt, or no args for hook mode)" ;;
 esac
