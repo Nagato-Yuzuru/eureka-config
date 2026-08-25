@@ -7,6 +7,14 @@
 type = "keychain"
 service = "fnox"
 
+# Day-side cache for activate's per-prompt hook-env resolution (memory only,
+# unix socket, same-uid). Short idle timeout keeps the in-memory half-life
+# small; /night on additionally runs `fnox daemon clear` so no day secret
+# value survives across the boundary. The night shim never touches it
+# (--no-daemon).
+[daemon]
+idle_timeout = "2h"
+
 # Night profile: CREDENTIALS ONLY. What is listed here is the complete
 # capability surface of a night shift — an undeclared credential does not
 # exist at night. keyring_cache=false is load-bearing: fnox then discards

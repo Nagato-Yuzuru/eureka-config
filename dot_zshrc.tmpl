@@ -113,6 +113,16 @@ export SSH_AUTH_SOCK="${HOME}/Library/Group Containers/2BUA8C4S2C.com.1password/
 [ -f "${XDG_CONFIG_HOME}/op/plugins.sh" ] && [ ! -e "${HOME}/.claude/night/active.json" ] && source "${XDG_CONFIG_HOME}/op/plugins.sh"
 {{- end }}
 
+# fnox: auto-load project fnox.toml secrets in interactive shells (the
+# per-user daemon does the caching; /night on clears it). Skipped while the
+# night flag exists — night shells carry no ambient project secrets.
+# UPSTREAM CAVEAT (owner ruling 2026-08-26): fnox has no direnv-style trust
+# model yet (filed, YUZ-77) — until it lands, cd into an untrusted repo
+# loads its fnox.toml. Accepted as a short exposure window; no local wrap.
+if command -v fnox > /dev/null 2>&1 && [ ! -e "$HOME/.claude/night/active.json" ]; then
+    eval "$(fnox activate zsh)"
+fi
+
 # fnox activate exports project secrets into interactive shells; the claude
 # process must never inherit them — they would ride in its process env for
 # the whole session, and the night flag cannot retroactively scrub process
