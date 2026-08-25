@@ -3,6 +3,10 @@
 # the night profile (credentials only — hygiene env lives in
 # ~/.claude/night/env.sh) is added alongside this provider block.
 
+# TODO(YUZ-80): on headless linux the keychain provider has no unlocked
+# secret service — custody there goes age (wizard provisions the key) or
+# lease-only (no standing secret at all; VM resting state = night tier).
+# Blocked on the R0.7 probe verdict; template this per-OS when it lands.
 [providers.keychain]
 type = "keychain"
 service = "fnox"

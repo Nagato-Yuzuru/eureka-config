@@ -143,7 +143,7 @@ on = ["darwin", "linux"]
 # upgrades are deliberate daylight events (keychain ACL re-binds per binary;
 # never upgrade while the night flag is armed).
 [packages.fnox]
-on = ["darwin"]
+on = ["darwin", "linux"]
 via = "mise"
 mise = { version = "1.34.0" }
 completions = { fnox = "fnox completion zsh" }

@@ -366,12 +366,14 @@ cmd_preflight() {
     # lease-independent on purpose: `fnox get` resolves the single secret, so
     # a dead GitHub lease cannot mask a healthy (or broken) 1Password channel
     local sa
-    if sa=$(FNOX_NON_INTERACTIVE=1 fnox -c "$HOME/.config/fnox/config.toml" -P night get OP_SERVICE_ACCOUNT_TOKEN 2> /dev/null) \
+    if ! command -v op > /dev/null 2>&1; then
+        soft "op absent — night vault channel unavailable on this machine (linux custody: YUZ-80)"
+    elif sa=$(FNOX_NON_INTERACTIVE=1 fnox -c "$HOME/.config/fnox/config.toml" -P night get OP_SERVICE_ACCOUNT_TOKEN 2> /dev/null) \
         && OP_SERVICE_ACCOUNT_TOKEN="$sa" timeout 20 op vault list --format=json 2> /dev/null \
         | jq -e 'map(.name) == ["night"]' > /dev/null 2>&1; then
         ok "SA reaches exactly the night vault (keychain ACL + 1Password, end to end)"
     else
-        bad "SA cannot list exactly the night vault (keychain ACL? dead token? op missing?)"
+        bad "SA cannot list exactly the night vault (keychain ACL? dead token?)"
     fi
 
     # the shim itself must exec before the lease question is even asked —
@@ -403,7 +405,7 @@ cmd_preflight() {
         exit 1
     fi
     if ((degraded)); then
-        echo "preflight DEGRADED — local-only night available (pushes and gh unavailable)."
+        echo "preflight DEGRADED — a reduced night is available (see ~ lines above)."
         exit 2
     fi
     echo "preflight PASS."
