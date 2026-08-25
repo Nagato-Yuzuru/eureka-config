@@ -105,8 +105,28 @@ eval "$(starship init zsh)"
 # 1password
 
 export SSH_AUTH_SOCK="${HOME}/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
-[ -f "${XDG_CONFIG_HOME}/op/plugins.sh" ] && source "${XDG_CONFIG_HOME}/op/plugins.sh"
+# Night flag skips the op plugins: their gh/hcloud wrappers route through the
+# locked desktop app after dark. Night-born shells get the real binaries,
+# which fail fast under the night hygiene env; day shells are unaffected.
+# (Day-born sessions carry the aliases in their snapshot regardless — the
+# OP_SERVICE_ACCOUNT_TOKEN sentinel in night/env.sh catches those.)
+[ -f "${XDG_CONFIG_HOME}/op/plugins.sh" ] && [ ! -e "${HOME}/.claude/night/active.json" ] && source "${XDG_CONFIG_HOME}/op/plugins.sh"
 {{- end }}
+
+# fnox activate exports project secrets into interactive shells; the claude
+# process must never inherit them — they would ride in its process env for
+# the whole session, and the night flag cannot retroactively scrub process
+# memory. Launch claude from a cleansed subshell (binary deactivate: the zsh
+# wrapper fn is upstream-broken, `local status` is read-only in zsh); the
+# parent shell keeps its activation. A session that genuinely needs ambient
+# project env opts in explicitly: `fnox exec -- claude`.
+claude() {
+    if [[ -n ${__FNOX_SESSION:-} ]]; then
+        (eval "$(command fnox deactivate 2>/dev/null)" 2>/dev/null; command claude "$@")
+    else
+        command claude "$@"
+    fi
+}
 
 # fzf
 if command -v fzf &>/dev/null; then
