@@ -20,17 +20,25 @@ session while the flag is on IS a night session.**
    - **DEGRADED** — only the GitHub lease is missing: offer to mint (step 2),
      or with the owner's explicit ok arm local-only (step 6, `--mode local-only`).
    - **PASS** — continue.
-2. Mint if needed: run `~/.claude/night/bin/night gh api user -q .login` and
-   relay the device code. **The owner's one click IS tonight's authorization**
-   — the token lives ~8h and nothing on disk can renew it.
+2. Mint if needed: run
+   `fnox -c ~/.config/fnox/config.toml -P night lease create github -l "night-$(date +%F)"`
+   and relay the device code, then confirm with
+   `~/.claude/night/bin/night gh api user -q .login`. **The owner's one click
+   IS tonight's authorization** — the token lives ~8h, nothing on disk can
+   renew it, and the label makes the lease ledger an audit trail.
 3. Show the scope preflight printed (the night App's installation
    repositories — the server-enforced push allowlist) and have the owner
    confirm it. Last chance to catch an over-wide grant before sleep.
 4. Confirm the shift's task list (Linear). If none was agreed, ask now.
 5. Ask about background processes started today and still running — they keep
-   their day environment all night; list survivors in the shift report.
+   their day environment (and anything inherited from an fnox-activated
+   launch shell) all night; process memory is the one boundary no channel
+   reaches. List survivors in the shift report.
 6. Flip: `~/.claude/hooks/night-gate.sh on --mode full --scope repo1,repo2`
    (scope = the list confirmed in step 3; an arm-time record, not truth).
+   Flipping also clears the fnox daemon — no day secret survives in memory
+   across the boundary — and live sessions get a night notice on their next
+   prompt.
 7. Suggest a fresh plain `claude` session for the main overnight work — fresh
    context for a long shift; nothing special to launch.
 
@@ -67,3 +75,5 @@ answers, and the shift's task list is non-empty and unambiguous.
 4. Post the report (with morning outcomes appended) as a comment on the
    shift's Linear issue if the night session did not already.
 5. T3 proposals: read them out; execution is the owner's, by hand.
+6. Housekeeping: `fnox -c ~/.config/fnox/config.toml -P night lease cleanup`
+   (drop expired lease ledger entries).

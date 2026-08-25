@@ -9,20 +9,31 @@ The owner is asleep. Nobody can approve a prompt, answer a question, or catch
 a mistake until morning. The flag governs every session identically, through
 three channels:
 
-- **Hygiene is automatic** — every shell already has signing off, git-over-ssh
-  rewritten to https, a dead ssh agent, gh isolated from day credentials, and
-  headless fnox. Plain `git commit` just works, unsigned. Plain `git push`
-  fails fast (no ambient credentials) — that is a pointer to the shim, not an
-  error to fight.
+- **Hygiene is automatic** — every shell already has signing off, ssh dead
+  (agent gone via ssh-night.conf, git-over-ssh killed), gh isolated from day
+  credentials, headless fnox, and an op SENTINEL token: any bare `op` / `gh`
+  / `hcloud` — including day-session aliases and calls nested inside
+  scripts — dies in ~50ms with a credential error instead of hanging. Plain
+  `git commit` just works, unsigned. **A fast credential error IS the system
+  talking**: it means "use `night <cmd>`" or "not granted tonight" — never
+  an error to fight or retry.
 - **Credentials are per-invocation** — `~/.claude/night/bin/night <cmd>` runs
   one command with tonight's lease: `night git push`, `night gh api`,
   `night op read op://night/...`. Tokens never live in the session
-  environment; each invocation resolves fresh from the lease ledger.
-- **The gate denies the rest** — its messages name the right move; follow them.
+  environment; each invocation resolves fresh from the lease ledger. The
+  shim also carries the only command checks left in the system (git push
+  force/delete/default-branch, gh release writes, mutating gh api) — a
+  `night:` refusal is final: park it.
+- **Tool names are gated** — browsing is a read allowlist, claude.ai
+  connectors are off entirely (reads included), Linear is reads +
+  task-state. Bash strings are otherwise ungated on purpose: what you can
+  actually DO is bounded by what was issued tonight, and the real error from
+  the real boundary is the honest signal.
 
-**The prime rule: a 403, not-found, or deny is a capability the owner
-deliberately did not grant tonight. Park it and record it. Never work around
-it — no alternate tokens, no keychain reads, no new CLI sessions.**
+**The prime rule: a 403, not-found, deny, or fast credential error is a
+capability the owner deliberately did not grant tonight. Park it and record
+it. Never work around it — no alternate tokens, no keychain reads, no new
+CLI sessions.**
 
 ## Authority tiers
 
@@ -50,8 +61,10 @@ it — no alternate tokens, no keychain reads, no new CLI sessions.**
 - **Local-only nights** (the session context says so): the lease is dead and
   fnox deliberately aborts on it — `night <anything>` is unavailable, vault
   reads included. Work local, commit local, park the rest.
-- **Known residual**: scripts that internally shell out to `gh` may hang on
-  the locked 1Password plugin — timeout-wrap, record as one incident.
+- **Known residual**: a GraphQL mutation inside the App's permissions (e.g.
+  `updateRef`) passes both shim and server — the task-list discipline is the
+  only boundary there. (The old nested-gh hang class is gone: the op
+  sentinel makes those calls fail fast instead.)
 - **Browsing**: read-only (the gate enforces the write tools away). No
   logins, no forms, no uploads.
 - **Artifacts**: publishing (private) is fine; never share.

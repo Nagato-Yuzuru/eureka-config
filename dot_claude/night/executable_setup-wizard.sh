@@ -224,9 +224,10 @@ if confirm "Create service account 'claude-night' (read-only on night vault)?"; 
   SA_OUT=$(op service-account create claude-night --vault "night:read_items" --format=json)
   SA_TOK=$(printf '%s' "$SA_OUT" | jq -r '.token // .secret // empty')
   if [[ -n "$SA_TOK" ]]; then
-    fnox -c "$HOME/.config/fnox/config.toml" -P night set OP_SERVICE_ACCOUNT_TOKEN "$SA_TOK" --provider keychain >/dev/null 2>&1 \
-      || fnox set OP_SERVICE_ACCOUNT_TOKEN "$SA_TOK" --provider keychain >/dev/null
-    printf '  %s✓ stored%s SA token via fnox keychain provider\n' "$GREEN" "$RESET"
+    # one write path, loudly: a fallback that silently changed the config or
+    # profile would store the token somewhere preflight never looks
+    fnox -c "$HOME/.config/fnox/config.toml" -P night set OP_SERVICE_ACCOUNT_TOKEN "$SA_TOK" --provider keychain >/dev/null
+    printf '  %s✓ stored%s SA token via fnox keychain provider (global config, night profile)\n' "$GREEN" "$RESET"
   else
     warn "could not parse token from op output — create the SA in the web UI and run: fnox set OP_SERVICE_ACCOUNT_TOKEN <token> --provider keychain"
     SKIPPED+=("SA token storage")
@@ -245,16 +246,24 @@ fi
 step "Move/copy the few items night tasks genuinely need into 'night'. Fewer is better."
 pause "Vault contents ready?"
 
-# ── Stage 4: branch rulesets ──────────────────────────────────────────────
-stage "GitHub rulesets — branch discipline, enforced server-side"
-say "Contents RW can force-push a default branch; the ruleset stops that on"
-say "GitHub's side where nothing local can bypass it. For EACH allowlist repo:"
+# ── Stage 4: ssh hardening + branch rulesets ──────────────────────────────
+stage "ssh hardening + GitHub rulesets"
+say "ssh: one Include line makes the 1Password agent vanish while the night"
+say "flag exists (ssh dies in ms instead of hanging until morning)."
+step "Add as the FIRST line of ~/.ssh/config (first-value-wins is the point):"
+step "  Include ~/.claude/night/ssh-night.conf"
+pause "Include line added at the top?"
+say "Rulesets: Contents RW can force-push a default branch; a branch ruleset"
+say "would stop that server-side — but ONLY on public repos or GitHub Pro."
+warn "Private repos on the free plan CANNOT have branch rulesets (403 — probed,"
+warn "YUZ-74). For those: SKIP this stage. The residual is accepted: the shim"
+warn "refuses force/main pushes, and the drift model does the rest."
+say "For each PUBLIC (or Pro) allowlist repo:"
 step "Settings → Rules → Rulesets → New branch ruleset"
 step "Enforcement: Active · Target branches: Include default branch"
 step "Rules: Block force pushes · Require a pull request before merging"
 step "Bypass list: leave EMPTY (binds you and your tokens too)"
-note "(the day PAT has no admin scope — this is browser-only by design)"
-pause "Rulesets created for every allowlist repo?"
+pause "Rulesets created where the plan allows (or consciously skipped)?"
 
 # ── Stage 5: preflight ────────────────────────────────────────────────────
 stage "Preflight"
