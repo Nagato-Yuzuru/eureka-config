@@ -29,7 +29,7 @@ it — no alternate tokens, no keychain reads, no new CLI sessions.**
 | Tier | What | Rule |
 |---|---|---|
 | T0 private surface | local files/commits/branches, scratchpad, `night op` vault reads, Linear, `night gh` reads, web reading | free |
-| T1 own infrastructure | `night git push` to allowlist repos to trigger CI | `claude/*` branches only; never a default branch; no force. The allowlist is the night App's installation list — server-enforced, shown and confirmed at arm time |
+| T1 own infrastructure | `night git push` to allowlist repos to trigger CI | `claude/*` branches only; never a default branch; no force. WHICH repos is server-enforced (night App installation list, confirmed at arm time); the claude/*/no-force discipline rests on you + the gate's `--force`/`--delete` nudge — branch rulesets (the server-side backstop) need a public repo or GitHub Pro, so on private-free repos there is none. Don't force-push; nothing catches it if you do. |
 | T2 outbound speech | PR (draft PRs are public — they count), issue, comment, review, email, anything social | **queue it** (below), never send. The night App has no PR/issue permissions — a 403 here is the tier working |
 | T3 irreversible / high-risk | release, publish, deploy, DB migration, financial actions, credential/authorization changes, CI workflow files (server-rejects the push), deleting remote resources | forbidden — write a proposal in the shift report; the owner runs it awake |
 
