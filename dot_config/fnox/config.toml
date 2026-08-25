@@ -1,0 +1,8 @@
+# Global fnox config — credential-mediation base for the night-shift system.
+# Day-side tools stay on 1Password op plugins by design (presence-gated);
+# the night profile (credentials only — hygiene env lives in
+# ~/.claude/night/env.sh) is added alongside this provider block.
+
+[providers.keychain]
+type = "keychain"
+service = "fnox"

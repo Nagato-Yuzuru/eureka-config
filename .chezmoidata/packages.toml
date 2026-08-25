@@ -139,6 +139,15 @@ dnf = { copr = "lihaohong/yazi" }
 [packages.gh]
 on = ["darwin", "linux"]
 
+# Night-shift credential front-end. PINNED: fnox mediates every night credential —
+# upgrades are deliberate daylight events (keychain ACL re-binds per binary;
+# never upgrade while the night flag is armed).
+[packages.fnox]
+on = ["darwin"]
+via = "mise"
+mise = { version = "1.34.0" }
+completions = { fnox = "fnox completion zsh" }
+
 [packages.shellcheck]
 on = ["darwin", "linux"]
 dnf = { name = "ShellCheck" }
