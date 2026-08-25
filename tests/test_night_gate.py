@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -79,11 +80,36 @@ DENY_BASH = [
     "gh api repos/o/r/contents/f -X PUT --field message=x",
     # nested CLI sessions
     "claude -p 'do things'",
-    "claude-night --continue",
     # T3 through the shim: releases ride on Contents:write — the one hole the
     # capability layer cannot close, so the gate line is load-bearing here
     "~/.claude/night/bin/night gh release create v1.0.0",
     "~/.claude/night/bin/night gh api -X POST repos/o/r/releases -f tag_name=v1",
+    # a shim-shaped word ANYWHERE in the string must not bless the other
+    # segments — the decision is per-segment, not per-string
+    "echo night && gh release create v1",
+    'git commit -m "the night shift work" && gh pr create',
+    "ls ~/.claude/night && hcloud server delete 42",
+    # paths and alias-escapes still resolve to the program (cheap, and the
+    # rule they dodge is a liveness reroute worth keeping)
+    "/usr/bin/ssh host uptime",
+    "\\gh api user",
+    # git push: only the unmistakable history-rewrite flags. Destination
+    # discipline (claude/* only) is the server-side ruleset's job (YUZ-74).
+    "~/.claude/night/bin/night git push --force origin HEAD:refs/heads/main",
+    "~/.claude/night/bin/night git push --delete origin refs/tags/v1.0.0",
+    "~/.claude/night/bin/night git push --mirror origin",
+    # security is whole-program off the night surface (dump/unlock/export
+    # read or open the keychain just as well as add/delete/find)
+    "security dump-keychain -d",
+    "security unlock-keychain",
+    "security export -t identities",
+    # T3 verb coverage: same irreversibility, sibling verbs
+    "wrangler versions upload",
+    "kubectl replace -f deploy.yaml",
+    "kubectl patch deploy x -p '{}'",
+    "kubectl scale deploy x --replicas=0",
+    "flyctl apps destroy myapp",
+    "docker buildx build --push -t repo/img .",
 ]
 
 ALLOW_BASH = [
@@ -102,6 +128,31 @@ ALLOW_BASH = [
     "echo fnoxlike-string",
     "echo laughs",  # contains 'gh' mid-word
     "grep -r sshd_config docs/",  # 'ssh' mid-word (sshd_config), flag position
+    # gated words as DATA (arguments, quoted strings) must not trip program
+    # rules — in a dotfiles repo these are everyday T0 commands
+    'git commit -m "docs: update claude settings"',
+    "rg claude dot_claude/",
+    'git commit -m "fix: ssh config"',
+    "rsync -a build/ dist/",  # local-only rsync never touches ssh
+    # heredoc bodies are data, not commands
+    "cat > notes.md <<'EOF'\ngh api user\nssh host uptime\nEOF",
+    # gh api with an explicit GET: -f is a query parameter, not a mutation
+    "~/.claude/night/bin/night gh api -X GET search/issues -f q=x",
+    # bare push is legitimate T0 on a claude/* branch; the gate cannot see
+    # the current branch, and destination discipline is the server-side
+    # ruleset's job (YUZ-74) — denying here would be a B1-class false deny
+    "git push",
+    "git push origin main",
+    # KNOWN LEAKS, accepted: the threat model is drift, not an adversary.
+    # Wrapped command strings (sh -c, eval, substitutions, variables) are
+    # deliberately not chased — a parser can always be smuggled past, so the
+    # real boundary is capability starvation + server-side rulesets. These
+    # pin the honest behavior: the gate must not pretend otherwise.
+    'bash -c "gh pr create"',
+    'eval "gh api user"',
+    "V=`gh release list`",
+    'echo "before $(gh release create v2) after"',
+    "n=~/.claude/night/bin/night && $n gh release create",
 ]
 
 
@@ -118,6 +169,11 @@ def test_bash_allowed(tmp_path: Path, command: str) -> None:
 # --- MCP rules -------------------------------------------------------------
 
 DENY_MCP = [
+    # Linear is allow-listed (reads + task-state), not allow-all: merging PRs,
+    # submitting reviews, and publishing issues are T2/T3 outbound acts
+    "mcp__linear-server__merge_diff",
+    "mcp__linear-server__submit_diff_review",
+    "mcp__linear-server__share_issue",
     # claude.ai connectors: whole prefix, reads included (injection surface)
     "mcp__claude_ai_Gmail__get_message",
     "mcp__claude_ai_Gmail__send_message",
@@ -175,6 +231,7 @@ def test_mcp_allowed(tmp_path: Path, tool: str) -> None:
 
 # --- regime & robustness ---------------------------------------------------
 
+
 def test_inert_without_flag(tmp_path: Path) -> None:
     # every rule stands down when the flag is absent
     assert bash_decision(tmp_path, "ssh host uptime", flag=False) == "allow"
@@ -202,3 +259,63 @@ def test_malformed_input_fails_closed(tmp_path: Path) -> None:
 def test_non_bash_non_mcp_tools_untouched(tmp_path: Path) -> None:
     # matcher registers only Bash|mcp__.* — but even if invoked, allow
     assert run_gate(tmp_path, "Read", {"file_path": "/etc/hosts"}) == "allow"
+
+
+def test_deny_without_grep_on_path(tmp_path: Path) -> None:
+    # decisions are pure bash + jq: a PATH missing grep (or any other
+    # external) must never fail open
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for tool in ("bash", "jq", "cat"):
+        src = shutil.which(tool)
+        assert src, f"{tool} not on PATH"
+        (bindir / tool).symlink_to(src)
+    night = tmp_path / "night"
+    night.mkdir()
+    (night / "active.json").write_text('{"since": 1, "mode": "full"}')
+    proc = subprocess.run(
+        [str(bindir / "bash"), str(GATE)],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "fnox get X"}}),
+        capture_output=True,
+        text=True,
+        env={"PATH": str(bindir), "HOME": os.environ["HOME"], "NIGHT_DIR": str(night)},
+        timeout=15,
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "fnox" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def _run_zshenv_guard(tmp_home: Path, line: str, *, claudecode: bool) -> str:
+    env = {"PATH": os.environ["PATH"], "HOME": str(tmp_home)}
+    if claudecode:
+        env["CLAUDECODE"] = "1"
+    proc = subprocess.run(
+        ["zsh", "-c", line + '\nprint -r -- "$NIGHT_MARKER"'],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=15,
+    )
+    return proc.stdout.strip()
+
+
+def test_zshenv_guard_line(tmp_path: Path) -> None:
+    # the preflight only greps that this line EXISTS; its logic is verified
+    # here, evaluated verbatim from the zshenv source against a fake HOME
+    src = (REPO_ROOT / "dot_zshenv.tmpl").read_text()
+    line = next(
+        ln for ln in src.splitlines() if "night/env.sh" in ln and not ln.lstrip().startswith("#")
+    )
+    home = tmp_path / "home"
+    night = home / ".claude" / "night"
+    night.mkdir(parents=True)
+    (night / "env.sh").write_text("export NIGHT_MARKER=lit\n")
+    # flag absent: hygiene stays off
+    assert _run_zshenv_guard(home, line, claudecode=True) == ""
+    # flag + Claude shell: env.sh sourced
+    (night / "active.json").write_text("{}")
+    assert _run_zshenv_guard(home, line, claudecode=True) == "lit"
+    # owner's own (non-Claude) shells keep the day environment
+    assert _run_zshenv_guard(home, line, claudecode=False) == ""
