@@ -9,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/yuzuru/.claude/hooks/night-gate.sh",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/night-gate.sh",
             "timeout": 10
           }
         ]
@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/yuzuru/.claude/hooks/night-gate.sh session-start",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/night-gate.sh session-start",
             "timeout": 10
           }
         ]
