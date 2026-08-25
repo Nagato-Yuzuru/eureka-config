@@ -1,0 +1,7 @@
+# night-shift v3 → v4: vessels and their config are gone (see night-gate v4
+# header). Removals propagate to every machine on apply.
+.claude/night/bin/claude-night
+.claude/night/bin/git-night
+.claude/night/bin/op-night
+.claude/night/config.json
+.claude/night/settings.json
