@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# night — run one command inside the night credential profile.
+# Hygiene comes from the flag (zshenv sources env.sh in every Claude shell);
+# credentials exist only per-invocation inside this process tree, freshly
+# resolved from the fnox lease ledger each time (renews itself near expiry).
+# -c pins the config chain to the global file: the lease ledger key becomes
+# cwd-independent (one arm covers /private/tmp scratch too), and no project's
+# own fnox.toml can override or inject night credential config.
+exec env FNOX_PROFILE=night fnox -c "$HOME/.config/fnox/config.toml" exec -- "$@"

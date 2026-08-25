@@ -10,3 +10,8 @@ case ":$PATH:" in
 *":$PNPM_HOME/bin:"*) ;;
 *) export PATH="$PNPM_HOME/bin:$PATH" ;;
 esac
+
+# Night mode: hygiene env for every Claude-spawned shell while the flag
+# exists. CLAUDECODE guards scope — interactive terminals, cron and launchd
+# never match, so the owner's own shells keep the day environment.
+[[ -n "$CLAUDECODE" && -e "$HOME/.claude/night/active.json" ]] && source "$HOME/.claude/night/env.sh"

@@ -1,0 +1,2 @@
+# GH_CONFIG_DIR target for night sessions: deliberately empty — gh with no
+# config has no stored auth to fall back to.

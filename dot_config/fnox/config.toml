@@ -6,3 +6,18 @@
 [providers.keychain]
 type = "keychain"
 service = "fnox"
+
+# Night profile: CREDENTIALS ONLY. What is listed here is the complete
+# capability surface of a night shift — an undeclared credential does not
+# exist at night. keyring_cache=false is load-bearing: fnox then discards
+# the 184-day refresh token GitHub mints alongside every 8h access token,
+# so nothing on disk can renew authority without a fresh device-flow
+# approval — "authorize while awake" holds structurally.
+[profiles.night.secrets]
+OP_SERVICE_ACCOUNT_TOKEN = { provider = "keychain", value = "OP_SERVICE_ACCOUNT_TOKEN" }
+
+[profiles.night.leases.github]
+type = "github-oauth"
+client_id = "Iv23lifV6li4jkqWVVej"
+env_var = "GH_TOKEN"
+keyring_cache = false
