@@ -21,3 +21,8 @@ type = "github-oauth"
 client_id = "Iv23lifV6li4jkqWVVej"
 env_var = "GH_TOKEN"
 keyring_cache = false
+# NOTE(upstream): `night gh` would rather ride `fnox proxy run` (placeholder
+# in the process tree, destination-scoped injection), but 1.34.0's proxy
+# rules cannot reference leases — probed decisively, filed upstream with the
+# trust ask (YUZ-77). Until that lands, gh rides exec and the shim carries
+# the gh argv checks.
