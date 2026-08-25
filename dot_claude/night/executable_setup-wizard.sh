@@ -191,97 +191,85 @@ finish() {
 TOTAL_STAGES=5
 
 NIGHT_DIR="$HOME/.claude/night"
-CONFIG="$NIGHT_DIR/config.json"
-SA_SVC=$(jq -r '.keychain.sa_token // "claude-night.op-sa-token"' "$CONFIG")
-VAULT=$(jq -r '.night_vault // "night"' "$CONFIG")
 
-# keychain_put SERVICE — hidden prompt -> login keychain (idempotent via -U).
-# Secrets never touch env files or argv of anything but `security`.
-keychain_put() {
-  local svc="$1" prompt="$2" val=""
-  if security find-generic-password -s "$svc" >/dev/null 2>&1; then
-    if ! confirm "keychain '$svc' already exists — replace it?"; then
-      note "keeping the existing keychain item"
-      return 0
-    fi
-  fi
-  ask_secret val "$prompt"
-  [[ -n "$val" ]] || { warn "empty — skipped"; SKIPPED+=("keychain $svc"); return 0; }
-  security add-generic-password -a "$USER" -s "$svc" -w "$val" -U
-  printf '  %s✓ stored%s in login keychain as %s\n' "$GREEN" "$RESET" "$svc"
-}
+banner "Night-shift v4 provisioning"
 
-banner "Night-shift provisioning"
+# ── Stage 1: night GitHub App ─────────────────────────────────────────────
+stage "GitHub — the night App (scope lives server-side)"
+say "The App's installation repo list IS the push allowlist, enforced by"
+say "GitHub at token-issue time. Its permissions define the night tiers:"
+say "Contents RW only — no PRs/issues (T2 403s), no Workflows (CI frozen)."
+open_url "https://github.com/settings/apps/new"
+step "Name: claude-night-<suffix> · Webhook: uncheck Active"
+step "Enable Device Flow: CHECK · Expire user authorization tokens: CHECK"
+step "Repository permissions: Contents = Read and write. Nothing else."
+step "Where can it be installed: Only on this account → Create"
+step "Note the Client ID, then: Install App → Only select repositories"
+step "  → pick the repos night shifts may push to (the allowlist)"
+ask CLIENT_ID "Client ID (Iv23...):"
+if [[ -n "${CLIENT_ID:-}" ]]; then
+  note "put it in chezmoi: dot_config/fnox/config.toml → [profiles.night.leases.github] client_id"
+fi
 
-# ── Stage 1: night vault ──────────────────────────────────────────────────
-stage "1Password — create the '$VAULT' vault"
+# ── Stage 2: 1Password night vault + service account (CLI) ────────────────
+stage "1Password — night vault and read-only service account"
 say "The night vault is the ONLY 1Password surface night sessions can read."
-say "Only secrets night tasks genuinely need go in it (test API keys etc.)."
-step "Open the 1Password desktop app."
-step "New Vault → name it exactly: $VAULT"
-step "Move/copy the few items night tasks need into it. Fewer is better."
-pause "Vault '$VAULT' exists?"
-
-# ── Stage 2: service account token ────────────────────────────────────────
-stage "1Password — service account for the night vault"
-say "A service account token lets 'op' read the $VAULT vault headlessly,"
-say "without touching the locked desktop app."
-open_url "https://my.1password.com/developer-tools/infrastructure-secrets/serviceaccount"
-note "If that URL 404s: my.1password.com → sidebar 'Developer' → Service Accounts → New."
-step "Name: claude-night"
-step "Vault access: grant READ access to '$VAULT' only. No other vaults."
-step "Create, then copy the token (starts 'ops_'). It is shown only once."
-keychain_put "$SA_SVC" "Paste the service account token:"
-if security find-generic-password -s "$SA_SVC" >/dev/null 2>&1 && command -v op >/dev/null 2>&1; then
-  if OP_SERVICE_ACCOUNT_TOKEN=$(security find-generic-password -s "$SA_SVC" -w) \
-     timeout 20 op vault list --format=json 2>/dev/null | jq -e --arg v "$VAULT" \
-       'map(select(.name == $v)) | length > 0' >/dev/null 2>&1; then
-    printf '  %s✓ verified%s — token reads vault %s\n' "$GREEN" "$RESET" "$VAULT"
+say "This stage runs op commands directly — approve the Touch ID prompts."
+if op vault get night >/dev/null 2>&1; then
+  note "vault 'night' already exists"
+else
+  op vault create night >/dev/null && printf '  %s✓ created%s vault night\n' "$GREEN" "$RESET"
+fi
+if confirm "Create service account 'claude-night' (read-only on night vault)?"; then
+  SA_OUT=$(op service-account create claude-night --vault "night:read_items" --format=json)
+  SA_TOK=$(printf '%s' "$SA_OUT" | jq -r '.token // .secret // empty')
+  if [[ -n "$SA_TOK" ]]; then
+    fnox -c "$HOME/.config/fnox/config.toml" -P night set OP_SERVICE_ACCOUNT_TOKEN "$SA_TOK" --provider keychain >/dev/null 2>&1 \
+      || fnox set OP_SERVICE_ACCOUNT_TOKEN "$SA_TOK" --provider keychain >/dev/null
+    printf '  %s✓ stored%s SA token via fnox keychain provider\n' "$GREEN" "$RESET"
   else
-    warn "token could not list vault '$VAULT' — check the grant; preflight will recheck"
+    warn "could not parse token from op output — create the SA in the web UI and run: fnox set OP_SERVICE_ACCOUNT_TOKEN <token> --provider keychain"
+    SKIPPED+=("SA token storage")
   fi
 fi
 
-# ── Stage 3: push recipe ──────────────────────────────────────────────────
-stage "Push recipe (which repos night sessions may push to)"
-say "This list is the RECIPE for the nightly PAT mint: every night, claude-night"
-say "prints it and you select exactly these repos on the mint page. The PAT's"
-say "repo selection — not this file — is the enforced boundary; preflight"
-say "checks the two agree. Pick own private repos / forks that need CI."
-note "current: $(jq -c '.push_allowlist' "$CONFIG")"
-ask REPOS "Repos (owner/repo, space-separated; empty keeps current):"
-if [[ -n "${REPOS:-}" ]]; then
-  # shellcheck disable=SC2086  # word splitting is the point: REPOS is space-separated
-  LIST=$(printf '%s\n' $REPOS | sed 's/,$//' | sed 's|^github.com/||' | sed 's|^|github.com/|' | jq -R . | jq -s .)
-  tmp=$(mktemp)
-  jq --argjson l "$LIST" '.push_allowlist = $l' "$CONFIG" > "$tmp" && mv "$tmp" "$CONFIG"
-  printf '  %s✓ wrote%s recipe: %s\n' "$GREEN" "$RESET" "$(jq -c '.push_allowlist' "$CONFIG")"
+# ── Stage 3: canary item ──────────────────────────────────────────────────
+stage "Canary — one readable item proves the whole vault channel"
+say "night op read op://night/canary/password is the standing end-to-end check."
+if op item get canary --vault night >/dev/null 2>&1; then
+  note "canary already exists"
+else
+  op item create --category=password --title=canary --vault night password=night-canary-ok >/dev/null \
+    && printf '  %s✓ created%s canary item\n' "$GREEN" "$RESET"
 fi
+step "Move/copy the few items night tasks genuinely need into 'night'. Fewer is better."
+pause "Vault contents ready?"
 
 # ── Stage 4: branch rulesets ──────────────────────────────────────────────
 stage "GitHub rulesets — branch discipline, enforced server-side"
-say "A PAT's scope stops at the repo: Contents RW can force-push main. Branch"
-say "discipline must live on GitHub's side, where nothing local can bypass it."
-say "For EACH recipe repo, create one ruleset:"
+say "Contents RW can force-push a default branch; the ruleset stops that on"
+say "GitHub's side where nothing local can bypass it. For EACH allowlist repo:"
 step "Settings → Rules → Rulesets → New branch ruleset"
 step "Enforcement: Active · Target branches: Include default branch"
-step "Rules: ✅ Block force pushes · ✅ Require a pull request before merging"
-step "Bypass list: leave EMPTY (so it binds you/your PAT too)"
-while IFS= read -r repo; do
-  [[ -n "$repo" ]] || continue
-  open_url "https://github.com/${repo#github.com/}/settings/rules"
-  pause "Ruleset created for ${repo#github.com/}?"
-done < <(jq -r '.push_allowlist[]?' "$CONFIG")
+step "Rules: Block force pushes · Require a pull request before merging"
+step "Bypass list: leave EMPTY (binds you and your tokens too)"
+note "(the day PAT has no admin scope — this is browser-only by design)"
+pause "Rulesets created for every allowlist repo?"
 
 # ── Stage 5: preflight ────────────────────────────────────────────────────
 stage "Preflight"
-say "Running the same checks /night on runs before every shift:"
+say "The same three-verdict check /night on runs before every shift:"
 printf '\n'
 if "$HOME/.claude/hooks/night-gate.sh" preflight; then
   printf '\n'
-  say "Provisioning complete. Tonight: /night on  ·  morning: /night review"
+  say "Provisioning complete. Tonight: /night on · morning: /night review"
 else
-  warn "fix the ✗ lines above, then re-run this wizard or 'night-gate.sh preflight'"
+  rc=$?
+  if [[ $rc == 2 ]]; then
+    say "DEGRADED is fine here — the lease mints at /night on (one device-flow click)."
+  else
+    warn "fix the ✗ lines above, then re-run this wizard or 'night-gate.sh preflight'"
+  fi
 fi
 
 finish
