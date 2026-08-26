@@ -9,10 +9,12 @@
 #     device-flow lease, Contents RW only, no PR/issue/workflow perms,
 #     keyring_cache=false discards the refresh token. What is not issued
 #     cannot be done; a 403 is the tier working.
-#   SHIM ARGV (~/.claude/night/bin/night). The night system's only command
-#     inspection, on real argv at the credential injection point: the
-#     within-Contents:write delta (force-push, ref deletes, default-branch
-#     pushes, release writes, mutating gh api).
+#   SHIM (~/.claude/night/bin/night). The night system's only command
+#     inspection, at the credential injection point — the within-
+#     Contents:write delta. git push is judged on ref-update objects from
+#     `git push --dry-run --porcelain` (rewrites, deletes, the resolved
+#     default branch — YUZ-87); gh on real argv (release writes, mutating
+#     gh api).
 #   HYGIENE (zshenv -> night/env.sh; ssh-night.conf). Subtractive env, hot
 #     per command, transitive: signing off, gh isolated, ssh agent gone, op
 #     sentinel. Credential-shaped bare commands die in milliseconds with

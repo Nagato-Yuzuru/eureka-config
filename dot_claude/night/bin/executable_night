@@ -11,12 +11,18 @@
 # Every command rides `fnox exec`: real credentials, this process tree only.
 # NOTE(YUZ-77): `fnox proxy run` would keep the real token out of this
 # process tree entirely, but its rules cannot reference leases (fnox
-# 1.34.0), so gh rides exec and the argv checks below stand in for proxy
-# path rules.
+# 1.34.0), so gh rides exec and the checks below stand in for proxy rules.
 #
 # -c pins the config chain to the global file: the lease ledger key becomes
 # cwd-independent (one arm covers /private/tmp scratch too), and no project's
 # own fnox.toml can override or inject night credential config.
+#
+# What the checks are, honestly (YUZ-87): DIRECT git and gh invocations are
+# really checked — git push by ref-update modeling (below), gh by argv at
+# this injection point. Indirection around the shim — `bash -c`, `env`,
+# `sh -c`, git aliases — is a known residual this file cannot see; the real
+# boundary for that class is the fnox proxy (YUZ-77). Credential isolation
+# itself rests on issuance (the App's permissions), not on these checks.
 set -euo pipefail
 
 CFG="$HOME/.config/fnox/config.toml"
@@ -26,12 +32,100 @@ die() {
     exit 3
 }
 
+# Executor: every allowed command leaves through here.
+# NIGHT_SHIM_EXEC=direct is the test seam — run WITHOUT credential
+# injection (a strict downgrade: every check still runs, no lease is
+# resolved; used to drive the push judgment against local fixture remotes).
+# NIGHT_SHIM_CHECK_ONLY=1 stops before executing anything: golden tables
+# exercise the argv checks alone.
+exec_night() {
+    [[ "${NIGHT_SHIM_CHECK_ONLY:-}" == 1 ]] && exit 0
+    if [[ "${NIGHT_SHIM_EXEC:-}" == direct ]]; then
+        exec "$@"
+    fi
+    exec fnox -c "$CFG" -P night --no-daemon exec -- "$@"
+}
+
+# ---------------------------------------------------------------------------
+# git push: ref-update modeling (YUZ-87). No argv spellings — the verdict is
+# made on what the push WOULD DO, as the remote reports it. The judge phase
+# runs inside the same credentialed exec as the real push (one lease
+# resolution covers dry-run, verdict and push):
+#
+#   `git push --dry-run --porcelain` returns one line per ref update, with
+#   the resolved destination ref and a flag: `+` forced update, `-` delete,
+#   `*` new, `=` up to date, space fast-forward, `!` rejected.
+#     +  → deny  T3: history rewrite (any spelling: --force, -f clusters,
+#                    +refspec, --mirror, force-with-lease that would rewrite)
+#     -  → deny  T3: ref removal (--delete, -d, :refspec, --prune, --mirror)
+#     destination == the remote's default branch (ls-remote --symref HEAD),
+#     or refs/heads/{main,master} by resolved name (belt for empty or
+#     mislabeled remotes)
+#        → deny  T1: default-branch push, whatever the branch is called
+#   A dry-run the remote itself refuses (auth, non-fast-forward without
+#   force, unknown ref) is relayed verbatim with git's own exit code: the
+#   real error from the real boundary.
+#
+# A --force spelling that would NOT rewrite (fast-forward) is allowed: the
+# model judges effects, not vocabulary.
+# ---------------------------------------------------------------------------
+
+# judge_push SUBIDX GIT_ARGV... — the credentialed phase. SUBIDX is the
+# index of "push" within GIT_ARGV[1:]. Dry-runs, judges, then execs the
+# real push. Never returns.
+judge_push() {
+    local subidx="$1"
+    shift
+    local -a argv=("$@")
+    # git [globals] push --dry-run --porcelain [pushargs]
+    local -a dry=("${argv[@]:0:subidx+2}" --dry-run --porcelain "${argv[@]:subidx+2}")
+    local out rc=0
+    out=$("${dry[@]}") || rc=$?
+    if ((rc)); then
+        # the remote's own refusal — relay it untouched
+        [[ -n "$out" ]] && printf '%s\n' "$out"
+        exit "$rc"
+    fi
+    local line flag pair dest url=''
+    local -a dests=()
+    while IFS= read -r line; do
+        case "$line" in
+            "To "*) url="${line#To }" ;;
+            *$'\t'*)
+                flag="${line%%$'\t'*}"
+                pair="${line#*$'\t'}"
+                pair="${pair%%$'\t'*}"
+                dest="${pair##*:}"
+                case "$flag" in
+                    +) die "T3: this push would rewrite published history on $url ($pair). Nothing on a night task list rewrites refs; propose it in the shift report." ;;
+                    -) die "T3: this push would delete $dest on $url. Ref removal is never night work; propose it in the shift report." ;;
+                esac
+                dests+=("$dest")
+                ;;
+        esac
+    done <<< "$out"
+    if ((${#dests[@]})); then
+        # the remote's ACTUAL default branch; empty on an empty remote
+        # (nothing exists there to protect — the belt below still holds)
+        local default_ref=''
+        default_ref=$("${argv[@]:0:subidx+1}" ls-remote --symref "$url" HEAD 2> /dev/null \
+            | sed -n $'s/^ref: \\(.*\\)\tHEAD$/\\1/p' | head -n 1) || true
+        for dest in "${dests[@]}"; do
+            if [[ -n "$default_ref" && "$dest" == "$default_ref" ]]; then
+                die "T1: this push targets the remote's default branch ($dest on $url) — never on a night task list. Push claude/* branches; queue or propose the rest."
+            fi
+            case "$dest" in
+                refs/heads/main | refs/heads/master)
+                    die "T1: this push targets $dest on $url — a default-branch name is never a night destination even when HEAD points elsewhere." ;;
+            esac
+        done
+    fi
+    unset NIGHT_SHIM_PHASE
+    exec "${argv[@]}"
+}
+
 (($#)) || die "usage: night <command> [args...]"
 
-# The night system's only command inspection, at the credential injection
-# point, on real argv: Contents:write cannot be narrowed server-side below
-# force-push / ref-delete / default-branch pushes (branch rulesets need a
-# public repo or GitHub Pro), so the line is drawn here.
 prog="${1##*/}"
 if [[ "$prog" == git ]]; then
     args=("${@:2}")
@@ -47,14 +141,11 @@ if [[ "$prog" == git ]]; then
         esac
     done
     if [[ "$sub" == push ]]; then
-        for a in "${args[@]}"; do
-            case "$a" in
-                --force | --force-with-lease* | -f | --delete | -d | --mirror)
-                    die "T3: git push $a rewrites or removes published refs. Push plain fast-forwards to claude/*; propose anything stronger in the shift report." ;;
-                main | master | refs/heads/main | refs/heads/master | *:main | *:master | *:refs/heads/main | *:refs/heads/master)
-                    die "T1: an explicit main/master destination is never on the night task list. Push claude/* branches; queue or propose the rest." ;;
-            esac
-        done
+        if [[ "${NIGHT_SHIM_PHASE:-}" == judge ]]; then
+            judge_push "$i" "$@"
+        fi
+        # one credentialed exec carries dry-run, verdict and the push itself
+        exec_night env NIGHT_SHIM_PHASE=judge bash "${BASH_SOURCE[0]}" "$@"
     fi
 fi
 
@@ -114,9 +205,4 @@ if [[ "$prog" == gh ]]; then
     fi
 fi
 
-# Testability seam: golden tables drive the checks without executing anything.
-if [[ "${NIGHT_SHIM_CHECK_ONLY:-}" == 1 ]]; then
-    exit 0
-fi
-
-exec fnox -c "$CFG" -P night --no-daemon exec -- "$@"
+exec_night "$@"
