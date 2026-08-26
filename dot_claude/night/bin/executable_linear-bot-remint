@@ -1,41 +1,95 @@
 #!/usr/bin/env bash
-# linear-bot-remint: mint a fresh 30-day Linear app token ("Night Shift
-# Agent") and rewire the linear-bot MCP connection to carry it, so agent
-# sessions write to the tracker under the agent identity. Day-only by
-# construction: the client secret resolves through 1Password, which is
-# locked at night and sentinel-killed in night shells — running this is
-# itself a presence-gated act. Preflight warns when expiry nears.
+# linear-bot-remint: converge the "Night Shift Agent" Linear identity to a
+# healthy state — a valid 30-day app token in custody, the linear-bot MCP
+# connection carrying it, and the expiry record preflight reads.
 #
-# Minting invalidates the previous token server-side (one active
-# client_credentials token per app), so an ad-hoc mint kills the wired
-# connection — always mint THROUGH this script, which swaps the header in
-# the same run.
+# Idempotent converge, because minting is the ONE non-repeatable step: the
+# server keeps a single active client_credentials token per app, so every
+# mint kills the previous token. The freshly minted token is therefore
+# persisted to custody BEFORE any wiring is touched; a run that dies during
+# wiring is repaired by re-running, which re-wires from custody without
+# minting again. Ad-hoc mints outside this script still kill the wired
+# connection — always mint through here. --fresh forces a mint when custody
+# looks healthy but the token was invalidated server-side anyway.
+#
+# Custody is a 0600 file under $NIGHT_DIR, NOT the fnox keychain the SA
+# token uses: `fnox set` reserializes the chezmoi-rendered fnox config
+# (formatting drift on a file chezmoi owns), and the token already sits in
+# plaintext in claude's own MCP store — a sibling file adds no new exposure
+# class. Day-only by construction: the client secret resolves through
+# 1Password, locked at night and sentinel-killed in night shells.
+#
+# Residual (accepted): `claude mcp add` takes the header via argv, visible
+# in ps for that instant — claude has no stdin path for headers, and this
+# runs day-only on a single-user machine with the owner present.
 set -euo pipefail
 
+NIGHT_DIR="${NIGHT_DIR:-$HOME/.claude/night}"
 CFG="$HOME/.config/fnox/config.toml"
 CLIENT_ID="07867befb39e6f9f66fa131a7eb09fb7"
-EXPIRY_FILE="$HOME/.claude/night/linear-bot-expiry"
+TOKEN_FILE="$NIGHT_DIR/linear-bot-token"
+EXPIRY_FILE="$NIGHT_DIR/linear-bot-expiry"
+REUSE_FLOOR_DAYS=5 # below this preflight warns anyway — a re-run mints fresh
 
-if [[ -e "$HOME/.claude/night/active.json" ]]; then
+fresh=0
+case "${1:-}" in
+    "") ;;
+    --fresh) fresh=1 ;;
+    *)
+        echo "usage: linear-bot-remint [--fresh]" >&2
+        exit 2
+        ;;
+esac
+
+if [[ -e "$NIGHT_DIR/active.json" ]]; then
     echo "linear-bot-remint: night flag is up — minting is a day capability" >&2
     exit 3
 fi
 
-secret=$(fnox -c "$CFG" -P day get LINEAR_BOT_CLIENT_SECRET)
-resp=$(curl -fsS -X POST https://api.linear.app/oauth/token \
-    -d grant_type=client_credentials -d "client_id=$CLIENT_ID" \
-    --data-urlencode "client_secret=$secret" \
-    -d "scope=read,write,app:assignable,app:mentionable")
-token=$(jq -r '.access_token // empty' <<< "$resp")
-if [[ -z "$token" ]]; then
-    jq 'del(.access_token)' <<< "$resp" >&2
-    exit 1
+now=$(date +%s)
+token='' exp=0
+if [[ "$fresh" == 0 && -s "$TOKEN_FILE" && -f "$EXPIRY_FILE" ]]; then
+    exp=$(cat "$EXPIRY_FILE" 2> /dev/null || echo 0)
+    [[ "$exp" =~ ^[0-9]+$ ]] || exp=0
+    if ((exp - now > REUSE_FLOOR_DAYS * 86400)); then
+        token=$(cat "$TOKEN_FILE")
+    fi
 fi
-expires_in=$(jq -r '.expires_in' <<< "$resp")
 
+if [[ -z "$token" ]]; then
+    secret=$(fnox -c "$CFG" -P day get LINEAR_BOT_CLIENT_SECRET)
+    resp=$(curl -sS -X POST https://api.linear.app/oauth/token \
+        -d grant_type=client_credentials -d "client_id=$CLIENT_ID" \
+        --data-urlencode "client_secret=$secret" \
+        -d "scope=read,write,app:assignable,app:mentionable")
+    token=$(jq -r '.access_token // empty' <<< "$resp" 2> /dev/null || true)
+    expires_in=$(jq -r '.expires_in // empty' <<< "$resp" 2> /dev/null || true)
+    if [[ -z "$token" || ! "$expires_in" =~ ^[0-9]+$ ]]; then
+        echo "linear-bot-remint: mint failed — response:" >&2
+        jq 'del(.access_token)' <<< "$resp" >&2 2> /dev/null \
+            || echo "  (unparseable response withheld: it could contain a token fragment)" >&2
+        exit 1
+    fi
+    # custody FIRST: from here on, a failed rewire is repaired by re-running
+    # — never by minting again (which would kill this token server-side)
+    mkdir -p "$NIGHT_DIR"
+    (
+        umask 077
+        printf '%s' "$token" > "$TOKEN_FILE.tmp"
+    )
+    command mv -f "$TOKEN_FILE.tmp" "$TOKEN_FILE"
+    exp=$((now + expires_in))
+    printf '%s\n' "$exp" > "$EXPIRY_FILE.tmp"
+    command mv -f "$EXPIRY_FILE.tmp" "$EXPIRY_FILE"
+    minted="minted fresh"
+else
+    minted="reused custody token"
+fi
+
+# converge the wiring from custody (remove+add is claude's upsert; running
+# it on an already-correct connection is harmless)
 claude mcp remove -s user linear-bot > /dev/null 2>&1 || true
 claude mcp add -s user --transport http linear-bot https://mcp.linear.app/mcp \
     --header "Authorization: Bearer $token" > /dev/null
-mkdir -p "$(dirname "$EXPIRY_FILE")"
-echo "$(($(date +%s) + expires_in))" > "$EXPIRY_FILE"
-echo "linear-bot reminted: token valid $((expires_in / 86400)) days"
+
+echo "linear-bot converged: $minted, valid $(((exp - now) / 86400)) days, MCP connection wired"
