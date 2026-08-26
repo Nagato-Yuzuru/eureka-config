@@ -40,6 +40,7 @@ The ticket rules:
 1. A ticket is a **brief**: a fresh context must be able to execute it without asking anything — scope, context, acceptance criteria, the output contract (a schema when a machine consumes the result), and the model tier when it departs from the executor's pin.
 2. Tickets are read by humans first. State the end-to-end behavior from the user's perspective; mechanism over feeling, active voice, no restated headers. Skip file paths and code that go stale; keep only decision-carrying snippets.
 3. Record adjudications. When the owner rules on a tradeoff, write the ruling into the ticket or artifact — an undocumented decision invites relitigation from every guilty-presumption reviewer that later reads the code.
+4. Comments meet the same bar as bodies. A progress or implementation comment is read by someone who was never in the room: open with one sentence of what the ticket now does at behavior level, then complete sentences — no semicolon fragment chains. A codename (a probe number, an internal mechanism name) gets a one-clause gloss on first use. A deviation names the forcing fact and the commit. Terseness is selecting what to include, not compressing the syntax of what stays.
 
 Done when every unit's blockers are named, every brief passes the fresh-context test, and every mechanizable acceptance criterion is written into its ticket.
 
