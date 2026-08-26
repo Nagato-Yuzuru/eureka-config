@@ -52,7 +52,10 @@ def run_gate(
         input=json.dumps({"tool_name": tool, "tool_input": tool_input}),
         capture_output=True,
         text=True,
-        env={"PATH": os.environ["PATH"], "HOME": os.environ["HOME"], "NIGHT_DIR": str(night)},
+        # HOME is the tmp dir: the gate also consults the canonical flag
+        # under $HOME (NIGHT_DIR is one-way, add-only — YUZ-92), and the
+        # REAL machine flag must never leak into a test verdict
+        env={"PATH": os.environ["PATH"], "HOME": str(tmp_path), "NIGHT_DIR": str(night)},
         timeout=15,
     )
     assert proc.returncode == 0, proc.stderr
@@ -109,6 +112,11 @@ DENY_MCP = [
     "mcp__claude_ai_Interactive_Brokers_IBKR__get_account_positions",
     "mcp__claude_ai_Todoist__find-tasks",
     # Chrome: read ALLOWLIST; writes and unknowns deny by default
+    # (screenshot/go_back/go_forward were never real tool names — the list
+    # mirrors the live registry and unknowns stay fail-closed, YUZ-92)
+    "mcp__claude-in-chrome__screenshot",
+    "mcp__claude-in-chrome__go_back",
+    "mcp__claude-in-chrome__go_forward",
     "mcp__claude-in-chrome__computer",
     "mcp__claude-in-chrome__javascript_tool",
     "mcp__claude-in-chrome__form_input",
@@ -147,9 +155,9 @@ ALLOW_MCP = [
     "mcp__claude-in-chrome__read_page",
     "mcp__claude-in-chrome__get_page_text",
     "mcp__claude-in-chrome__find",
-    "mcp__claude-in-chrome__screenshot",
     "mcp__claude-in-chrome__tabs_context_mcp",
     "mcp__claude-in-chrome__read_console_messages",
+    "mcp__claude-in-chrome__read_network_requests",  # pure read, was wrongly denied (YUZ-92)
     "mcp__plugin_playwright_playwright__browser_snapshot",
     "mcp__plugin_playwright_playwright__browser_navigate",
     "mcp__plugin_playwright_playwright__browser_navigate_back",
@@ -191,7 +199,7 @@ def run_user_prompt(tmp_path: Path, sid: str, *, flag: bool = True) -> dict | No
         input=json.dumps({"session_id": sid, "prompt": "carry on"}),
         capture_output=True,
         text=True,
-        env={"PATH": os.environ["PATH"], "HOME": os.environ["HOME"], "NIGHT_DIR": str(night)},
+        env={"PATH": os.environ["PATH"], "HOME": str(tmp_path), "NIGHT_DIR": str(night)},
         timeout=15,
     )
     assert proc.returncode == 0, proc.stderr
@@ -259,6 +267,49 @@ def test_malformed_input_fails_closed(tmp_path: Path) -> None:
 def test_non_mcp_tools_untouched(tmp_path: Path) -> None:
     # the matcher registers only mcp__.*, but even if invoked: allow
     assert run_gate(tmp_path, "Read", {"file_path": "/etc/hosts"}) == "allow"
+
+
+def test_nul_prefixed_input_fails_closed(tmp_path: Path) -> None:
+    # a NUL prefix truncates the gate's read -d '' to an empty payload,
+    # which used to slide through as tool="" -> allow (YUZ-92)
+    night = tmp_path / "night"
+    night.mkdir()
+    (night / "active.json").write_text('{"since": 1, "mode": "full"}')
+    proc = subprocess.run(
+        ["bash", str(GATE)],
+        input="\x00"
+        + json.dumps({"tool_name": "mcp__claude_ai_Gmail__get_message", "tool_input": {}}),
+        capture_output=True,
+        text=True,
+        env={"PATH": os.environ["PATH"], "HOME": str(tmp_path), "NIGHT_DIR": str(night)},
+        timeout=15,
+    )
+    assert proc.returncode == 0
+    out = json.loads(proc.stdout)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "no tool_name" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_night_dir_cannot_disarm_real_flag(tmp_path: Path) -> None:
+    # NIGHT_DIR is one-way, like NIGHT_GATE_FORCE: it may point the gate
+    # at an EXTRA flag (tests, live-fire), never relocate the lookup away
+    # from the canonical $HOME flag (YUZ-92)
+    home = tmp_path / "home"
+    (home / ".claude" / "night").mkdir(parents=True)
+    (home / ".claude" / "night" / "active.json").write_text('{"since": 1, "mode": "full"}')
+    empty = tmp_path / "empty-night"
+    empty.mkdir()
+    proc = subprocess.run(
+        ["bash", str(GATE)],
+        input=json.dumps({"tool_name": "mcp__claude_ai_Gmail__get_message", "tool_input": {}}),
+        capture_output=True,
+        text=True,
+        env={"PATH": os.environ["PATH"], "HOME": str(home), "NIGHT_DIR": str(empty)},
+        timeout=15,
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 def test_deny_without_grep_on_path(tmp_path: Path) -> None:
@@ -337,6 +388,42 @@ def test_env_sh_clears_inherited_overrides(tmp_path: Path) -> None:
     env = night_env(tmp_path)
     for var in ("GIT_SSH_COMMAND", "GIT_SSH", "GH_TOKEN", "GITHUB_TOKEN"):
         assert var not in env, f"{var} survived env.sh"
+
+
+def test_env_sh_git_config_count_is_derived(tmp_path: Path) -> None:
+    # the builder makes COUNT/pair misalignment unrepresentable (YUZ-92):
+    # the indices must be exactly 0..COUNT-1, keys and values in lockstep
+    env = night_env(tmp_path)
+    n = int(env["GIT_CONFIG_COUNT"])
+    keys = {k for k in env if k.startswith("GIT_CONFIG_KEY_")}
+    values = {k for k in env if k.startswith("GIT_CONFIG_VALUE_")}
+    assert keys == {f"GIT_CONFIG_KEY_{i}" for i in range(n)}
+    assert values == {f"GIT_CONFIG_VALUE_{i}" for i in range(n)}
+
+
+def test_env_sh_git_config_pairs_are_effective(tmp_path: Path) -> None:
+    # every pair read back through git itself — the middle entries (the
+    # two insteadOf rewrites, the two credential.helper lines) previously
+    # had no coverage at all (YUZ-92)
+    env = night_env(tmp_path)
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+
+    def get_all(key: str) -> list[str]:
+        proc = subprocess.run(
+            ["git", "config", "--get-all", key],
+            env=env, capture_output=True, text=True, timeout=15,
+        )  # fmt: skip
+        assert proc.returncode == 0, proc.stderr
+        return proc.stdout.splitlines()
+
+    assert get_all("commit.gpgsign") == ["false"]
+    assert get_all("tag.gpgsign") == ["false"]
+    assert get_all("url.https://github.com/.insteadOf") == [
+        "git@github.com:",
+        "ssh://git@github.com/",
+    ]
+    assert get_all("credential.helper") == ["", "!gh auth git-credential"]
+    assert get_all("core.sshCommand") == ["/usr/bin/false"]
 
 
 @pytest.mark.skipif(shutil.which("gh") is None, reason="gh not installed")

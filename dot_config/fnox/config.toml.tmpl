@@ -39,10 +39,10 @@ vault = "Night Shift Agents"
 idle_timeout = "2h"
 
 # fnox profile semantics: the top-level [secrets] table merges into EVERY
-# named profile; named profiles are isolated from each other. The base
-# therefore stays EMPTY. A base secret would silently join the night
-# surface and break "the night list is the complete night credential set"
-# (tests pin this).
+# named profile; named profiles are isolated from each other. The night
+# shim passes --no-defaults, so a base secret can never join the night
+# surface mechanically (YUZ-92); keep the base empty anyway — day-side
+# resolution has no such guard.
 #
 # Day profile: minting credentials, resolved with -P day. LINEAR_BOT_CLIENT_SECRET
 # mints the "Night Shift Agent" Linear app token (client_credentials grant,

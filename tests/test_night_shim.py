@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
@@ -55,7 +56,10 @@ def shim_verdict(argv: list[str]) -> str:
         env={"PATH": os.environ["PATH"], "HOME": os.environ["HOME"], "NIGHT_SHIM_CHECK_ONLY": "1"},
         timeout=15,
     )
-    if proc.returncode == 0:
+    # check-only exits NON-zero on pass (10) so it can never read as "the
+    # command ran" (YUZ-92); 3 stays the deny code
+    if proc.returncode == 10:
+        assert "NOT executed" in proc.stderr
         return "allow"
     assert proc.returncode == 3, proc.stderr
     return "deny"
@@ -366,11 +370,10 @@ def test_fnox_night_profile_shape() -> None:
     assert lease["keyring_cache"] is False
     secrets = cfg["profiles"]["night"]["secrets"]
     # credentials only, and the complete night set: nothing undeclared
+    # (base [secrets] can no longer merge in: the shim passes
+    # --no-defaults — behavior pinned below)
     assert set(secrets) == {"OP_SERVICE_ACCOUNT_TOKEN"}
     assert secrets["OP_SERVICE_ACCOUNT_TOKEN"]["provider"] == "keychain"
-    # the top-level [secrets] table merges into EVERY named profile, so it
-    # must stay empty: a base secret silently joins the night surface
-    assert "secrets" not in cfg
     # minting credentials ride the 1Password provider: locked app + op
     # sentinel make them mechanically unreachable at night, while keychain
     # items would stay readable after dark
@@ -390,7 +393,6 @@ def test_fnox_linux_custody_rides_age() -> None:
     assert cfg["providers"]["age"]["key_file"] == "~/.config/fnox/age.key"
     sa = cfg["profiles"]["night"]["secrets"]["OP_SERVICE_ACCOUNT_TOKEN"]
     assert sa == {"provider": "age", "value": "QUJD"}
-    assert "secrets" not in cfg
 
 
 def test_fnox_linux_unprovisioned_declares_nothing() -> None:
@@ -398,3 +400,49 @@ def test_fnox_linux_unprovisioned_declares_nothing() -> None:
     # preflight, never resolves to a silently wrong one
     cfg = render_fnox_config("linux")
     assert cfg["profiles"]["night"].get("secrets", {}) == {}
+
+
+@pytest.mark.skipif(shutil.which("fnox") is None, reason="fnox not installed")
+def test_no_defaults_keeps_base_secrets_off_the_night_surface(tmp_path: Path) -> None:
+    # the mechanization the shim rides (YUZ-92): with --no-defaults the
+    # top-level [secrets] table does NOT merge into the night profile, so
+    # a base secret cannot silently join the night surface. Isolated from
+    # the machine's real config via fake HOME/XDG (-c still merges the
+    # global chain).
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        '[secrets]\nBASE_LEAK = { value = "x" }\n\n'
+        '[profiles.night.secrets]\nNIGHT_ONLY = { value = "n" }\n'
+    )
+    env = {
+        "PATH": os.environ["PATH"],
+        "HOME": str(tmp_path),
+        "XDG_CONFIG_HOME": str(tmp_path / "xdg"),
+    }
+
+    def night_list(*flags: str) -> str:
+        proc = subprocess.run(
+            ["fnox", "-c", str(cfg), *flags, "-P", "night", "list"],
+            env=env, capture_output=True, text=True, timeout=15,
+        )  # fmt: skip
+        assert proc.returncode == 0, proc.stderr
+        return proc.stdout
+
+    with_defaults = night_list()
+    assert "BASE_LEAK" in with_defaults  # the hazard is real without the flag
+    assert "NIGHT_ONLY" in with_defaults
+    guarded = night_list("--no-defaults")
+    assert "BASE_LEAK" not in guarded  # and the flag kills it
+    assert "NIGHT_ONLY" in guarded
+
+
+def test_shim_exec_line_carries_no_defaults() -> None:
+    # wiring for the behavior above: the one fnox exec line the night
+    # rides must pass the flag
+    exec_lines = [
+        ln
+        for ln in SHIM.read_text().splitlines()
+        if "fnox" in ln and "exec" in ln and ln.strip().startswith("exec ")
+    ]
+    assert exec_lines, "shim lost its fnox exec line?"
+    assert all("--no-defaults" in ln for ln in exec_lines)

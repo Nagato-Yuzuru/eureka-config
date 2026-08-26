@@ -48,10 +48,15 @@ ACTIVE="$NIGHT_DIR/active.json"
 QUEUE_DIR="$NIGHT_DIR/queue"
 SESSIONS_DIR="$NIGHT_DIR/sessions"
 NIGHT_SHIM="$NIGHT_DIR/bin/night"
+# the flag's canonical home, NOT overridable: NIGHT_DIR is a test seam
+# that may only ADD activation (point the gate at an extra flag), never
+# relocate the lookup away from a real flag — same one-way posture as
+# NIGHT_GATE_FORCE (YUZ-92)
+DEFAULT_ACTIVE="$HOME/.claude/night/active.json"
 
 # presence-only flag: manual on/off, no time semantics. A corrupt flag file
 # is still a file: fail-closed.
-is_active() { [[ -e "$ACTIVE" ]]; }
+is_active() { [[ -e "$ACTIVE" || -e "$DEFAULT_ACTIVE" ]]; }
 
 # --- hook mode (PreToolUse) --------------------------------------------------
 
@@ -117,8 +122,12 @@ gate_mcp() { # TOOL_NAME
             # Browser sessions are ambient authority no lease can starve,
             # so the browser gets a read ALLOWLIST: a tool this list has
             # never seen (new, or write-class) is denied by default.
+            # allowlist written from the live tool registry, not memory:
+            # screenshot/go_back/go_forward were never real tool names, and
+            # read_network_requests is a pure read (sister of
+            # read_console_messages) that the old list wrongly denied (YUZ-92)
             case "${t#mcp__claude-in-chrome__}" in
-                navigate | go_back | go_forward | read_page | get_page_text | find | screenshot | tabs_context_mcp | read_console_messages) allow ;;
+                navigate | read_page | get_page_text | find | tabs_context_mcp | read_console_messages | read_network_requests) allow ;;
                 *)
                     emit_deny "night: browsing is read-only (browser sessions are logged-in ambient authority). '$t' is not on the read allowlist — write-class or unknown: park it and record it." ;;
             esac
@@ -143,7 +152,13 @@ hook_mode() {
     fi
     local input='' tool
     IFS= read -r -d '' input || : # read to EOF; no external cat
+    # an empty or unparseable payload (e.g. a NUL-prefixed stream truncating
+    # the read) must deny, not slide through as tool="" (YUZ-92); a jq
+    # crash already denies via the exit backstop
     tool=$(jq -r '.tool_name // ""' <<< "$input")
+    if [[ -z "$tool" ]]; then
+        emit_deny "night-gate: hook input carried no tool_name (empty or malformed payload); failing closed. Park this action and note it in the shift report."
+    fi
     case "$tool" in
         mcp__*) gate_mcp "$tool" ;;
     esac
@@ -230,7 +245,7 @@ cmd_on() {
         esac
     done
     local today ts
-    today=$(date -u +%F)
+    today=$(date +%F) # LOCAL date: the queue/report convention (a UTC+8 small-hours arm otherwise splits the night across two dirs — YUZ-92)
     ts=$(date -u +%FT%TZ) # ISO in the flag: portable to read back anywhere
     mkdir -p "$NIGHT_DIR" "$QUEUE_DIR/$today" "$NIGHT_DIR/reports" "$SESSIONS_DIR"
     # day daemon caches must not cross the boundary; idempotent, best-effort

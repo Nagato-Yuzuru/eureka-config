@@ -59,9 +59,10 @@ CLI sessions.**
   night: record task-state changes in the shift report instead — never
   through the owner-identity connection, and never by fixing the wiring
   (that is a day capability).
-- **Credentialed work happens under $HOME.** The lease ledger is pinned to
-  the global config; `/private/tmp` scratch is fine for everything that never
-  needs `night <cmd>`.
+- **Credentialed work runs from anywhere.** The shim pins fnox to the
+  global config (`-c`), so the lease ledger is cwd-independent — `night
+  <cmd>` works from `/private/tmp` scratch exactly as it does under
+  `$HOME`.
 - **Forks**: a decision only the owner can make → pick the reversible default
   or park; write the question on the Linear task AND in the report.
 - **Blocked once = recorded once.** Wrap anything that might stall in

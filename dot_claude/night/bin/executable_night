@@ -39,11 +39,20 @@ die() {
 # NIGHT_SHIM_CHECK_ONLY=1 stops before executing anything: golden tables
 # exercise the argv checks alone.
 exec_night() {
-    [[ "${NIGHT_SHIM_CHECK_ONLY:-}" == 1 ]] && exit 0
+    if [[ "${NIGHT_SHIM_CHECK_ONLY:-}" == 1 ]]; then
+        # non-zero on purpose (YUZ-92): a silent exit 0 read as "the
+        # command ran" to a calling agent. 10 = checks passed, nothing
+        # executed; 3 stays the deny code.
+        printf 'night: check-only — checks passed, command NOT executed\n' >&2
+        exit 10
+    fi
     if [[ "${NIGHT_SHIM_EXEC:-}" == direct ]]; then
         exec "$@"
     fi
-    exec fnox -c "$CFG" -P night --no-daemon exec -- "$@"
+    # --no-defaults: the top-level [secrets] table never merges into the
+    # night profile, so a base secret is mechanically outside the night
+    # surface — the flag replaces the old comment+test defenses (YUZ-92)
+    exec fnox -c "$CFG" --no-defaults -P night --no-daemon exec -- "$@"
 }
 
 # ---------------------------------------------------------------------------

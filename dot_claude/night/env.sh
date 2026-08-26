@@ -37,17 +37,30 @@ export GH_CONFIG_DIR="$HOME/.claude/night/gh-null"
 # scripts. `night op ...` still works: fnox exec overrides this with the
 # real SA token.
 export OP_SERVICE_ACCOUNT_TOKEN="ops_NIGHT_SENTINEL_invalid_on_purpose_use_night_op"
-export GIT_CONFIG_COUNT=7
-export GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false
-export GIT_CONFIG_KEY_1=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_1=git@github.com:
-export GIT_CONFIG_KEY_2=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_2=ssh://git@github.com/
-export GIT_CONFIG_KEY_3=credential.helper GIT_CONFIG_VALUE_3=
-export GIT_CONFIG_KEY_4=credential.helper GIT_CONFIG_VALUE_4='!gh auth git-credential'
+# Git config as GIT_CONFIG_KEY_i/VALUE_i pairs with a DERIVED count: a
+# hand-maintained GIT_CONFIG_COUNT drifts against the pairs — too low
+# silently drops trailing entries (system values win), too high fatals
+# every night git command. The builder makes misalignment unrepresentable.
+# (YUZ-92)
+_night_git_n=0
+_night_git_cfg() {
+    # shellcheck disable=SC2163  # dynamic names are the point of the builder
+    export "GIT_CONFIG_KEY_${_night_git_n}=$1" "GIT_CONFIG_VALUE_${_night_git_n}=$2"
+    _night_git_n=$((_night_git_n + 1))
+}
+_night_git_cfg commit.gpgsign false
+_night_git_cfg url.https://github.com/.insteadOf git@github.com:
+_night_git_cfg url.https://github.com/.insteadOf ssh://git@github.com/
+_night_git_cfg credential.helper ""
+_night_git_cfg credential.helper '!gh auth git-credential'
 # The insteadOf pair above only covers github.com; user gitconfig may rewrite
 # OTHER hosts https->ssh (url.<ssh>.insteadOf), and insteadOf longest-match
 # cannot be neutralized per-host from here. Kill the whole class instead: any
 # git that reaches ssh fails in milliseconds, not hanging on the locked
 # 1Password agent until morning. (Bare ssh itself is handled in ssh_config:
 # ~/.claude/night/ssh-night.conf, Include'd by the owner.)
-export GIT_CONFIG_KEY_5=core.sshCommand GIT_CONFIG_VALUE_5=/usr/bin/false
-export GIT_CONFIG_KEY_6=tag.gpgsign GIT_CONFIG_VALUE_6=false
+_night_git_cfg core.sshCommand /usr/bin/false
+_night_git_cfg tag.gpgsign false
+export GIT_CONFIG_COUNT="$_night_git_n"
+unset -f _night_git_cfg
+unset _night_git_n
