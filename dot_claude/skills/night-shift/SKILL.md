@@ -51,6 +51,9 @@ CLI sessions.**
 - **Task source**: the pre-agreed Linear list. No new scope at night. Update
   task states and comment as you go (T0); comments meet the ticket-body bar
   (full sentences a stranger can read, codenames glossed on first use).
+  Write through the `mcp__linear-bot__*` tools — the "Night Shift Agent"
+  identity, so the tracker records the agent, not the owner. The
+  owner-identity connection is read-only at night; the gate enforces both.
 - **Credentialed work happens under $HOME.** The lease ledger is pinned to
   the global config; `/private/tmp` scratch is fine for everything that never
   needs `night <cmd>`.

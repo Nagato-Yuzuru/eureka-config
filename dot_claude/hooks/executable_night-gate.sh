@@ -83,17 +83,30 @@ allow() {
 gate_mcp() { # TOOL_NAME
     local t="$1"
     case "$t" in
-        mcp__linear-server__*)
+        mcp__linear-bot__*)
             # Linear is the night task tracker: allow-listed to reads plus
             # private task state, not open. save_issue/save_comment are T0
             # (Linear-internal notes, the skill's own queue/report mirror),
             # NOT the tier table's T2 "comment", which means public GitHub
             # PR/issue speech. Merging diffs, submitting reviews and
-            # publishing issues act on the world: deny.
-            case "${t#mcp__linear-server__}" in
+            # publishing issues act on the world: deny. Task-state writes
+            # ride THIS connection (the "Night Shift Agent" app identity),
+            # so the tracker records the agent, not the owner.
+            case "${t#mcp__linear-bot__}" in
                 list_* | get_* | search_documentation | extract_images | save_issue | save_comment) allow ;;
                 *)
                     emit_deny "night: Linear is allow-listed to reads + task state (list_*/get_*/save_issue/save_comment). '$t' merges, reviews or publishes — T2/T3 outbound: queue it or propose it in the shift report." ;;
+            esac
+            ;;
+        mcp__linear-server__*)
+            # The owner-identity connection is read-only at night: writes
+            # through it would attribute agent activity to the owner.
+            case "${t#mcp__linear-server__}" in
+                list_* | get_* | search_documentation | extract_images) allow ;;
+                save_issue | save_comment)
+                    emit_deny "night: task-state writes carry the agent identity — use the mcp__linear-bot__ equivalent of '$t' so the tracker records the agent, not the owner." ;;
+                *)
+                    emit_deny "night: Linear is allow-listed to reads + task state (list_*/get_* here; save_issue/save_comment via linear-bot). '$t' merges, reviews or publishes — T2/T3 outbound: queue it or propose it in the shift report." ;;
             esac
             ;;
         mcp__claude_ai_*)
@@ -362,6 +375,22 @@ cmd_preflight() {
         ok "fnox present ($(fnox --version 2> /dev/null || echo '?'))"
     else
         bad "fnox not installed"
+    fi
+    # linear-bot: night task-state writes carry the agent identity; a dead
+    # token turns them into fast failures mid-shift
+    if [[ -f "$NIGHT_DIR/linear-bot-expiry" ]]; then
+        local exp days
+        exp=$(cat "$NIGHT_DIR/linear-bot-expiry" 2> /dev/null || echo 0)
+        days=$(((exp - $(date +%s)) / 86400))
+        if ((days < 0)); then
+            soft "linear-bot token expired — run linear-bot-remint (day, presence-gated)"
+        elif ((days < 5)); then
+            soft "linear-bot token expires in ${days}d — run linear-bot-remint before a long stretch"
+        else
+            ok "linear-bot token alive (${days}d left)"
+        fi
+    else
+        soft "linear-bot token expiry unknown — run linear-bot-remint once"
     fi
     # lease-independent on purpose: `fnox get` resolves the single secret, so
     # a dead GitHub lease cannot mask a healthy (or broken) 1Password channel

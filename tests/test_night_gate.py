@@ -86,11 +86,18 @@ def test_bash_never_parsed(tmp_path: Path, command: str) -> None:
 # --- MCP tool names ---------------------------------------------------------
 
 DENY_MCP = [
-    # Linear is allow-listed (reads + task-state), not allow-all
+    # Linear owner-identity connection: reads only at night — task-state
+    # writes carry the bot identity via mcp__linear-bot__*
     "mcp__linear-server__merge_diff",
     "mcp__linear-server__submit_diff_review",
     "mcp__linear-server__share_issue",
     "mcp__linear-server__save_document",
+    "mcp__linear-server__save_issue",
+    "mcp__linear-server__save_comment",
+    # bot connection: task state yes, acting on the world no
+    "mcp__linear-bot__merge_diff",
+    "mcp__linear-bot__share_issue",
+    "mcp__linear-bot__some_future_tool",  # fail-closed here too
     # claude.ai connectors: whole prefix, reads included (a prompt-injection
     # channel)
     "mcp__claude_ai_Gmail__get_message",
@@ -126,11 +133,13 @@ DENY_MCP = [
 ]
 
 ALLOW_MCP = [
-    # Linear is the night task tracker (separate MCP, not a claude.ai connector)
-    "mcp__linear-server__save_issue",
-    "mcp__linear-server__save_comment",
+    # Linear reads ride either connection; task-state writes only the bot
     "mcp__linear-server__list_issues",
     "mcp__linear-server__get_issue",
+    "mcp__linear-bot__list_issues",
+    "mcp__linear-bot__get_issue",
+    "mcp__linear-bot__save_issue",
+    "mcp__linear-bot__save_comment",
     # read-only browsing stays open
     "mcp__claude-in-chrome__navigate",
     "mcp__claude-in-chrome__read_page",
@@ -328,7 +337,7 @@ def test_bare_gh_dies_fast_under_night_env(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(shutil.which("op") is None, reason="op not installed")
-def test_op_dies_fast_on_sentinel(tmp_path: Path) -> None:
+def test_op_dies_fast_on_sentinel() -> None:
     proc = subprocess.run(
         ["op", "vault", "list"],
         capture_output=True,

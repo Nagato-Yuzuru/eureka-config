@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# linear-bot-remint: mint a fresh 30-day Linear app token ("Night Shift
+# Agent") and rewire the linear-bot MCP connection to carry it, so agent
+# sessions write to the tracker under the agent identity. Day-only by
+# construction: the client secret resolves through 1Password, which is
+# locked at night and sentinel-killed in night shells — running this is
+# itself a presence-gated act. Preflight warns when expiry nears.
+set -euo pipefail
+
+CFG="$HOME/.config/fnox/config.toml"
+CLIENT_ID="07867befb39e6f9f66fa131a7eb09fb7"
+EXPIRY_FILE="$HOME/.claude/night/linear-bot-expiry"
+
+if [[ -e "$HOME/.claude/night/active.json" ]]; then
+    echo "linear-bot-remint: night flag is up — minting is a day capability" >&2
+    exit 3
+fi
+
+secret=$(fnox -c "$CFG" -P day get LINEAR_BOT_CLIENT_SECRET)
+resp=$(curl -fsS -X POST https://api.linear.app/oauth/token \
+    -d grant_type=client_credentials -d "client_id=$CLIENT_ID" \
+    --data-urlencode "client_secret=$secret" \
+    -d "scope=read,write,app:assignable,app:mentionable")
+token=$(jq -r '.access_token // empty' <<< "$resp")
+if [[ -z "$token" ]]; then
+    jq 'del(.access_token)' <<< "$resp" >&2
+    exit 1
+fi
+expires_in=$(jq -r '.expires_in' <<< "$resp")
+
+claude mcp remove -s user linear-bot > /dev/null 2>&1 || true
+claude mcp add -s user --transport http linear-bot https://mcp.linear.app/mcp \
+    --header "Authorization: Bearer $token" > /dev/null
+mkdir -p "$(dirname "$EXPIRY_FILE")"
+echo "$(($(date +%s) + expires_in))" > "$EXPIRY_FILE"
+echo "linear-bot reminted: token valid $((expires_in / 86400)) days"
