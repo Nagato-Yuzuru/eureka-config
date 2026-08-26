@@ -192,7 +192,7 @@ TOTAL_STAGES=6
 
 NIGHT_DIR="$HOME/.claude/night"
 
-banner "Night-shift v4 provisioning"
+banner "Night-shift v5 provisioning"
 
 # ── Stage 1: night GitHub App ─────────────────────────────────────────────
 stage "GitHub — the night App (scope lives server-side)"
@@ -208,36 +208,53 @@ step "Note the Client ID, then: Install App → Only select repositories"
 step "  → pick the repos night shifts may push to (the allowlist)"
 ask CLIENT_ID "Client ID (Iv23...):"
 if [[ -n "${CLIENT_ID:-}" ]]; then
-  note "put it in chezmoi: dot_config/fnox/config.toml → [profiles.night.leases.github] client_id"
+  # the config is a chezmoi TEMPLATE: editing a plain config.toml source
+  # would create a second source for the same target (duplicate-target on
+  # apply) — the template is the only home
+  note "put it in chezmoi: dot_config/fnox/config.toml.tmpl → [profiles.night.leases.github] client_id, then chezmoi apply"
 fi
 
 # ── Stage 2: 1Password night vault + service account (CLI) ────────────────
 stage "1Password — night vault and read-only service account"
 say "The night vault is the ONLY 1Password surface night sessions can read."
 say "This stage runs op commands directly — approve the Touch ID prompts."
-if op vault get Night >/dev/null 2>&1; then
-  note "vault 'Night' already exists"
+if ! command -v op >/dev/null 2>&1; then
+  # set -e would kill the wizard on the bare op call — and machines
+  # without op (the linux boxes stage 4 provisions) legitimately run this
+  warn "op CLI not installed — provision the vault/SA from the mac that has 1Password"
+  SKIPPED+=("1Password night vault + service account (op missing)")
 else
-  op vault create Night >/dev/null && printf '  %s✓ created%s vault Night\n' "$GREEN" "$RESET"
-fi
-if confirm "Create service account 'claude-night' (read-only on night vault)?"; then
-  SA_OUT=$(op service-account create claude-night --vault "Night:read_items" --format=json)
-  SA_TOK=$(printf '%s' "$SA_OUT" | jq -r '.token // .secret // empty')
-  if [[ -n "$SA_TOK" ]]; then
-    # one write path, loudly: a fallback that silently changed the config or
-    # profile would store the token somewhere preflight never looks
-    fnox -c "$HOME/.config/fnox/config.toml" -P night set OP_SERVICE_ACCOUNT_TOKEN "$SA_TOK" --provider keychain >/dev/null
-    printf '  %s✓ stored%s SA token via fnox keychain provider (global config, night profile)\n' "$GREEN" "$RESET"
+  if op vault get Night >/dev/null 2>&1; then
+    note "vault 'Night' already exists"
   else
-    warn "could not parse token from op output — create the SA in the web UI and run: fnox set OP_SERVICE_ACCOUNT_TOKEN <token> --provider keychain"
-    SKIPPED+=("SA token storage")
+    op vault create Night >/dev/null && printf '  %s✓ created%s vault Night\n' "$GREEN" "$RESET"
+  fi
+  if confirm "Create service account 'claude-night' (read-only on night vault)?"; then
+    SA_OUT=$(op service-account create claude-night --vault "Night:read_items" --format=json)
+    SA_TOK=$(printf '%s' "$SA_OUT" | jq -r '.token // .secret // empty')
+    if [[ -n "$SA_TOK" ]]; then
+      # one write path, loudly: a fallback that silently changed the config or
+      # profile would store the token somewhere preflight never looks
+      if fnox -c "$HOME/.config/fnox/config.toml" -P night set OP_SERVICE_ACCOUNT_TOKEN "$SA_TOK" --provider keychain >/dev/null; then
+        printf '  %s✓ stored%s SA token via fnox keychain provider (global config, night profile)\n' "$GREEN" "$RESET"
+      else
+        warn "fnox keychain store FAILED — store it yourself: fnox -c ~/.config/fnox/config.toml -P night set OP_SERVICE_ACCOUNT_TOKEN <token> --provider keychain"
+        SKIPPED+=("SA token storage")
+      fi
+    else
+      warn "could not parse token from op output — create the SA in the web UI and run: fnox set OP_SERVICE_ACCOUNT_TOKEN <token> --provider keychain"
+      SKIPPED+=("SA token storage")
+    fi
   fi
 fi
 
 # ── Stage 3: canary item ──────────────────────────────────────────────────
 stage "Canary — one readable item proves the whole vault channel"
 say "night op read op://Night/canary/password is the standing end-to-end check."
-if op item get canary --vault Night >/dev/null 2>&1; then
+if ! command -v op >/dev/null 2>&1; then
+  warn "op CLI not installed — create the canary from the mac (see stage 2)"
+  SKIPPED+=("canary item (op missing)")
+elif op item get canary --vault Night >/dev/null 2>&1; then
   note "canary already exists"
 else
   op item create --category=password --title=canary --vault Night password=night-canary-ok >/dev/null \
@@ -252,14 +269,40 @@ say "linux has no unlocked secret service: night custody rides an age key."
 say "Recipient + ciphertext are committed (.chezmoidata/night.toml — both"
 say "public-safe); the private key travels only owner→machine."
 if confirm "Provision a linux machine now?"; then
-  step "Generate on this mac: age-keygen -o /tmp/night-age.key"
-  step "Record the public key (age1...) as [night.age] recipient in .chezmoidata/night.toml"
-  step "Encrypt the SA token to it:"
-  step "  fnox -c ~/.config/fnox/config.toml -P night get OP_SERVICE_ACCOUNT_TOKEN \\"
-  step "    | age -r <recipient> | base64 > /tmp/sa.b64"
-  step "Paste /tmp/sa.b64 as sa_token_ciphertext in .chezmoidata/night.toml; commit + chezmoi apply"
-  step "Move /tmp/night-age.key to the linux machine as ~/.config/fnox/age.key (chmod 600); remove the /tmp copies"
-  pause "Linux custody provisioned?"
+  # the wizard runs the keygen + encryption pipeline itself (the other
+  # stages already execute op/fnox directly): a hand-typed pipeline and a
+  # hand-pasted few-hundred-char base64 only surface truncation on the
+  # OTHER machine's preflight, after this stage said to delete the key.
+  # Only the private-key hand-off stays manual — that is custody itself.
+  if ! command -v age-keygen >/dev/null 2>&1 || ! command -v age >/dev/null 2>&1; then
+    warn "age/age-keygen not on PATH (mise pins them on darwin: mise install) — rerun this stage after installing"
+    SKIPPED+=("linux age custody (age missing)")
+  else
+    # a 700 temp DIR, not mktemp's pre-created file: age-keygen refuses to
+    # write over an existing path
+    KEYFILE="$(mktemp -d -t night-age)/night-age.key"
+    if ! age-keygen -o "$KEYFILE" >/dev/null 2>&1; then
+      warn "age-keygen failed — rerun this stage"
+      SKIPPED+=("linux age custody (keygen failed)")
+    else
+      RECIPIENT=$(age-keygen -y "$KEYFILE")
+      if CIPHERTEXT=$(fnox -c "$HOME/.config/fnox/config.toml" -P night get OP_SERVICE_ACCOUNT_TOKEN \
+          | age -r "$RECIPIENT" | base64 | tr -d '\n') && [[ -n "$CIPHERTEXT" ]]; then
+        printf '\n'
+        say "Committed halves — paste into .chezmoidata/night.toml under [night.age]:"
+        printf '\n    recipient = "%s"\n    sa_token_ciphertext = "%s"\n\n' "$RECIPIENT" "$CIPHERTEXT"
+        step "Update .chezmoidata/night.toml with the two values above; commit + chezmoi apply"
+        step "Move the private key to the linux machine as ~/.config/fnox/age.key (chmod 600):"
+        step "  $KEYFILE"
+        step "After the transfer, delete the local copy: rm -r ${KEYFILE%/*}"
+        pause "Linux custody provisioned?"
+      else
+        rm -rf "${KEYFILE%/*}"
+        warn "could not resolve + encrypt the SA token (stage 2 keychain custody in place?)"
+        SKIPPED+=("linux age custody (SA resolution failed)")
+      fi
+    fi
+  fi
 else
   note "skipped — on linux the config renders an UNPROVISIONED marker until this runs"
   SKIPPED+=("linux age custody")
