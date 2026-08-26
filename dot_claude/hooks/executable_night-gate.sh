@@ -201,9 +201,13 @@ die() {
 # env.sh directly (content check, works while the flag is down); cmd_on
 # re-runs it POST-FLIP through the real zshenv chain (wiring check, only
 # possible once the flag exists). Values must match HY_WANT exactly.
+# Both loaders SEED GIT_SSH_COMMAND/GIT_SSH (HY_SEED): env.sh must
+# actively clear inherited overrides — they outrank core.sshCommand, so
+# "unset" here is a real property, not an env -i vacuity. (YUZ-89)
 # shellcheck disable=SC2016  # the probe must expand in zsh, not here
-HY_PROBE='print -r -- "$GH_CONFIG_DIR|$FNOX_NON_INTERACTIVE|$SSH_AUTH_SOCK|${OP_SERVICE_ACCOUNT_TOKEN%%_*}|$(git config --get commit.gpgsign)|$(git config --get tag.gpgsign)|$(git config --get core.sshCommand)"'
-HY_WANT="$HOME/.claude/night/gh-null|1||ops|false|false|/usr/bin/false"
+HY_PROBE='print -r -- "$GH_CONFIG_DIR|$FNOX_NON_INTERACTIVE|$SSH_AUTH_SOCK|${OP_SERVICE_ACCOUNT_TOKEN%%_*}|$(git config --get commit.gpgsign)|$(git config --get tag.gpgsign)|$(git config --get core.sshCommand)|${GIT_SSH_COMMAND-unset}|${GIT_SSH-unset}"'
+HY_WANT="$HOME/.claude/night/gh-null|1||ops|false|false|/usr/bin/false|unset|unset"
+HY_SEED=(GIT_SSH_COMMAND=/bin/echo GIT_SSH=/bin/echo)
 
 cmd_on() {
     local mode="full" scope="[]"
@@ -238,7 +242,7 @@ cmd_on() {
     # are only testable END TO END while the flag exists. Verify now and
     # revert rather than leave a night armed on dead hygiene.
     local pf_fail='' hy sshg
-    hy=$(env -i HOME="$HOME" PATH="$PATH" CLAUDECODE=1 zsh -c "$HY_PROBE" 2> /dev/null || true)
+    hy=$(env -i HOME="$HOME" PATH="$PATH" CLAUDECODE=1 "${HY_SEED[@]}" zsh -c "$HY_PROBE" 2> /dev/null || true)
     if [[ "$hy" == "$HY_WANT" ]]; then
         echo "  ✓ hygiene live end to end (zshenv chain sourced env.sh under the flag)"
     else
@@ -251,6 +255,15 @@ cmd_on() {
         echo "  ✓ ssh Match live (identityagent none, batchmode yes)"
     else
         pf_fail+="ssh -G does not show the night Match in effect; "
+    fi
+    # IdentityFile ACCUMULATES across blocks: the night /dev/null replaces
+    # the default key list, but an explicit IdentityFile elsewhere in the
+    # config would still ride. The armed property is the exact list. (YUZ-89)
+    if [[ "$(grep '^identityfile ' <<< "$sshg" || true)" == "identityfile /dev/null" ]] \
+        && grep -q '^identitiesonly yes$' <<< "$sshg"; then
+        echo "  ✓ ssh identities neutralized (identityfile is exactly /dev/null, identitiesonly yes)"
+    else
+        pf_fail+="ssh -G identity list is not exactly /dev/null with identitiesonly yes (an on-disk key could authenticate as the owner); "
     fi
     if [[ -n "$pf_fail" ]]; then
         command rm -f "$ACTIVE"
@@ -377,10 +390,10 @@ cmd_preflight() {
         bad hygiene "no non-commented night/env.sh line in ~/.zshenv — hygiene would never load"
     fi
     local hy
-    hy=$(env -i HOME="$HOME" PATH="$PATH" CLAUDECODE=1 zsh -c \
+    hy=$(env -i HOME="$HOME" PATH="$PATH" CLAUDECODE=1 "${HY_SEED[@]}" zsh -c \
         "source '$HOME/.claude/night/env.sh'; $HY_PROBE" 2> /dev/null || true)
     if [[ "$hy" == "$HY_WANT" ]]; then
-        ok hygiene "hygiene env sources clean: gh isolated, fnox headless, ssh agent dead, op sentinel armed, signing off, git-over-ssh killed"
+        ok hygiene "hygiene env sources clean: gh isolated, fnox headless, ssh agent dead, op sentinel armed, signing off, git-over-ssh killed, inherited GIT_SSH* overrides cleared"
     else
         bad hygiene "hygiene env content wrong when sourced (got '$hy')"
     fi
@@ -419,12 +432,9 @@ cmd_preflight() {
     else
         ok ssh "night Include precedes any IdentityAgent (order verified; effective value re-checked post-flip)"
     fi
-    # regression: on-disk private keys would let night ssh succeed as the owner
-    if grep -lE -- '-----BEGIN .*PRIVATE KEY' "$HOME"/.ssh/* 2> /dev/null | grep -q .; then
-        bad ssh "private key files on disk in ~/.ssh — night ssh could succeed with the owner's identity"
-    else
-        ok ssh "no on-disk ssh private keys"
-    fi
+    # (the on-disk private-key grep is gone: IdentityFile /dev/null +
+    # IdentitiesOnly in ssh-night.conf make keys unreachable by FORCE, and
+    # cmd_on verifies the effective identity list post-flip — YUZ-89)
     # file-tool writes to the queue/report dirs must not prompt at night
     if "$HOME/.claude/hooks/path-gate.sh" check "$NIGHT_DIR" w > /dev/null 2>&1; then
         ok path-gate "path-gate grants w on $NIGHT_DIR (queue + report writes)"

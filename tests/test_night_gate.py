@@ -296,12 +296,24 @@ SENTINEL = "ops_NIGHT_SENTINEL_invalid_on_purpose_use_night_op"
 
 
 def night_env(tmp_path: Path) -> dict[str, str]:
-    """The night hygiene env exactly as env.sh produces it, plus a bare HOME."""
+    """The night hygiene env exactly as env.sh produces it, plus a bare HOME.
+
+    Seeded with the inherited overrides env.sh must CLEAR (YUZ-89): an env
+    GIT_SSH_COMMAND outranks core.sshCommand, an env GH_TOKEN outranks the
+    isolated gh config dir — surviving the source would reopen the class.
+    """
     proc = subprocess.run(
         ["zsh", "-c", f'source "{ENV_SH}"; env'],
         capture_output=True,
         text=True,
-        env={"PATH": os.environ["PATH"], "HOME": str(tmp_path)},
+        env={
+            "PATH": os.environ["PATH"],
+            "HOME": str(tmp_path),
+            "GIT_SSH_COMMAND": "/bin/echo",
+            "GIT_SSH": "/bin/echo",
+            "GH_TOKEN": "ghp_day_leak",
+            "GITHUB_TOKEN": "ghp_day_leak",
+        },
         timeout=15,
     )
     assert proc.returncode == 0, proc.stderr
@@ -318,6 +330,13 @@ def test_env_sh_values(tmp_path: Path) -> None:
     assert env["GIT_CONFIG_COUNT"] == "7"
     assert env["GIT_CONFIG_VALUE_0"] == "false"  # commit.gpgsign
     assert env["GIT_CONFIG_VALUE_5"] == "/usr/bin/false"  # core.sshCommand
+
+
+def test_env_sh_clears_inherited_overrides(tmp_path: Path) -> None:
+    # seeded in night_env; sourcing env.sh must remove every one
+    env = night_env(tmp_path)
+    for var in ("GIT_SSH_COMMAND", "GIT_SSH", "GH_TOKEN", "GITHUB_TOKEN"):
+        assert var not in env, f"{var} survived env.sh"
 
 
 @pytest.mark.skipif(shutil.which("gh") is None, reason="gh not installed")
@@ -383,12 +402,20 @@ def test_ssh_night_conf_kills_agent_when_flag_on(tmp_path: Path) -> None:
     on = effective(flag=True)
     assert "identityagent none" in on
     assert "batchmode yes" in on
+    # identities neutralized structurally (YUZ-89): /dev/null REPLACES the
+    # default on-disk key list, identitiesonly pins ssh to configured files
+    on_files = [ln for ln in on.splitlines() if ln.startswith("identityfile ")]
+    assert on_files == ["identityfile /dev/null"]
+    assert "identitiesonly yes" in on
     # day: the later Host block's agent wins again (first-value semantics
     # only bite while the Match matches). ssh -G prints ~ expanded via
     # pw_dir, so match on the suffix.
     off = effective(flag=False)
     assert "identityagent none" not in off
     assert "day-agent.sock" in off
+    # the default key list is back: night neutralization has no day residue
+    assert "identityfile /dev/null" not in off
+    assert any("id_ed25519" in ln for ln in off.splitlines())
 
 
 # --- zshenv guard ------------------------------------------------------------
@@ -789,4 +816,17 @@ def test_on_reverts_when_ssh_match_shadowed(tmp_path: Path) -> None:
     p = h.run_on()
     assert p.returncode == 3, p.stdout + p.stderr
     assert "ssh" in p.stderr
+    assert not (h.night / "active.json").exists()
+
+
+def test_on_reverts_when_explicit_identityfile_rides(tmp_path: Path) -> None:
+    # IdentityFile accumulates across blocks: /dev/null replaces only the
+    # DEFAULT list, so an explicit day key would still be offered. The
+    # armed property is the exact list — anything else refuses to arm.
+    h = PreflightHarness(tmp_path)
+    conf = h.home / ".ssh" / "config"
+    conf.write_text(conf.read_text() + "Host *\n  IdentityFile ~/.ssh/deploy_key\n")
+    p = h.run_on()
+    assert p.returncode == 3, p.stdout + p.stderr
+    assert "identity list is not exactly /dev/null" in p.stderr
     assert not (h.night / "active.json").exists()

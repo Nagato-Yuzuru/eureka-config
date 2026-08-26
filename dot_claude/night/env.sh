@@ -13,6 +13,12 @@
 
 export SSH_AUTH_SOCK=""
 export GIT_TERMINAL_PROMPT=0
+# Inherited overrides reopen whole classes the vars below close: an env
+# GIT_SSH_COMMAND/GIT_SSH outranks core.sshCommand=/usr/bin/false (git
+# would exec the day ssh), and gh prefers an env GH_TOKEN/GITHUB_TOKEN
+# over the isolated config dir. Clear them; `night gh` still works (fnox
+# exec injects its token into the child, after this ran). (YUZ-89)
+unset GIT_SSH_COMMAND GIT_SSH GH_TOKEN GITHUB_TOKEN
 # Night is headless: a dead lease must fail fast and classifiable, never poll
 # a device-flow code nobody will enter. FNOX_NON_INTERACTIVE covers device
 # and browser auth (FNOX_PROMPT_AUTH does not), and also blocks fnox's own
