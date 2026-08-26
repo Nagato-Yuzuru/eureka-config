@@ -497,7 +497,18 @@ if [[ -z "${GH_TOKEN:-}" ]]; then
   echo "gh: To get started with GitHub CLI, please run: gh auth login" >&2
   exit 1
 fi
+ghmode=$(cat "@GHMODE@" 2>/dev/null || echo normal)
 if [[ "$*" == "api user -q .login" ]]; then echo nightbot; fi
+if [[ "$*" == "api user/installations" ]]; then
+  if [[ "$ghmode" == widened ]]; then
+    echo '{"installations":[{"id":7,"permissions":{"contents":"write","metadata":"read","pull_requests":"write"}}]}'
+  else
+    echo '{"installations":[{"id":7,"permissions":{"contents":"write","metadata":"read"}}]}'
+  fi
+fi
+if [[ "$*" == "api user/installations/7/repositories --jq .repositories[].full_name" ]]; then
+  echo "owner/repo-night"
+fi
 exit 0
 """
 
@@ -548,7 +559,9 @@ class PreflightHarness:
             '[[ -e "$HOME/.claude/night/active.json" && -n "${CLAUDECODE:-}" ]] '
             '&& source "$HOME/.claude/night/env.sh"\ntrue\n'
         )
-        (home / ".ssh" / "config").write_text("Include ~/.claude/night/ssh-night.conf\n")
+        # absolute path: ssh expands ~ in Include via pw_dir (the REAL
+        # home), which would escape the fake home entirely
+        (home / ".ssh" / "config").write_text(f"Include {home}/.claude/night/ssh-night.conf\n")
         (home / ".claude" / "settings.json").write_text(
             json.dumps(
                 {
@@ -570,10 +583,12 @@ class PreflightHarness:
 
         self.fnox_mode = tmp_path / "fnox-mode"  # lease-ok | lease-absent | fabric-broken
         self.claude_mode = tmp_path / "claude-mode"  # present | absent
+        self.gh_mode = tmp_path / "gh-mode"  # normal | widened
         self.fnox_mode.write_text("lease-ok")
         self.claude_mode.write_text("present")
+        self.gh_mode.write_text("normal")
         _stub(stubs / "fnox", FNOX_STUB.replace("@MODE@", str(self.fnox_mode)))
-        _stub(stubs / "gh", GH_STUB)
+        _stub(stubs / "gh", GH_STUB.replace("@GHMODE@", str(self.gh_mode)))
         _stub(stubs / "op", OP_STUB)
         _stub(stubs / "claude", CLAUDE_STUB.replace("@MODE@", str(self.claude_mode)))
         self.env = {"PATH": f"{stubs}:{os.environ['PATH']}", "HOME": str(home)}
@@ -581,9 +596,18 @@ class PreflightHarness:
     def expiry_in(self, seconds: int) -> None:
         (self.night / "linear-bot-expiry").write_text(str(int(time.time()) + seconds))
 
-    def run(self) -> subprocess.CompletedProcess[str]:
+    def run(self, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["bash", str(GATE), "preflight"],
+            capture_output=True,
+            text=True,
+            env={**self.env, **(extra_env or {})},
+            timeout=120,
+        )
+
+    def run_on(self) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", str(GATE), "on", "--mode", "full"],
             capture_output=True,
             text=True,
             env=self.env,
@@ -667,3 +691,102 @@ def test_preflight_expiring_token_warns(tmp_path: Path) -> None:
     p = h.run()
     assert p.returncode == 2, p.stdout + p.stderr
     assert "token expires in 2d" in p.stdout
+
+
+# --- preflight probes verify the channel, not a proxy (YUZ-88) ---------------
+
+
+def test_preflight_detects_day_gh_token_leak(tmp_path: Path) -> None:
+    # gh prefers an env token over any config dir: an inherited day
+    # GH_TOKEN defeats the gh-null isolation, and the probe must say so
+    # instead of neutralizing the token before testing
+    h = PreflightHarness(tmp_path)
+    h.expiry_in(20 * 86400)
+    p = h.run(extra_env={"GH_TOKEN": "ghp_day_leak"})
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert "day auth" in p.stdout
+    assert "broken:" in p.stdout and "hygiene" in p.stdout
+
+
+def test_preflight_widened_app_permissions_fail(tmp_path: Path) -> None:
+    # T2 rests on the App having no PR/issue permissions; a widened App
+    # must fail the shift before arming, not silently convert 403s
+    h = PreflightHarness(tmp_path)
+    h.expiry_in(20 * 86400)
+    h.gh_mode.write_text("widened")
+    p = h.run()
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert "pull_requests:write" in p.stdout
+    assert "preflight FAILED — broken: github-lease." in p.stdout
+
+
+def test_preflight_app_permissions_asserted_when_clean(tmp_path: Path) -> None:
+    h = PreflightHarness(tmp_path)
+    h.expiry_in(20 * 86400)
+    p = h.run()
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "App permissions are exactly contents:write" in p.stdout
+    assert "owner/repo-night" in p.stdout  # scope listing still rendered
+
+
+def test_preflight_identityagent_before_include_fails(tmp_path: Path) -> None:
+    # the real ssh property is ORDER (first value wins), not Include
+    # existence: a Host block above the Include holds the day agent all
+    # night
+    h = PreflightHarness(tmp_path)
+    h.expiry_in(20 * 86400)
+    conf = h.home / ".ssh" / "config"
+    conf.write_text("Host *\n  IdentityAgent ~/day-agent.sock\n" + conf.read_text())
+    p = h.run()
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert "precedes the night Include" in p.stdout
+    assert "ssh" in p.stdout.split("broken:")[1]
+
+
+def test_preflight_commented_zshenv_guard_fails(tmp_path: Path) -> None:
+    # a commented-out guard used to green the substring grep while
+    # delivering zero hygiene all night
+    h = PreflightHarness(tmp_path)
+    h.expiry_in(20 * 86400)
+    (h.home / ".zshenv").write_text(
+        '# [[ -e "$HOME/.claude/night/active.json" ]] && source "$HOME/.claude/night/env.sh"\ntrue\n'
+    )
+    p = h.run()
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert "hygiene would never load" in p.stdout
+
+
+# --- cmd_on: post-flip re-verification (YUZ-88) ------------------------------
+# zshenv wiring and the ssh Match only become testable end to end once the
+# flag exists; arming verifies them LIVE and reverts rather than leave a
+# night armed on dead hygiene.
+
+
+def test_on_arms_when_live_hygiene_holds(tmp_path: Path) -> None:
+    h = PreflightHarness(tmp_path)
+    p = h.run_on()
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "hygiene live end to end" in p.stdout
+    assert "ssh Match live" in p.stdout
+    assert "night mode ON" in p.stdout
+    assert (h.night / "active.json").exists()
+
+
+def test_on_reverts_when_zshenv_chain_dead(tmp_path: Path) -> None:
+    h = PreflightHarness(tmp_path)
+    (h.home / ".zshenv").write_text("true\n")  # wiring gone: guard never fires
+    p = h.run_on()
+    assert p.returncode == 3, p.stdout + p.stderr
+    assert "post-flip verification failed" in p.stderr
+    assert "zshenv" in p.stderr
+    assert not (h.night / "active.json").exists()
+
+
+def test_on_reverts_when_ssh_match_shadowed(tmp_path: Path) -> None:
+    h = PreflightHarness(tmp_path)
+    conf = h.home / ".ssh" / "config"
+    conf.write_text("Host *\n  IdentityAgent ~/day-agent.sock\n" + conf.read_text())
+    p = h.run_on()
+    assert p.returncode == 3, p.stdout + p.stderr
+    assert "ssh" in p.stderr
+    assert not (h.night / "active.json").exists()

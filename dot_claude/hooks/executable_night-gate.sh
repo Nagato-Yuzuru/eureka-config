@@ -197,6 +197,14 @@ die() {
     exit 3
 }
 
+# The hygiene fingerprint: ONE payload, two loaders. Preflight sources
+# env.sh directly (content check, works while the flag is down); cmd_on
+# re-runs it POST-FLIP through the real zshenv chain (wiring check, only
+# possible once the flag exists). Values must match HY_WANT exactly.
+# shellcheck disable=SC2016  # the probe must expand in zsh, not here
+HY_PROBE='print -r -- "$GH_CONFIG_DIR|$FNOX_NON_INTERACTIVE|$SSH_AUTH_SOCK|${OP_SERVICE_ACCOUNT_TOKEN%%_*}|$(git config --get commit.gpgsign)|$(git config --get tag.gpgsign)|$(git config --get core.sshCommand)"'
+HY_WANT="$HOME/.claude/night/gh-null|1||ops|false|false|/usr/bin/false"
+
 cmd_on() {
     local mode="full" scope="[]"
     while (($#)); do
@@ -226,6 +234,28 @@ cmd_on() {
     command -v fnox > /dev/null 2>&1 && fnox daemon clear > /dev/null 2>&1 || true
     jq -n --arg m "$mode" --argjson s "$scope" --arg ts "$ts" \
         '{since: $ts, mode: $m, scope: $s, confirmed_at: $ts}' > "$ACTIVE"
+    # Post-flip re-verification (YUZ-88): zshenv wiring and the ssh Match
+    # are only testable END TO END while the flag exists. Verify now and
+    # revert rather than leave a night armed on dead hygiene.
+    local pf_fail='' hy sshg
+    hy=$(env -i HOME="$HOME" PATH="$PATH" CLAUDECODE=1 zsh -c "$HY_PROBE" 2> /dev/null || true)
+    if [[ "$hy" == "$HY_WANT" ]]; then
+        echo "  ✓ hygiene live end to end (zshenv chain sourced env.sh under the flag)"
+    else
+        pf_fail+="zshenv chain did not produce the hygiene env (got '$hy'); "
+    fi
+    # -F pins the probe to the user config the Include lives in (and lets
+    # tests point HOME elsewhere); defaults still apply for unset options
+    sshg=$(ssh -F "$HOME/.ssh/config" -G github.com 2> /dev/null || true)
+    if grep -q '^identityagent none$' <<< "$sshg" && grep -q '^batchmode yes$' <<< "$sshg"; then
+        echo "  ✓ ssh Match live (identityagent none, batchmode yes)"
+    else
+        pf_fail+="ssh -G does not show the night Match in effect; "
+    fi
+    if [[ -n "$pf_fail" ]]; then
+        command rm -f "$ACTIVE"
+        die "post-flip verification failed — night NOT armed: ${pf_fail% }"
+    fi
     echo "night mode ON ($mode) — every Claude session on this machine is now governed; ends only with 'off'"
     echo "queue: $QUEUE_DIR/$today/"
 }
@@ -264,7 +294,10 @@ cmd_status() {
 # keychain, shim): do not start a shift. DEGRADE = an optional channel is
 # down (github-lease, linear-bot, sa-vault); the verdict names each one and
 # a reduced night may still be worth arming. Verifies real channels and the
-# enforcement machinery itself, never proxies.
+# enforcement machinery itself, never proxies. Properties that only exist
+# while the flag is up (zshenv chain, the ssh Match) get their honest
+# end-to-end check POST-FLIP in cmd_on; here they are checked as content
+# and ORDER, the strongest pre-flip form (YUZ-88).
 #
 # Verdict discipline (YUZ-86): every probe records into its own CHANNEL
 # register (ok/soft/bad take the channel as their first argument); the
@@ -335,23 +368,32 @@ cmd_preflight() {
     # hygiene channel: the deployed env.sh, really sourced in a clean shell,
     # must set the real values, not just exist under the right filename
     if [[ -f "$HOME/.claude/night/env.sh" ]]; then ok hygiene "env.sh present"; else bad hygiene "env.sh missing"; fi
-    if grep -q 'night/env.sh' "$HOME/.zshenv" 2> /dev/null; then ok hygiene "zshenv guard present"; else bad hygiene "zshenv guard missing from ~/.zshenv"; fi
+    # non-commented wiring only: a commented-out guard once greened this
+    # probe while delivering zero hygiene all night (YUZ-88). The chain
+    # itself is re-verified end to end post-flip (cmd_on).
+    if grep -qE '^[^#]*night/env\.sh' "$HOME/.zshenv" 2> /dev/null; then
+        ok hygiene "zshenv guard wired (non-commented; chain re-verified post-flip)"
+    else
+        bad hygiene "no non-commented night/env.sh line in ~/.zshenv — hygiene would never load"
+    fi
     local hy
-    # shellcheck disable=SC2016  # the zsh script must expand in zsh, not here
     hy=$(env -i HOME="$HOME" PATH="$PATH" CLAUDECODE=1 zsh -c \
-        'source "$HOME/.claude/night/env.sh"; print -r -- "$GH_CONFIG_DIR|$FNOX_NON_INTERACTIVE|$SSH_AUTH_SOCK|${OP_SERVICE_ACCOUNT_TOKEN%%_*}|$(git config --get commit.gpgsign)|$(git config --get tag.gpgsign)|$(git config --get core.sshCommand)"' 2> /dev/null || true)
-    if [[ "$hy" == "$HOME/.claude/night/gh-null|1||ops|false|false|/usr/bin/false" ]]; then
+        "source '$HOME/.claude/night/env.sh'; $HY_PROBE" 2> /dev/null || true)
+    if [[ "$hy" == "$HY_WANT" ]]; then
         ok hygiene "hygiene env sources clean: gh isolated, fnox headless, ssh agent dead, op sentinel armed, signing off, git-over-ssh killed"
     else
         bad hygiene "hygiene env content wrong when sourced (got '$hy')"
     fi
     # feedback layer, really exercised: credential-shaped bare commands must
     # die fast (not hang on anything lockable) with a readable error
+    # the environment is NOT neutralized on purpose: gh prefers an env
+    # token over any config dir, so a day GH_TOKEN in the inherited
+    # environment IS the leak this probe exists to catch (YUZ-88)
     if command -v gh > /dev/null 2>&1; then
-        if timeout 5 env GH_CONFIG_DIR="$HOME/.claude/night/gh-null" GH_TOKEN= GITHUB_TOKEN= gh api user > /dev/null 2>&1; then
-            bad hygiene "bare gh with the night config dir unexpectedly SUCCEEDED (day auth leaking in)"
+        if timeout 5 env GH_CONFIG_DIR="$HOME/.claude/night/gh-null" gh api user > /dev/null 2>&1; then
+            bad hygiene "bare gh with the night config dir unexpectedly SUCCEEDED — day auth (an env GH_TOKEN outranks the config dir) would ride into night shells"
         else
-            ok hygiene "bare gh dies fast under night gh isolation"
+            ok hygiene "bare gh dies fast under night gh isolation (inherited env, no token neutralization)"
         fi
     fi
     if command -v op > /dev/null 2>&1; then
@@ -361,12 +403,21 @@ cmd_preflight() {
             ok hygiene "op dies fast on the sentinel token (no desktop-app hang path)"
         fi
     fi
-    # ssh: the Match-exec include must be wired at the TOP of ~/.ssh/config
+    # ssh: the real property is ORDER — ssh keeps the FIRST value, so the
+    # Include must precede any IdentityAgent directive or the (locked) day
+    # agent stays the identity agent all night. Order is checkable while
+    # the flag is down; the effective value is re-verified post-flip
+    # (cmd_on runs ssh -G once the Match can fire). (YUZ-88)
     if [[ -f "$HOME/.claude/night/ssh-night.conf" ]]; then ok ssh "ssh-night.conf present"; else bad ssh "ssh-night.conf missing"; fi
-    if head -5 "$HOME/.ssh/config" 2> /dev/null | grep -q 'night/ssh-night.conf'; then
-        ok ssh "ssh config Includes ssh-night.conf near the top"
+    local inc_ln agent_ln
+    inc_ln=$(grep -inEm1 -e '^[^#]*Include[[:space:]].*night/ssh-night\.conf' "$HOME/.ssh/config" 2> /dev/null | cut -d: -f1 || true)
+    agent_ln=$(grep -inEm1 -e '^[[:space:]]*IdentityAgent[[:space:]]' "$HOME/.ssh/config" 2> /dev/null | cut -d: -f1 || true)
+    if [[ -z "$inc_ln" ]]; then
+        bad ssh "no non-commented Include of night/ssh-night.conf in \$HOME/.ssh/config"
+    elif [[ -n "$agent_ln" ]] && ((agent_ln < inc_ln)); then
+        bad ssh "IdentityAgent at line $agent_ln precedes the night Include (line $inc_ln) — first-value-wins keeps the day agent all night"
     else
-        bad ssh "ssh config at \$HOME/.ssh/config does not Include night/ssh-night.conf in its first lines (ssh keeps the FIRST value — the Include must come before any IdentityAgent)"
+        ok ssh "night Include precedes any IdentityAgent (order verified; effective value re-checked post-flip)"
     fi
     # regression: on-disk private keys would let night ssh succeed as the owner
     if grep -lE -- '-----BEGIN .*PRIVATE KEY' "$HOME"/.ssh/* 2> /dev/null | grep -q .; then
@@ -431,8 +482,24 @@ cmd_preflight() {
         alive)
             if login=$(FNOX_NON_INTERACTIVE=1 "$NIGHT_SHIM" gh api user -q .login 2> /dev/null); then
                 ok github-lease "github lease alive (as $login)"
+                # T2 rests entirely on the App's permission set staying
+                # contents:write (+ implicit metadata:read). Assert it from
+                # the same response that names the repos: a quietly widened
+                # App (pull_requests:write) would turn T2 403s into
+                # successes and nothing else would ever notice. (YUZ-88)
+                local inst_json widened
+                inst_json=$(FNOX_NON_INTERACTIVE=1 "$NIGHT_SHIM" gh api user/installations 2> /dev/null || true)
+                widened=$(jq -r '[.installations[].permissions | to_entries[]
+                        | select((.key == "contents" and .value == "write") or (.key == "metadata" and .value == "read") | not)
+                        | "\(.key):\(.value)"] | unique | join(", ")' <<< "$inst_json" 2> /dev/null) \
+                    || widened="(unparseable user/installations response)"
+                if [[ -z "$widened" ]]; then
+                    ok github-lease "App permissions are exactly contents:write (+ metadata:read) — T2's 403s stand"
+                else
+                    bad github-lease "night App permissions beyond contents:write: $widened — a PR/issue write would SUCCEED. Fix the App before arming."
+                fi
                 echo "  scope — installation repositories (the enforced allowlist):"
-                FNOX_NON_INTERACTIVE=1 "$NIGHT_SHIM" gh api user/installations --jq '.installations[].id' 2> /dev/null \
+                jq -r '.installations[].id' <<< "$inst_json" 2> /dev/null \
                     | while read -r iid; do
                         FNOX_NON_INTERACTIVE=1 "$NIGHT_SHIM" gh api "user/installations/$iid/repositories" --jq '.repositories[].full_name' 2> /dev/null | sed 's/^/    - /'
                     done || true
