@@ -1,8 +1,8 @@
 """Golden decision table for the night shim's argv checks (v5).
 
-The shim is the credential injection point — the ONE place a command is
-still inspected in the night system, on real argv (zero string parsing
-anywhere else; see night-gate v5 header). NIGHT_SHIM_CHECK_ONLY=1 is the
+The shim is the credential injection point: the ONE place the night
+system inspects a command, on real argv (zero string parsing anywhere
+else; see the night-gate header). NIGHT_SHIM_CHECK_ONLY=1 is the
 testability seam: run the checks, skip the fnox exec.
 """
 
@@ -36,7 +36,7 @@ def shim_verdict(argv: list[str]) -> str:
 
 DENY = [
     # history rewrite / ref removal: the Contents:write hole no server-side
-    # ruleset closes on private-free repos (YUZ-74 canceled)
+    # ruleset closes on private-free repos
     ["git", "push", "--force", "origin", "HEAD:refs/heads/claude/x"],
     ["git", "push", "-f"],
     ["git", "push", "--force-with-lease", "origin", "claude/x"],
@@ -54,9 +54,8 @@ DENY = [
     # git global flags and path-spelled programs still resolve
     ["git", "-C", "/tmp/x", "push", "--force"],
     ["/usr/bin/git", "push", "-f"],
-    # gh: releases ride Contents:write — the one hole the App cannot close —
-    # and mutating api calls are T3 (proxy would make this config, not code;
-    # blocked on upstream proxy+lease support)
+    # gh: releases ride Contents:write, the one hole the App cannot close;
+    # mutating api calls are T3
     ["gh", "release", "create", "v1.0.0"],
     ["gh", "release", "delete", "v1.0.0"],
     ["gh", "release", "edit", "v1.0.0", "--draft=false"],
@@ -76,14 +75,14 @@ ALLOW = [
     ["git", "push", "--set-upstream", "origin", "claude/x"],
     ["git", "fetch", "origin"],
     ["git", "commit", "-m", "wip --force"],  # data, not push args
-    # gh reads stay free — including release READS (v4 denied the whole
-    # release subcommand; checking latest versions at night is legitimate T0)
+    # gh reads stay free, release READS included: checking latest versions
+    # at night is legitimate T0
     ["gh", "release", "list"],
     ["gh", "release", "view", "v1.0.0"],
     ["gh", "release", "download", "v1.0.0"],
     ["gh", "api", "user", "-q", ".login"],
     ["gh", "api", "-X", "GET", "search/issues", "-f", "q=x"],
-    ["gh", "pr", "list"],  # App has no PR perms — server 403 is the tier
+    ["gh", "pr", "list"],  # App has no PR perms; the server 403 is the tier
     ["op", "read", "op://night/item/field"],
     ["echo", "--force"],  # non-git programs' flags are data
 ]
@@ -115,7 +114,7 @@ def test_shim_no_args_usage_error() -> None:
 
 
 def test_fnox_night_profile_shape() -> None:
-    # the load-bearing knobs of the night credential surface
+    # the load-bearing knobs of the night credential profile
     cfg = tomllib.loads(FNOX_CONFIG.read_text())
     lease = cfg["profiles"]["night"]["leases"]["github"]
     assert lease["type"] == "github-oauth"
@@ -123,5 +122,5 @@ def test_fnox_night_profile_shape() -> None:
     # discards the 184-day refresh token: "authorize while awake" rests here
     assert lease["keyring_cache"] is False
     secrets = cfg["profiles"]["night"]["secrets"]
-    # credentials only, and the complete night surface: nothing undeclared
+    # credentials only, and the complete night set: nothing undeclared
     assert set(secrets) == {"OP_SERVICE_ACCOUNT_TOKEN"}

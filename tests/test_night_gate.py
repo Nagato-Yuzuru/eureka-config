@@ -5,12 +5,12 @@ does: event JSON on stdin, decision JSON (or silence = allow) on stdout.
 The rule semantics live HERE as a table; the script is the implementation.
 NIGHT_DIR is the testability seam for the flag file.
 
-v5 removed the Bash lexer entirely: Bash strings are NEVER parsed (a hook
-sees the actor's own description of an action, not the action). Command
-enforcement lives at the issuance layer (GitHub App / fnox lease), the shim
-argv checks (test_night_shim.py), and the hygiene env (liveness tests
-below). This hook gates ONLY tool names — the one ambient authority no
-lease can starve: browser sessions and claude.ai connectors.
+Bash strings are NEVER parsed (a hook sees the actor's own description of
+an action, not the action). Command enforcement lives at the issuance
+layer (GitHub App / fnox lease), the shim argv checks
+(test_night_shim.py), and the hygiene env (liveness tests below). This
+hook gates ONLY tool names, the one ambient authority no lease can
+starve: browser sessions and claude.ai connectors.
 """
 
 from __future__ import annotations
@@ -63,9 +63,9 @@ def run_gate(
 # --- Bash: zero parsing, pinned --------------------------------------------
 
 BASH_IS_NEVER_PARSED = [
-    # every one of these was a v4 lexer deny; the honest v5 behavior is
-    # allow — their enforcement lives at issuance / shim / hygiene now,
-    # and a parser verdict on them would be theater (or a false deny)
+    # command shapes a string parser would be tempted to deny, pinned as
+    # allow: their enforcement lives at issuance / shim / hygiene, and a
+    # parser verdict here would be theater or a false deny
     "gh pr list",
     "ssh host uptime",
     "fnox get OP_SERVICE_ACCOUNT_TOKEN",
@@ -91,14 +91,15 @@ DENY_MCP = [
     "mcp__linear-server__submit_diff_review",
     "mcp__linear-server__share_issue",
     "mcp__linear-server__save_document",
-    # claude.ai connectors: whole prefix, reads included (injection surface)
+    # claude.ai connectors: whole prefix, reads included (a prompt-injection
+    # channel)
     "mcp__claude_ai_Gmail__get_message",
     "mcp__claude_ai_Gmail__send_message",
     "mcp__claude_ai_Google_Calendar__list_events",
     "mcp__claude_ai_Google_Drive__share_file",
     "mcp__claude_ai_Interactive_Brokers_IBKR__get_account_positions",
     "mcp__claude_ai_Todoist__find-tasks",
-    # Chrome: read ALLOWLIST — writes and unknowns deny by default
+    # Chrome: read ALLOWLIST; writes and unknowns deny by default
     "mcp__claude-in-chrome__computer",
     "mcp__claude-in-chrome__javascript_tool",
     "mcp__claude-in-chrome__form_input",
@@ -245,7 +246,7 @@ def test_malformed_input_fails_closed(tmp_path: Path) -> None:
 
 
 def test_non_mcp_tools_untouched(tmp_path: Path) -> None:
-    # matcher registers only mcp__.* — but even if invoked, allow
+    # the matcher registers only mcp__.*, but even if invoked: allow
     assert run_gate(tmp_path, "Read", {"file_path": "/etc/hosts"}) == "allow"
 
 
@@ -278,7 +279,7 @@ def test_deny_without_grep_on_path(tmp_path: Path) -> None:
 # --- hygiene channel: liveness goldens --------------------------------------
 # The feedback layer's promise is that credential-shaped bare commands die
 # FAST with a readable error. Test the real property against the real
-# binaries — not a parser's opinion of the command.
+# binaries.
 
 SENTINEL = "ops_NIGHT_SENTINEL_invalid_on_purpose_use_night_op"
 

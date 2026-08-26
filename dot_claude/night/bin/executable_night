@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# night — run one command inside the night credential profile.
+# night: run one command inside the night credential profile.
 #
-# Hygiene comes from the flag (zshenv sources env.sh in every Claude shell);
-# credentials exist only per-invocation, freshly resolved from the lease
+# Hygiene comes from the flag (zshenv sources env.sh in every Claude shell).
+# Credentials exist only per invocation, freshly resolved from the lease
 # ledger on every call (--no-daemon: no cross-boundary memory cache, expiry
 # decided against the ledger each time). A dead or absent lease fails the
-# invocation in milliseconds with the remedy in the error text — no cache,
-# no renewal; local-only until the owner re-mints awake.
+# invocation in milliseconds with the remedy in the error text. No cache,
+# no renewal: local-only until the owner re-mints awake.
 #
 # Every command rides `fnox exec`: real credentials, this process tree only.
-# (`fnox proxy run` — placeholder in the tree, destination-scoped injection —
-# is the wanted gh channel, but 1.34.0's proxy rules cannot reference leases;
-# probed decisively, asked upstream alongside the trust model. When it lands,
-# gh moves to proxy and the gh checks below become config, not code.)
+# NOTE(YUZ-77): `fnox proxy run` would keep the real token out of this
+# process tree entirely, but its rules cannot reference leases (fnox
+# 1.34.0), so gh rides exec and the argv checks below stand in for proxy
+# path rules.
 #
 # -c pins the config chain to the global file: the lease ledger key becomes
 # cwd-independent (one arm covers /private/tmp scratch too), and no project's
@@ -28,10 +28,10 @@ die() {
 
 (($#)) || die "usage: night <command> [args...]"
 
-# The one surviving command inspection, at the credential injection point, on
-# real argv: the lease's Contents:write cannot be narrowed below force-push /
-# ref-delete / default-branch pushes server-side (branch rulesets need a
-# public repo or GitHub Pro — YUZ-74 canceled), so the line is drawn here.
+# The night system's only command inspection, at the credential injection
+# point, on real argv: Contents:write cannot be narrowed server-side below
+# force-push / ref-delete / default-branch pushes (branch rulesets need a
+# public repo or GitHub Pro), so the line is drawn here.
 prog="${1##*/}"
 if [[ "$prog" == git ]]; then
     args=("${@:2}")

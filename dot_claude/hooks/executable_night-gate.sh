@@ -1,33 +1,33 @@
 #!/usr/bin/env bash
-# night-gate v5 — night-mode operations + the tool-name gate.
+# night-gate v5: night-mode operations + the tool-name gate.
 #
 # Night mode's entire state is one byte: ~/.claude/night/active.json exists
 # or it doesn't. Enforcement lives ONLY where mediation is complete:
 #
-#   ISSUANCE (GitHub server side; fnox night profile) — the night App's
+#   ISSUANCE (GitHub server side; fnox night profile). The night App's
 #     permissions and installation list ARE the authority boundary: 8h
 #     device-flow lease, Contents RW only, no PR/issue/workflow perms,
 #     keyring_cache=false discards the refresh token. What is not issued
 #     cannot be done; a 403 is the tier working.
-#   SHIM ARGV (~/.claude/night/bin/night) — the one surviving command
+#   SHIM ARGV (~/.claude/night/bin/night). The night system's only command
 #     inspection, on real argv at the credential injection point: the
 #     within-Contents:write delta (force-push, ref deletes, default-branch
 #     pushes, release writes, mutating gh api).
-#   HYGIENE (zshenv -> night/env.sh; ssh-night.conf) — subtractive env, hot
+#   HYGIENE (zshenv -> night/env.sh; ssh-night.conf). Subtractive env, hot
 #     per command, transitive: signing off, gh isolated, ssh agent gone, op
-#     sentinel. Credential-shaped bare commands die in milliseconds with the
-#     real error — the FEEDBACK layer; the night-shift skill teaches how to
-#     read it (a denial is a capability not granted tonight: park it).
-#   TOOL NAMES (this hook) — the only ambient authority no lease can starve:
+#     sentinel. Credential-shaped bare commands die in milliseconds with
+#     the real error. This is the FEEDBACK layer; the night-shift skill
+#     teaches how to read it (a denial is a capability not granted tonight:
+#     park it).
+#   TOOL NAMES (this hook). The only ambient authority no lease can starve:
 #     browser sessions and claude.ai connectors. Tool names cannot be
 #     respelled, so allowlists here are a real boundary.
 #
-# Bash strings are NEVER parsed. v4's 600-line lexer is gone: a hook sees
-# the actor's own description of an action, not the action — rules there
-# are either theater or false-deny generators (B1). The drift threat model
-# (confused-but-compliant agent, not an adversary) is unchanged; what
-# changed is WHERE honesty lives: real errors from real boundaries instead
-# of simulated denials from a parser.
+# Bash strings are NEVER parsed: a hook sees the actor's own description of
+# an action, not the action, so command rules here would be either theater
+# or false-deny generators. The threat model is drift (a confused-but-
+# compliant agent), not an adversary; honesty means real errors from real
+# boundaries, not simulated denials from a parser.
 #
 # Modes:
 #   (no args)      PreToolUse gate: inert unless the flag exists
@@ -53,7 +53,7 @@ is_active() { [[ -e "$ACTIVE" ]]; }
 
 # --- hook mode (PreToolUse) --------------------------------------------------
 
-# Fail-closed backstop: a crash mid-decision must deny, not ask — at night
+# Fail-closed backstop: a crash mid-decision must deny, not ask. At night
 # nobody answers an ask, and a deny lets the agent park and move on.
 HOOK_DECIDED=0
 hook_exit_backstop() {
@@ -84,11 +84,11 @@ gate_mcp() { # TOOL_NAME
     local t="$1"
     case "$t" in
         mcp__linear-server__*)
-            # Linear is the night task tracker — allow-listed, not open:
-            # reads plus private task state. save_issue/save_comment are T0
+            # Linear is the night task tracker: allow-listed to reads plus
+            # private task state, not open. save_issue/save_comment are T0
             # (Linear-internal notes, the skill's own queue/report mirror),
-            # NOT the T2 "comment" of the tier table — that means public
-            # GitHub PR/issue speech. Merging diffs, submitting reviews and
+            # NOT the tier table's T2 "comment", which means public GitHub
+            # PR/issue speech. Merging diffs, submitting reviews and
             # publishing issues act on the world: deny.
             case "${t#mcp__linear-server__}" in
                 list_* | get_* | search_documentation | extract_images | save_issue | save_comment) allow ;;
@@ -99,9 +99,9 @@ gate_mcp() { # TOOL_NAME
         mcp__claude_ai_*)
             emit_deny "night: claude.ai connectors are off the night surface entirely — reads included (unattended reading of mail/files is a prompt-injection channel). Night task tracking is Linear." ;;
         mcp__claude-in-chrome__*)
-            # Browser sessions are ambient authority no lease can starve, so
-            # the browser surface is a read ALLOWLIST: a tool this list has
-            # never seen — new, or write-class — is denied by default.
+            # Browser sessions are ambient authority no lease can starve,
+            # so the browser gets a read ALLOWLIST: a tool this list has
+            # never seen (new, or write-class) is denied by default.
             case "${t#mcp__claude-in-chrome__}" in
                 navigate | go_back | go_forward | read_page | get_page_text | find | screenshot | tabs_context_mcp | read_console_messages) allow ;;
                 *)
@@ -246,8 +246,8 @@ cmd_status() {
 }
 
 # Three-verdict preflight. FAIL = the fabric is broken (hook, hygiene,
-# keychain, shim) — do not start a shift. DEGRADE = only the GitHub lease is
-# unavailable — a local-only night is possible. Verifies real channels and
+# keychain, shim): do not start a shift. DEGRADE = only the GitHub lease is
+# unavailable: a local-only night is possible. Verifies real channels and
 # the enforcement machinery itself, never proxies.
 cmd_preflight() {
     local fails=0 degraded=0
@@ -265,7 +265,7 @@ cmd_preflight() {
 
     # the hook: registered for the two events that matter, executable, and
     # both decision paths fire on the REGISTERED hook command (not this
-    # file — a stale deployment must show up here)
+    # file: a stale deployment must show up here)
     local entry hookcmd='' matcher=''
     entry=$(jq -c '[.hooks.PreToolUse[]? | select([.hooks[]?.command // empty] | any(test("night-gate")))] | .[0] // empty' "$HOME/.claude/settings.json" 2> /dev/null || true)
     if [[ -n "$entry" ]]; then
@@ -308,7 +308,7 @@ cmd_preflight() {
     fi
 
     # hygiene channel: the deployed env.sh, really sourced in a clean shell,
-    # must set the real values — not just exist under the right filename
+    # must set the real values, not just exist under the right filename
     if [[ -f "$HOME/.claude/night/env.sh" ]]; then ok "env.sh present"; else bad "env.sh missing"; fi
     if grep -q 'night/env.sh' "$HOME/.zshenv" 2> /dev/null; then ok "zshenv guard present"; else bad "zshenv guard missing from ~/.zshenv"; fi
     local hy
@@ -376,7 +376,7 @@ cmd_preflight() {
         bad "SA cannot list exactly the night vault (keychain ACL? dead token?)"
     fi
 
-    # the shim itself must exec before the lease question is even asked —
+    # the shim itself must exec before the lease question is even asked:
     # a broken shim is FAIL (fabric), never mistaken for a missing lease
     local shim_ok=0
     if FNOX_NON_INTERACTIVE=1 "$NIGHT_SHIM" true > /dev/null 2>&1; then

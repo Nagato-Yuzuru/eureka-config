@@ -1,30 +1,30 @@
-# Global fnox config — credential-mediation base for the night-shift system.
-# Day-side tools stay on 1Password op plugins by design (presence-gated);
-# the night profile (credentials only — hygiene env lives in
-# ~/.claude/night/env.sh) is added alongside this provider block.
+# Global fnox config: credential-mediation base for the night-shift system.
+# Day-side tools stay on 1Password op plugins by design (presence-gated).
+# The night profile holds credentials only; the hygiene env lives in
+# ~/.claude/night/env.sh.
 
 # TODO(YUZ-80): on headless linux the keychain provider has no unlocked
-# secret service — custody there goes age (wizard provisions the key) or
+# secret service. Custody there goes age (wizard provisions the key) or
 # lease-only (no standing secret at all; VM resting state = night tier).
-# Blocked on the R0.7 probe verdict; template this per-OS when it lands.
+# Template this per-OS when a VM is actually provisioned.
 [providers.keychain]
 type = "keychain"
 service = "fnox"
 
-# Day-side cache for activate's per-prompt hook-env resolution (memory only,
-# unix socket, same-uid). Short idle timeout keeps the in-memory half-life
-# small; /night on additionally runs `fnox daemon clear` so no day secret
-# value survives across the boundary. The night shim never touches it
-# (--no-daemon).
+# Day-side cache for activate's per-prompt hook-env resolution (memory
+# only, unix socket, same-uid). The short idle timeout keeps the in-memory
+# half-life small; /night on additionally runs `fnox daemon clear` so no
+# day secret value survives across the boundary. The night shim never
+# touches it (--no-daemon).
 [daemon]
 idle_timeout = "2h"
 
-# Night profile: CREDENTIALS ONLY. What is listed here is the complete
-# capability surface of a night shift — an undeclared credential does not
-# exist at night. keyring_cache=false is load-bearing: fnox then discards
-# the 184-day refresh token GitHub mints alongside every 8h access token,
-# so nothing on disk can renew authority without a fresh device-flow
-# approval — "authorize while awake" holds structurally.
+# Night profile: CREDENTIALS ONLY. This list is the complete set of night
+# credentials; an undeclared credential does not exist at night.
+# keyring_cache=false is load-bearing: fnox then discards the 184-day
+# refresh token GitHub mints alongside every 8h access token, so nothing on
+# disk can renew authority without a fresh device-flow approval.
+# "Authorize while awake" rests here.
 [profiles.night.secrets]
 OP_SERVICE_ACCOUNT_TOKEN = { provider = "keychain", value = "OP_SERVICE_ACCOUNT_TOKEN" }
 
@@ -33,8 +33,7 @@ type = "github-oauth"
 client_id = "Iv23lifV6li4jkqWVVej"
 env_var = "GH_TOKEN"
 keyring_cache = false
-# NOTE(upstream): `night gh` would rather ride `fnox proxy run` (placeholder
-# in the process tree, destination-scoped injection), but 1.34.0's proxy
-# rules cannot reference leases — probed decisively, filed upstream with the
-# trust ask (YUZ-77). Until that lands, gh rides exec and the shim carries
-# the gh argv checks.
+# NOTE(YUZ-77): `night gh` would ride `fnox proxy run` (the real token
+# never enters an agent-visible process), but 1.34.0's proxy rules cannot
+# reference leases. Until the upstream fix lands, gh rides exec and the
+# shim carries the gh argv checks.
