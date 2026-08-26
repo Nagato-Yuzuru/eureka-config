@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 GATE = REPO_ROOT / "dot_claude" / "hooks" / "executable_night-gate.sh"
 ENV_SH = REPO_ROOT / "dot_claude" / "night" / "env.sh"
 SSH_CONF = REPO_ROOT / "dot_claude" / "night" / "ssh-night.conf"
+SHIM = REPO_ROOT / "dot_claude" / "night" / "bin" / "executable_night"
 
 
 def run_gate(
@@ -437,3 +439,231 @@ def test_zshrc_night_wiring_present() -> None:
     # claude launches from a deactivate-cleansed subshell
     assert "claude() {" in src
     assert "command fnox deactivate" in src
+
+
+# --- preflight: three-verdict goldens ----------------------------------------
+# A fake HOME where every channel is healthy and every external binary is a
+# PATH stub. The goldens pin the VERDICT ENGINE (YUZ-86): each probe records
+# into its own channel register and the verdict is computed once at the end,
+# so one probe's failure can never swallow another channel's classification
+# — the regression was "lease not minted yet" reported as fabric FAILURE on
+# every normal arming evening. They also pin the DEGRADE verdict naming
+# github-lease and linear-bot separately (YUZ-90): the two mean different
+# reduced nights.
+
+
+def _stub(path: Path, body: str) -> None:
+    path.write_text("#!/bin/bash\n" + body)
+    path.chmod(0o755)
+
+
+FNOX_STUB = """\
+mode=$(cat "@MODE@" 2>/dev/null || echo lease-ok)
+for a in "$@"; do
+  if [[ "$a" == --version ]]; then echo "fnox 1.34.0-stub"; exit 0; fi
+done
+argstr=" $* "
+if [[ "$argstr" == *" get OP_SERVICE_ACCOUNT_TOKEN "* ]]; then
+  printf 'op-stub-token'
+  exit 0
+fi
+if [[ "$argstr" == *" lease list "* ]]; then
+  echo "No leases found."
+  exit 0
+fi
+if [[ "$argstr" == *" exec "* ]]; then
+  case "$mode" in
+    lease-absent)
+      echo "Error: fnox::provider::auth_failed (https://fnox.jdx.dev/leases/github-oauth)" >&2
+      echo "  x GitHub OAuth: authentication failed: interactive auth required" >&2
+      exit 1
+      ;;
+    fabric-broken)
+      echo "Error: fnox::config::invalid: could not parse config" >&2
+      exit 1
+      ;;
+  esac
+  args=("$@"); cmd=()
+  for ((i = 0; i < ${#args[@]}; i++)); do
+    if [[ "${args[i]}" == -- ]]; then cmd=("${args[@]:i+1}"); break; fi
+  done
+  GH_TOKEN=ghs_stub OP_SERVICE_ACCOUNT_TOKEN=op-stub-token exec "${cmd[@]}"
+fi
+exit 0
+"""
+
+GH_STUB = """\
+if [[ -z "${GH_TOKEN:-}" ]]; then
+  echo "gh: To get started with GitHub CLI, please run: gh auth login" >&2
+  exit 1
+fi
+if [[ "$*" == "api user -q .login" ]]; then echo nightbot; fi
+exit 0
+"""
+
+OP_STUB = """\
+tok="${OP_SERVICE_ACCOUNT_TOKEN:-}"
+if [[ -z "$tok" || "$tok" == ops_NIGHT_SENTINEL* ]]; then
+  echo "[ERROR] service account token format is invalid" >&2
+  exit 1
+fi
+if [[ "$*" == *"vault list"* ]]; then echo '[{"name":"Night"}]'; fi
+exit 0
+"""
+
+CLAUDE_STUB = """\
+mode=$(cat "@MODE@" 2>/dev/null || echo present)
+if [[ "${1:-} ${2:-}" == "mcp get" ]]; then
+  if [[ "$mode" == present ]]; then exit 0; else exit 1; fi
+fi
+exit 0
+"""
+
+
+class PreflightHarness:
+    def __init__(self, tmp_path: Path) -> None:
+        home = tmp_path / "home"
+        stubs = tmp_path / "stubs"
+        stubs.mkdir()
+        self.home = home
+        self.night = home / ".claude" / "night"
+        (self.night / "bin").mkdir(parents=True)
+        (self.night / "gh-null").mkdir()
+        hooks = home / ".claude" / "hooks"
+        hooks.mkdir()
+        (home / ".ssh").mkdir()
+        (home / ".config" / "fnox").mkdir(parents=True)
+
+        # deployed artifacts, copied verbatim from the repo source
+        gate = hooks / "night-gate.sh"
+        gate.write_text(GATE.read_text())
+        gate.chmod(0o755)
+        (self.night / "env.sh").write_text(ENV_SH.read_text())
+        (self.night / "ssh-night.conf").write_text(SSH_CONF.read_text())
+        shim = self.night / "bin" / "night"
+        shim.write_text(SHIM.read_text())
+        shim.chmod(0o755)
+        (home / ".config" / "fnox" / "config.toml").write_text("# rendered by chezmoi\n")
+        (home / ".zshenv").write_text(
+            '[[ -e "$HOME/.claude/night/active.json" && -n "${CLAUDECODE:-}" ]] '
+            '&& source "$HOME/.claude/night/env.sh"\ntrue\n'
+        )
+        (home / ".ssh" / "config").write_text("Include ~/.claude/night/ssh-night.conf\n")
+        (home / ".claude" / "settings.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "mcp__.*",
+                                "hooks": [{"type": "command", "command": str(gate)}],
+                            }
+                        ],
+                        "UserPromptSubmit": [
+                            {"hooks": [{"type": "command", "command": f"{gate} user-prompt"}]}
+                        ],
+                    }
+                }
+            )
+        )
+        _stub(hooks / "path-gate.sh", "exit 0\n")
+
+        self.fnox_mode = tmp_path / "fnox-mode"  # lease-ok | lease-absent | fabric-broken
+        self.claude_mode = tmp_path / "claude-mode"  # present | absent
+        self.fnox_mode.write_text("lease-ok")
+        self.claude_mode.write_text("present")
+        _stub(stubs / "fnox", FNOX_STUB.replace("@MODE@", str(self.fnox_mode)))
+        _stub(stubs / "gh", GH_STUB)
+        _stub(stubs / "op", OP_STUB)
+        _stub(stubs / "claude", CLAUDE_STUB.replace("@MODE@", str(self.claude_mode)))
+        self.env = {"PATH": f"{stubs}:{os.environ['PATH']}", "HOME": str(home)}
+
+    def expiry_in(self, seconds: int) -> None:
+        (self.night / "linear-bot-expiry").write_text(str(int(time.time()) + seconds))
+
+    def run(self) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", str(GATE), "preflight"],
+            capture_output=True,
+            text=True,
+            env=self.env,
+            timeout=120,
+        )
+
+
+def test_preflight_all_channels_healthy_passes(tmp_path: Path) -> None:
+    h = PreflightHarness(tmp_path)
+    h.expiry_in(20 * 86400)
+    p = h.run()
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "preflight PASS." in p.stdout
+    assert [ln for ln in p.stdout.splitlines() if ln.startswith("  ✗")] == []
+    assert [ln for ln in p.stdout.splitlines() if ln.startswith("  ~")] == []
+
+
+def test_preflight_lease_absent_degrades_not_fails(tmp_path: Path) -> None:
+    # THE YUZ-86 pin: a not-yet-minted evening is the normal arming flow,
+    # and the shim's eager-lease failure must classify as "lease absent",
+    # never as fabric breakage
+    h = PreflightHarness(tmp_path)
+    h.expiry_in(20 * 86400)
+    h.fnox_mode.write_text("lease-absent")
+    p = h.run()
+    assert p.returncode == 2, p.stdout + p.stderr
+    assert "preflight DEGRADED — reduced: github-lease." in p.stdout
+    assert "FAILED" not in p.stdout
+    assert "  ✓ night shim execs to the lease boundary" in p.stdout
+    assert "--mode local-only" in p.stdout
+
+
+def test_preflight_names_lease_and_linear_bot_separately(tmp_path: Path) -> None:
+    # YUZ-90: the two degradations mean different nights — the verdict must
+    # name both, each with its own consequence line
+    h = PreflightHarness(tmp_path)  # no expiry file: linear-bot never minted
+    h.fnox_mode.write_text("lease-absent")
+    p = h.run()
+    assert p.returncode == 2, p.stdout + p.stderr
+    assert "preflight DEGRADED — reduced: github-lease linear-bot." in p.stdout
+    assert "--mode local-only" in p.stdout
+    assert "task-state writes fail ALL NIGHT" in p.stdout
+    assert "linear-bot-remint" in p.stdout
+
+
+def test_preflight_missing_connection_with_live_token_degrades(tmp_path: Path) -> None:
+    # the half-done remint state (token persisted, wiring lost): visible,
+    # with the repair-without-minting remedy
+    h = PreflightHarness(tmp_path)
+    h.expiry_in(20 * 86400)
+    h.claude_mode.write_text("absent")
+    p = h.run()
+    assert p.returncode == 2, p.stdout + p.stderr
+    assert "preflight DEGRADED — reduced: linear-bot." in p.stdout
+    assert "re-wires it without minting" in p.stdout
+
+
+def test_preflight_fabric_broken_fails(tmp_path: Path) -> None:
+    h = PreflightHarness(tmp_path)
+    h.expiry_in(20 * 86400)
+    h.fnox_mode.write_text("fabric-broken")
+    p = h.run()
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert "preflight FAILED — broken: fabric." in p.stdout
+    assert "Do not start the shift." in p.stdout
+    assert "wiring broken" in p.stdout
+
+
+def test_preflight_expired_token_degrades(tmp_path: Path) -> None:
+    h = PreflightHarness(tmp_path)
+    h.expiry_in(-600)
+    p = h.run()
+    assert p.returncode == 2, p.stdout + p.stderr
+    assert "token expired" in p.stdout
+    assert "preflight DEGRADED — reduced: linear-bot." in p.stdout
+
+
+def test_preflight_expiring_token_warns(tmp_path: Path) -> None:
+    h = PreflightHarness(tmp_path)
+    h.expiry_in(2 * 86400 + 3600)
+    p = h.run()
+    assert p.returncode == 2, p.stdout + p.stderr
+    assert "token expires in 2d" in p.stdout

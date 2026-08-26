@@ -17,8 +17,16 @@ session while the flag is on IS a night session.**
 1. Run `~/.claude/hooks/night-gate.sh preflight`. Three verdicts:
    - **FAILED** — say so and stop. The fabric is broken; a dead channel found
      now costs a click, found at 2am it costs the shift.
-   - **DEGRADED** — only the GitHub lease is missing: offer to mint (step 2),
-     or with the owner's explicit ok arm local-only (step 6, `--mode local-only`).
+   - **DEGRADED** — one or more optional channels are down; the verdict names
+     each one, and they mean different nights — read them separately:
+     - `github-lease` — offer to mint (step 2), or with the owner's explicit
+       ok arm local-only (step 7, `--mode local-only`).
+     - `linear-bot` — task-state writes fail all night (the gate points
+       writes at the bot identity, and there is nothing to point at): run
+       `~/.claude/night/bin/linear-bot-remint` now — day and presence-gated,
+       so it cannot be fixed after the flip — then re-run preflight.
+     - `sa-vault` — `night op` vault reads unavailable on this machine; arm
+       only if no task on tonight's list needs a vault secret.
    - **PASS** — continue.
 2. Mint if needed: run
    `fnox -c ~/.config/fnox/config.toml -P night lease create github -l "night-$(date +%F)"`

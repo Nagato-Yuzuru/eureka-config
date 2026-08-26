@@ -104,7 +104,7 @@ gate_mcp() { # TOOL_NAME
             case "${t#mcp__linear-server__}" in
                 list_* | get_* | search_documentation | extract_images) allow ;;
                 save_issue | save_comment)
-                    emit_deny "night: task-state writes carry the agent identity — use the mcp__linear-bot__ equivalent of '$t' so the tracker records the agent, not the owner." ;;
+                    emit_deny "night: task-state writes carry the agent identity — use the mcp__linear-bot__ equivalent of '$t' so the tracker records the agent, not the owner. If the linear-bot connection is absent tonight (preflight said so at arm time), record the update in the shift report instead." ;;
                 *)
                     emit_deny "night: Linear is allow-listed to reads + task state (list_*/get_* here; save_issue/save_comment via linear-bot). '$t' merges, reviews or publishes — T2/T3 outbound: queue it or propose it in the shift report." ;;
             esac
@@ -259,19 +259,29 @@ cmd_status() {
 }
 
 # Three-verdict preflight. FAIL = the fabric is broken (hook, hygiene,
-# keychain, shim): do not start a shift. DEGRADE = only the GitHub lease is
-# unavailable: a local-only night is possible. Verifies real channels and
-# the enforcement machinery itself, never proxies.
+# keychain, shim): do not start a shift. DEGRADE = an optional channel is
+# down (github-lease, linear-bot, sa-vault); the verdict names each one and
+# a reduced night may still be worth arming. Verifies real channels and the
+# enforcement machinery itself, never proxies.
+#
+# Verdict discipline (YUZ-86): every probe records into its own CHANNEL
+# register (ok/soft/bad take the channel as their first argument); the
+# verdict is computed once, at the end, from the registers. No probe result
+# gates another channel's probe, so an early failure cannot swallow a later
+# classification — the ordered counter pair this replaces reported FAILED on
+# every not-yet-minted evening, because the shim probe conflated "fnox
+# wiring broken" with "lease absent" and its failure suppressed the
+# DEGRADE branch entirely.
 cmd_preflight() {
-    local fails=0 degraded=0
-    ok() { echo "  ✓ $*"; }
-    bad() {
-        echo "  ✗ $*"
-        fails=$((fails + 1))
-    }
+    local ch_failed='' ch_degraded=''
+    ok() { echo "  ✓ $2"; } # CHANNEL MSG — channel named for uniformity
     soft() {
-        echo "  ~ $*"
-        degraded=1
+        echo "  ~ $2"
+        [[ " $ch_degraded " == *" $1 "* ]] || ch_degraded+="$1 "
+    }
+    bad() {
+        echo "  ✗ $2"
+        [[ " $ch_failed " == *" $1 "* ]] || ch_failed+="$1 "
     }
 
     echo "night preflight:"
@@ -285,156 +295,199 @@ cmd_preflight() {
         hookcmd=$(jq -r '[.hooks[].command] | .[0]' <<< "$entry")
         matcher=$(jq -r '.matcher // ""' <<< "$entry")
         if [[ -x "${hookcmd%% *}" ]]; then
-            ok "gate registered and executable"
+            ok hook "gate registered and executable"
         else
-            bad "night-gate registered but not executable ($hookcmd)"
+            bad hook "night-gate registered but not executable ($hookcmd)"
         fi
         if [[ "mcp__linear-server__get_issue" =~ $matcher ]]; then
-            ok "PreToolUse matcher covers mcp__ tools"
+            ok hook "PreToolUse matcher covers mcp__ tools"
         else
-            bad "matcher '$matcher' does not cover mcp__ tools"
+            bad hook "matcher '$matcher' does not cover mcp__ tools"
         fi
     else
-        bad "night-gate not registered for PreToolUse in ~/.claude/settings.json"
+        bad hook "night-gate not registered for PreToolUse in ~/.claude/settings.json"
     fi
     if jq -e '[.hooks.UserPromptSubmit[]? | select([.hooks[]?.command // empty] | any(test("night-gate")))] | length > 0' "$HOME/.claude/settings.json" > /dev/null 2>&1; then
-        ok "user-prompt notifier registered (live sessions learn the flag fell)"
+        ok hook "user-prompt notifier registered (live sessions learn the flag fell)"
     else
-        bad "night-gate user-prompt not registered for UserPromptSubmit"
+        bad hook "night-gate user-prompt not registered for UserPromptSubmit"
     fi
     if [[ -n "$hookcmd" ]]; then
         local fire
         fire=$(printf '%s' '{"tool_name":"mcp__claude_ai_Gmail__get_message","tool_input":{}}' \
             | NIGHT_DIR="$NIGHT_DIR" NIGHT_GATE_FORCE=1 bash -c "$hookcmd" 2> /dev/null || true)
         if jq -e '(.hookSpecificOutput.permissionDecision == "deny") and (.hookSpecificOutput.permissionDecisionReason | test("connector"))' <<< "$fire" > /dev/null 2>&1; then
-            ok "gate live-fire denies a connector tool (registered hook, forced on)"
+            ok hook "gate live-fire denies a connector tool (registered hook, forced on)"
         else
-            bad "gate live-fire deny failed — the registered hook's deny path is broken"
+            bad hook "gate live-fire deny failed — the registered hook's deny path is broken"
         fi
         fire=$(printf '%s' '{"tool_name":"mcp__linear-server__list_issues","tool_input":{}}' \
             | NIGHT_DIR="$NIGHT_DIR" NIGHT_GATE_FORCE=1 bash -c "$hookcmd" 2> /dev/null || true)
         if [[ -z "$fire" ]]; then
-            ok "gate live-fire allows Linear reads (silent)"
+            ok hook "gate live-fire allows Linear reads (silent)"
         else
-            bad "gate live-fire allow path broken — allowed tool produced output"
+            bad hook "gate live-fire allow path broken — allowed tool produced output"
         fi
     fi
 
     # hygiene channel: the deployed env.sh, really sourced in a clean shell,
     # must set the real values, not just exist under the right filename
-    if [[ -f "$HOME/.claude/night/env.sh" ]]; then ok "env.sh present"; else bad "env.sh missing"; fi
-    if grep -q 'night/env.sh' "$HOME/.zshenv" 2> /dev/null; then ok "zshenv guard present"; else bad "zshenv guard missing from ~/.zshenv"; fi
+    if [[ -f "$HOME/.claude/night/env.sh" ]]; then ok hygiene "env.sh present"; else bad hygiene "env.sh missing"; fi
+    if grep -q 'night/env.sh' "$HOME/.zshenv" 2> /dev/null; then ok hygiene "zshenv guard present"; else bad hygiene "zshenv guard missing from ~/.zshenv"; fi
     local hy
     # shellcheck disable=SC2016  # the zsh script must expand in zsh, not here
     hy=$(env -i HOME="$HOME" PATH="$PATH" CLAUDECODE=1 zsh -c \
         'source "$HOME/.claude/night/env.sh"; print -r -- "$GH_CONFIG_DIR|$FNOX_NON_INTERACTIVE|$SSH_AUTH_SOCK|${OP_SERVICE_ACCOUNT_TOKEN%%_*}|$(git config --get commit.gpgsign)|$(git config --get tag.gpgsign)|$(git config --get core.sshCommand)"' 2> /dev/null || true)
     if [[ "$hy" == "$HOME/.claude/night/gh-null|1||ops|false|false|/usr/bin/false" ]]; then
-        ok "hygiene env sources clean: gh isolated, fnox headless, ssh agent dead, op sentinel armed, signing off, git-over-ssh killed"
+        ok hygiene "hygiene env sources clean: gh isolated, fnox headless, ssh agent dead, op sentinel armed, signing off, git-over-ssh killed"
     else
-        bad "hygiene env content wrong when sourced (got '$hy')"
+        bad hygiene "hygiene env content wrong when sourced (got '$hy')"
     fi
     # feedback layer, really exercised: credential-shaped bare commands must
     # die fast (not hang on anything lockable) with a readable error
     if command -v gh > /dev/null 2>&1; then
         if timeout 5 env GH_CONFIG_DIR="$HOME/.claude/night/gh-null" GH_TOKEN= GITHUB_TOKEN= gh api user > /dev/null 2>&1; then
-            bad "bare gh with the night config dir unexpectedly SUCCEEDED (day auth leaking in)"
+            bad hygiene "bare gh with the night config dir unexpectedly SUCCEEDED (day auth leaking in)"
         else
-            ok "bare gh dies fast under night gh isolation"
+            ok hygiene "bare gh dies fast under night gh isolation"
         fi
     fi
     if command -v op > /dev/null 2>&1; then
         if timeout 5 env OP_SERVICE_ACCOUNT_TOKEN="ops_NIGHT_SENTINEL_invalid_on_purpose_use_night_op" op vault list > /dev/null 2>&1; then
-            bad "op with the sentinel token unexpectedly SUCCEEDED"
+            bad hygiene "op with the sentinel token unexpectedly SUCCEEDED"
         else
-            ok "op dies fast on the sentinel token (no desktop-app hang path)"
+            ok hygiene "op dies fast on the sentinel token (no desktop-app hang path)"
         fi
     fi
     # ssh: the Match-exec include must be wired at the TOP of ~/.ssh/config
-    if [[ -f "$HOME/.claude/night/ssh-night.conf" ]]; then ok "ssh-night.conf present"; else bad "ssh-night.conf missing"; fi
+    if [[ -f "$HOME/.claude/night/ssh-night.conf" ]]; then ok ssh "ssh-night.conf present"; else bad ssh "ssh-night.conf missing"; fi
     if head -5 "$HOME/.ssh/config" 2> /dev/null | grep -q 'night/ssh-night.conf'; then
-        ok "ssh config Includes ssh-night.conf near the top"
+        ok ssh "ssh config Includes ssh-night.conf near the top"
     else
-        bad "ssh config at \$HOME/.ssh/config does not Include night/ssh-night.conf in its first lines (ssh keeps the FIRST value — the Include must come before any IdentityAgent)"
+        bad ssh "ssh config at \$HOME/.ssh/config does not Include night/ssh-night.conf in its first lines (ssh keeps the FIRST value — the Include must come before any IdentityAgent)"
     fi
     # regression: on-disk private keys would let night ssh succeed as the owner
     if grep -lE -- '-----BEGIN .*PRIVATE KEY' "$HOME"/.ssh/* 2> /dev/null | grep -q .; then
-        bad "private key files on disk in ~/.ssh — night ssh could succeed with the owner's identity"
+        bad ssh "private key files on disk in ~/.ssh — night ssh could succeed with the owner's identity"
     else
-        ok "no on-disk ssh private keys"
+        ok ssh "no on-disk ssh private keys"
     fi
     # file-tool writes to the queue/report dirs must not prompt at night
     if "$HOME/.claude/hooks/path-gate.sh" check "$NIGHT_DIR" w > /dev/null 2>&1; then
-        ok "path-gate grants w on $NIGHT_DIR (queue + report writes)"
+        ok path-gate "path-gate grants w on $NIGHT_DIR (queue + report writes)"
     else
-        bad "path-gate denies w on $NIGHT_DIR — queue/report writes would prompt with nobody awake"
+        bad path-gate "path-gate denies w on $NIGHT_DIR — queue/report writes would prompt with nobody awake"
     fi
 
     # credential channel: real resolutions, not existence checks
-    if [[ -x "$NIGHT_SHIM" ]]; then ok "night shim executable"; else bad "night shim missing"; fi
+    if [[ -x "$NIGHT_SHIM" ]]; then ok fabric "night shim executable"; else bad fabric "night shim missing"; fi
     if command -v fnox > /dev/null 2>&1; then
-        ok "fnox present ($(fnox --version 2> /dev/null || echo '?'))"
+        ok fabric "fnox present ($(fnox --version 2> /dev/null || echo '?'))"
     else
-        bad "fnox not installed"
+        bad fabric "fnox not installed"
     fi
-    # linear-bot: night task-state writes carry the agent identity; a dead
-    # token turns them into fast failures mid-shift
-    if [[ -f "$NIGHT_DIR/linear-bot-expiry" ]]; then
-        local exp days
-        exp=$(cat "$NIGHT_DIR/linear-bot-expiry" 2> /dev/null || echo 0)
-        days=$(((exp - $(date +%s)) / 86400))
-        if ((days < 0)); then
-            soft "linear-bot token expired — run linear-bot-remint (day, presence-gated)"
-        elif ((days < 5)); then
-            soft "linear-bot token expires in ${days}d — run linear-bot-remint before a long stretch"
-        else
-            ok "linear-bot token alive (${days}d left)"
-        fi
+    # the shim pins its config chain to this exact file (cwd-independence);
+    # missing means every night invocation fails identically
+    if [[ -f "$HOME/.config/fnox/config.toml" ]]; then
+        ok fabric "global fnox config present (the shim's pinned -c)"
     else
-        soft "linear-bot token expiry unknown — run linear-bot-remint once"
+        bad fabric "global fnox config missing at ~/.config/fnox/config.toml"
     fi
     # lease-independent on purpose: `fnox get` resolves the single secret, so
     # a dead GitHub lease cannot mask a healthy (or broken) 1Password channel
     local sa
     if ! command -v op > /dev/null 2>&1; then
-        soft "op absent — night vault channel unavailable on this machine (linux custody: YUZ-80)"
+        soft sa-vault "op absent — night vault channel unavailable on this machine (linux custody: YUZ-80)"
     elif sa=$(FNOX_NON_INTERACTIVE=1 fnox -c "$HOME/.config/fnox/config.toml" -P night get OP_SERVICE_ACCOUNT_TOKEN 2> /dev/null) \
         && OP_SERVICE_ACCOUNT_TOKEN="$sa" timeout 20 op vault list --format=json 2> /dev/null \
         | jq -e 'map(.name) == ["Night"]' > /dev/null 2>&1; then
-        ok "SA reaches exactly the night vault (keychain ACL + 1Password, end to end)"
+        ok sa-vault "SA reaches exactly the night vault (keychain ACL + 1Password, end to end)"
     else
-        bad "SA cannot list exactly the night vault (keychain ACL? dead token?)"
+        bad sa-vault "SA cannot list exactly the night vault (keychain ACL? dead token?)"
     fi
 
-    # the shim itself must exec before the lease question is even asked:
-    # a broken shim is FAIL (fabric), never mistaken for a missing lease
-    local shim_ok=0
-    if FNOX_NON_INTERACTIVE=1 "$NIGHT_SHIM" true > /dev/null 2>&1; then
-        ok "night shim execs end to end (fnox exec path)"
-        shim_ok=1
+    # The shim probe, classified by ERROR TYPE: fnox exec resolves the lease
+    # eagerly, so `night true` cannot tell "wiring broken" from "lease not
+    # minted yet" by exit code alone. fnox's auth_failed diagnostic marks the
+    # probe reaching lease resolution — that IS the fabric working; the
+    # lease's own verdict lands in its own channel below.
+    local shim_err='' shim_rc=0 lease_state=''
+    shim_err=$(FNOX_NON_INTERACTIVE=1 "$NIGHT_SHIM" true 2>&1 > /dev/null) || shim_rc=$?
+    if ((shim_rc == 0)); then
+        ok fabric "night shim execs end to end (fnox exec path)"
+        lease_state=alive
+    elif grep -qE 'auth_failed|interactive auth required' <<< "$shim_err"; then
+        ok fabric "night shim execs to the lease boundary (config parsed, lease consulted)"
+        lease_state=absent
     else
-        bad "night shim cannot exec a trivial command — shim/fnox wiring broken (not a lease question)"
+        bad fabric "night shim cannot exec a trivial command — shim/fnox wiring broken: $(head -n 1 <<< "$shim_err")"
     fi
 
-    # lease: absent => DEGRADE (local-only), not FAIL
+    # github-lease: absent => DEGRADE (local-only night possible), never FAIL
     local login
-    if ((shim_ok)) && login=$(FNOX_NON_INTERACTIVE=1 "$NIGHT_SHIM" gh api user -q .login 2> /dev/null); then
-        ok "github lease alive (as $login)"
-        echo "  scope — installation repositories (the enforced allowlist):"
-        FNOX_NON_INTERACTIVE=1 "$NIGHT_SHIM" gh api user/installations --jq '.installations[].id' 2> /dev/null \
-            | while read -r iid; do
-                FNOX_NON_INTERACTIVE=1 "$NIGHT_SHIM" gh api "user/installations/$iid/repositories" --jq '.repositories[].full_name' 2> /dev/null | sed 's/^/    - /'
-            done || true
-    elif ((shim_ok)); then
-        soft "github lease absent/expired — tonight would be LOCAL-ONLY (mint interactively: $NIGHT_SHIM gh api user)"
+    case "$lease_state" in
+        alive)
+            if login=$(FNOX_NON_INTERACTIVE=1 "$NIGHT_SHIM" gh api user -q .login 2> /dev/null); then
+                ok github-lease "github lease alive (as $login)"
+                echo "  scope — installation repositories (the enforced allowlist):"
+                FNOX_NON_INTERACTIVE=1 "$NIGHT_SHIM" gh api user/installations --jq '.installations[].id' 2> /dev/null \
+                    | while read -r iid; do
+                        FNOX_NON_INTERACTIVE=1 "$NIGHT_SHIM" gh api "user/installations/$iid/repositories" --jq '.repositories[].full_name' 2> /dev/null | sed 's/^/    - /'
+                    done || true
+            else
+                soft github-lease "lease resolves locally but GitHub rejects it (revoked? offline?) — re-mint at arm time"
+            fi
+            ;;
+        absent)
+            soft github-lease "github lease absent/expired — mint at arm time (one device-flow click), or arm --mode local-only"
+            ;;
+    esac
+
+    # linear-bot: night task-state writes carry the agent identity; the gate
+    # DENIES owner-identity writes and points at the bot connection, so an
+    # absent token or connection means no tracker writes all night — its own
+    # channel, never conflated with the GitHub lease (YUZ-90)
+    local conn=unknown exp days
+    if command -v claude > /dev/null 2>&1; then
+        if claude mcp get linear-bot > /dev/null 2>&1; then conn=present; else conn=absent; fi
+    fi
+    if [[ ! -f "$NIGHT_DIR/linear-bot-expiry" ]]; then
+        soft linear-bot "never minted (no expiry record) — task-state writes would have no identity to ride: run linear-bot-remint (day, presence-gated)"
+    else
+        exp=$(cat "$NIGHT_DIR/linear-bot-expiry" 2> /dev/null || echo 0)
+        [[ "$exp" =~ ^[0-9]+$ ]] || exp=0
+        # seconds first: integer division truncates toward zero, so a
+        # freshly expired token would otherwise read "expires in 0d"
+        local left
+        left=$((exp - $(date +%s)))
+        days=$((left / 86400))
+        if ((left < 0)); then
+            soft linear-bot "token expired — run linear-bot-remint (day, presence-gated)"
+        elif ((days < 5)); then
+            soft linear-bot "token expires in ${days}d — run linear-bot-remint before a long stretch"
+        elif [[ "$conn" == absent ]]; then
+            soft linear-bot "token alive (${days}d) but the linear-bot MCP connection is missing — linear-bot-remint re-wires it without minting"
+        elif [[ "$conn" == present ]]; then
+            ok linear-bot "linear-bot wired (token ${days}d left, MCP connection present)"
+        else
+            ok linear-bot "linear-bot token alive (${days}d left; claude CLI not visible — connection unchecked)"
+        fi
     fi
 
+    # verdict: computed HERE and only here, from the channel registers
     echo
-    if ((fails > 0)); then
-        echo "preflight FAILED ($fails) — do not start the shift."
+    if [[ -n "$ch_failed" ]]; then
+        echo "preflight FAILED — broken: ${ch_failed% }. Do not start the shift."
         exit 1
     fi
-    if ((degraded)); then
-        echo "preflight DEGRADED — a reduced night is available (see ~ lines above)."
+    if [[ -n "$ch_degraded" ]]; then
+        echo "preflight DEGRADED — reduced: ${ch_degraded% }. Consequences, per channel:"
+        [[ " $ch_degraded " == *" github-lease "* ]] \
+            && echo "  github-lease: no night push/gh/op unless minted at arm time — or arm --mode local-only"
+        [[ " $ch_degraded " == *" linear-bot "* ]] \
+            && echo "  linear-bot: task-state writes fail ALL NIGHT — run linear-bot-remint BEFORE arming"
+        [[ " $ch_degraded " == *" sa-vault "* ]] \
+            && echo "  sa-vault: night op vault reads unavailable on this machine"
         exit 2
     fi
     echo "preflight PASS."
