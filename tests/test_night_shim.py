@@ -124,3 +124,6 @@ def test_fnox_night_profile_shape() -> None:
     secrets = cfg["profiles"]["night"]["secrets"]
     # credentials only, and the complete night set: nothing undeclared
     assert set(secrets) == {"OP_SERVICE_ACCOUNT_TOKEN"}
+    # the top-level [secrets] table merges into EVERY named profile, so it
+    # must stay empty: a base secret silently joins the night surface
+    assert "secrets" not in cfg

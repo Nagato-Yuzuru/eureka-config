@@ -19,6 +19,20 @@ service = "fnox"
 [daemon]
 idle_timeout = "2h"
 
+# fnox profile semantics: the top-level [secrets] table merges into EVERY
+# named profile; named profiles are isolated from each other. The base
+# therefore stays EMPTY. A base secret would silently join the night
+# surface and break "the night list is the complete night credential set"
+# (tests pin this).
+#
+# Day profile: minting credentials, resolved with -P day. LINEAR_BOT_CLIENT_SECRET
+# mints the "Night Shift Agent" Linear app token (client_credentials grant,
+# 30-day tokens) so agent-authored issues and comments are attributed to
+# the app user, not the owner. Minting authority is a day capability;
+# night sessions use an already-minted token, never the secret.
+[profiles.day.secrets]
+LINEAR_BOT_CLIENT_SECRET = { provider = "keychain", value = "LINEAR_BOT_CLIENT_SECRET" }
+
 # Night profile: CREDENTIALS ONLY. This list is the complete set of night
 # credentials; an undeclared credential does not exist at night.
 # keyring_cache=false is load-bearing: fnox then discards the 184-day
