@@ -30,16 +30,26 @@ session while the flag is on IS a night session.**
    repositories — the server-enforced push allowlist) and have the owner
    confirm it. Last chance to catch an over-wide grant before sleep.
 4. Confirm the shift's task list (Linear). If none was agreed, ask now.
-5. Ask about background processes started today and still running — they keep
+5. **Credential summary** — the 1Password half of step 3's confirmation.
+   Print the night surface and read it against the task list just agreed:
+   `fnox -c ~/.config/fnox/config.toml -P night list` (the complete set of
+   night-resolvable secrets — an undeclared credential does not exist at
+   night) and `op item list --vault night` (everything the SA can read).
+   A task needing more: move the item into the night vault / declare it in
+   the night profile now, awake. A listed item no task needs: flag it —
+   fewer is better. Day-custody agent credentials (tagged
+   `night-shift-agents`, e.g. the Linear minting secret) never move into
+   the night vault.
+6. Ask about background processes started today and still running — they keep
    their day environment (and anything inherited from an fnox-activated
    launch shell) all night; process memory is the one boundary no channel
    reaches. List survivors in the shift report.
-6. Flip: `~/.claude/hooks/night-gate.sh on --mode full --scope repo1,repo2`
+7. Flip: `~/.claude/hooks/night-gate.sh on --mode full --scope repo1,repo2`
    (scope = the list confirmed in step 3; an arm-time record, not truth).
    Flipping also clears the fnox daemon — no day secret survives in memory
    across the boundary — and live sessions get a night notice on their next
    prompt.
-7. Suggest a fresh plain `claude` session for the main overnight work — fresh
+8. Suggest a fresh plain `claude` session for the main overnight work — fresh
    context for a long shift; nothing special to launch.
 
 ## off

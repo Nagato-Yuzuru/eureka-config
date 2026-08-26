@@ -127,3 +127,8 @@ def test_fnox_night_profile_shape() -> None:
     # the top-level [secrets] table merges into EVERY named profile, so it
     # must stay empty: a base secret silently joins the night surface
     assert "secrets" not in cfg
+    # minting credentials ride the 1Password provider: locked app + op
+    # sentinel make them mechanically unreachable at night, while keychain
+    # items would stay readable after dark
+    day = cfg["profiles"]["day"]["secrets"]
+    assert day["LINEAR_BOT_CLIENT_SECRET"]["provider"] == "onepass"
