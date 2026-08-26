@@ -148,6 +148,14 @@ via = "mise"
 mise = { version = "1.34.0" }
 completions = { fnox = "fnox completion zsh" }
 
+# Encrypts linux night custody (fnox age provider) and the wizard's
+# provisioning step on the mac. PINNED for the same reason as fnox:
+# upgrades are deliberate daylight events.
+[packages.age]
+on = ["darwin", "linux"]
+via = "mise"
+mise = { version = "1.3.1" }
+
 [packages.shellcheck]
 on = ["darwin", "linux"]
 dnf = { name = "ShellCheck" }

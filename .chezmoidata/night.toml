@@ -1,0 +1,11 @@
+# Night custody facts consumed by dot_config/fnox/config.toml.tmpl.
+# Both values are public-safe: an age recipient is a public key, and the
+# ciphertext is age-encrypted to that recipient. Empty until the first
+# linux machine is provisioned (setup wizard, linux custody stage).
+[night.age]
+# Public half of the night-custody key; the private half lives only at
+# ~/.config/fnox/age.key on linux machines, placed by the owner.
+recipient = ""
+# base64 of raw `age -r <recipient>` output over the 1Password
+# service-account token (the fnox age provider's inline value format).
+sa_token_ciphertext = ""

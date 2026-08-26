@@ -188,7 +188,7 @@ finish() {
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=5
+TOTAL_STAGES=6
 
 NIGHT_DIR="$HOME/.claude/night"
 
@@ -215,8 +215,8 @@ fi
 stage "1Password — night vault and read-only service account"
 say "The night vault is the ONLY 1Password surface night sessions can read."
 say "This stage runs op commands directly — approve the Touch ID prompts."
-if op vault get night >/dev/null 2>&1; then
-  note "vault 'night' already exists"
+if op vault get Night >/dev/null 2>&1; then
+  note "vault 'Night' already exists"
 else
   op vault create Night >/dev/null && printf '  %s✓ created%s vault Night\n' "$GREEN" "$RESET"
 fi
@@ -243,10 +243,29 @@ else
   op item create --category=password --title=canary --vault Night password=night-canary-ok >/dev/null \
     && printf '  %s✓ created%s canary item\n' "$GREEN" "$RESET"
 fi
-step "Move/copy the few items night tasks genuinely need into 'night'. Fewer is better."
+step "Move/copy the few items night tasks genuinely need into 'Night'. Fewer is better."
 pause "Vault contents ready?"
 
-# ── Stage 4: ssh hardening + branch rulesets ──────────────────────────────
+# ── Stage 4: linux custody (age) ──────────────────────────────────────────
+stage "Linux custody — age key for machines without a keychain"
+say "linux has no unlocked secret service: night custody rides an age key."
+say "Recipient + ciphertext are committed (.chezmoidata/night.toml — both"
+say "public-safe); the private key travels only owner→machine."
+if confirm "Provision a linux machine now?"; then
+  step "Generate on this mac: age-keygen -o /tmp/night-age.key"
+  step "Record the public key (age1...) as [night.age] recipient in .chezmoidata/night.toml"
+  step "Encrypt the SA token to it:"
+  step "  fnox -c ~/.config/fnox/config.toml -P night get OP_SERVICE_ACCOUNT_TOKEN \\"
+  step "    | age -r <recipient> | base64 > /tmp/sa.b64"
+  step "Paste /tmp/sa.b64 as sa_token_ciphertext in .chezmoidata/night.toml; commit + chezmoi apply"
+  step "Move /tmp/night-age.key to the linux machine as ~/.config/fnox/age.key (chmod 600); remove the /tmp copies"
+  pause "Linux custody provisioned?"
+else
+  note "skipped — on linux the config renders an UNPROVISIONED marker until this runs"
+  SKIPPED+=("linux age custody")
+fi
+
+# ── Stage 5: ssh hardening + branch rulesets ──────────────────────────────
 stage "ssh hardening + GitHub rulesets"
 say "ssh: one Include line makes the 1Password agent vanish while the night"
 say "flag exists (ssh dies in ms instead of hanging until morning)."
@@ -265,7 +284,7 @@ step "Rules: Block force pushes · Require a pull request before merging"
 step "Bypass list: leave EMPTY (binds you and your tokens too)"
 pause "Rulesets created where the plan allows (or consciously skipped)?"
 
-# ── Stage 5: preflight ────────────────────────────────────────────────────
+# ── Stage 6: preflight ────────────────────────────────────────────────────
 stage "Preflight"
 say "The same three-verdict check /night on runs before every shift:"
 printf '\n'

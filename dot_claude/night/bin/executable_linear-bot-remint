@@ -5,6 +5,11 @@
 # construction: the client secret resolves through 1Password, which is
 # locked at night and sentinel-killed in night shells — running this is
 # itself a presence-gated act. Preflight warns when expiry nears.
+#
+# Minting invalidates the previous token server-side (one active
+# client_credentials token per app), so an ad-hoc mint kills the wired
+# connection — always mint THROUGH this script, which swaps the header in
+# the same run.
 set -euo pipefail
 
 CFG="$HOME/.config/fnox/config.toml"

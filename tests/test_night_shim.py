@@ -8,6 +8,7 @@ testability seam: run the checks, skip the fnox exec.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tomllib
@@ -17,7 +18,26 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SHIM = REPO_ROOT / "dot_claude" / "night" / "bin" / "executable_night"
-FNOX_CONFIG = REPO_ROOT / "dot_config" / "fnox" / "config.toml"
+FNOX_CONFIG_TMPL = REPO_ROOT / "dot_config" / "fnox" / "config.toml.tmpl"
+
+
+def render_fnox_config(os_: str, extra_data: dict | None = None) -> dict:
+    """The fnox config exactly as chezmoi renders it for the given OS."""
+    data: dict = {"chezmoi": {"os": os_, "arch": "arm64" if os_ == "darwin" else "amd64"}}
+    if extra_data:
+        data.update(extra_data)
+    proc = subprocess.run(
+        [
+            "chezmoi", "execute-template", "--source", str(REPO_ROOT),
+            "--override-data", json.dumps(data),
+            "--file", str(FNOX_CONFIG_TMPL),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )  # fmt: skip
+    assert proc.returncode == 0, proc.stderr
+    return tomllib.loads(proc.stdout)
 
 
 def shim_verdict(argv: list[str]) -> str:
@@ -115,7 +135,7 @@ def test_shim_no_args_usage_error() -> None:
 
 def test_fnox_night_profile_shape() -> None:
     # the load-bearing knobs of the night credential profile
-    cfg = tomllib.loads(FNOX_CONFIG.read_text())
+    cfg = render_fnox_config("darwin")
     lease = cfg["profiles"]["night"]["leases"]["github"]
     assert lease["type"] == "github-oauth"
     assert lease["env_var"] == "GH_TOKEN"
@@ -124,6 +144,7 @@ def test_fnox_night_profile_shape() -> None:
     secrets = cfg["profiles"]["night"]["secrets"]
     # credentials only, and the complete night set: nothing undeclared
     assert set(secrets) == {"OP_SERVICE_ACCOUNT_TOKEN"}
+    assert secrets["OP_SERVICE_ACCOUNT_TOKEN"]["provider"] == "keychain"
     # the top-level [secrets] table merges into EVERY named profile, so it
     # must stay empty: a base secret silently joins the night surface
     assert "secrets" not in cfg
@@ -132,3 +153,25 @@ def test_fnox_night_profile_shape() -> None:
     # items would stay readable after dark
     day = cfg["profiles"]["day"]["secrets"]
     assert day["LINEAR_BOT_CLIENT_SECRET"]["provider"] == "onepass"
+
+
+def test_fnox_linux_custody_rides_age() -> None:
+    # provisioned linux: the SA rides the committed age ciphertext and the
+    # owner-placed key; no keychain provider exists to reach for
+    cfg = render_fnox_config(
+        "linux",
+        {"night": {"age": {"recipient": "age1testrecipient", "sa_token_ciphertext": "QUJD"}}},
+    )
+    assert "keychain" not in cfg.get("providers", {})
+    assert cfg["providers"]["age"]["recipients"] == ["age1testrecipient"]
+    assert cfg["providers"]["age"]["key_file"] == "~/.config/fnox/age.key"
+    sa = cfg["profiles"]["night"]["secrets"]["OP_SERVICE_ACCOUNT_TOKEN"]
+    assert sa == {"provider": "age", "value": "QUJD"}
+    assert "secrets" not in cfg
+
+
+def test_fnox_linux_unprovisioned_declares_nothing() -> None:
+    # before the wizard's custody stage: an absent credential fails fast at
+    # preflight, never resolves to a silently wrong one
+    cfg = render_fnox_config("linux")
+    assert cfg["profiles"]["night"].get("secrets", {}) == {}

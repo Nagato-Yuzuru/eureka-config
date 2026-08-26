@@ -3,13 +3,21 @@
 # The night profile holds credentials only; the hygiene env lives in
 # ~/.claude/night/env.sh.
 
-# TODO(YUZ-80): on headless linux the keychain provider has no unlocked
-# secret service. Custody there goes age (wizard provisions the key) or
-# lease-only (no standing secret at all; VM resting state = night tier).
-# Template this per-OS when a VM is actually provisioned.
+# Custody is per-OS. darwin: the login keychain, ACL bound to the fnox
+# binary. linux has no unlocked secret service, so night custody rides an
+# age key the owner places at ~/.config/fnox/age.key when provisioning the
+# machine (setup wizard, linux custody stage); recipient and ciphertext
+# are committed in .chezmoidata/night.toml — both are public-safe.
+{{ if eq .chezmoi.os "darwin" -}}
 [providers.keychain]
 type = "keychain"
 service = "fnox"
+{{ else -}}
+[providers.age]
+type = "age"
+recipients = [{{ .night.age.recipient | quote }}]
+key_file = "~/.config/fnox/age.key"
+{{ end -}}
 
 # Day-custody vault for the agent system; membership across vaults is
 # tracked by the agent-system TAG, this vault is just the default home.
@@ -51,7 +59,14 @@ LINEAR_BOT_CLIENT_SECRET = { provider = "onepass", value = "op://Night Shift Age
 # disk can renew authority without a fresh device-flow approval.
 # "Authorize while awake" rests here.
 [profiles.night.secrets]
+{{ if eq .chezmoi.os "darwin" -}}
 OP_SERVICE_ACCOUNT_TOKEN = { provider = "keychain", value = "OP_SERVICE_ACCOUNT_TOKEN" }
+{{ else if .night.age.sa_token_ciphertext -}}
+OP_SERVICE_ACCOUNT_TOKEN = { provider = "age", value = {{ .night.age.sa_token_ciphertext | quote }} }
+{{ else -}}
+# UNPROVISIONED: no night custody on this machine yet. Run the setup
+# wizard's linux custody stage; preflight fails the SA check until then.
+{{ end -}}
 
 [profiles.night.leases.github]
 type = "github-oauth"
