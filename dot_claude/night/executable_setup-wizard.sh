@@ -218,10 +218,10 @@ say "This stage runs op commands directly — approve the Touch ID prompts."
 if op vault get night >/dev/null 2>&1; then
   note "vault 'night' already exists"
 else
-  op vault create night >/dev/null && printf '  %s✓ created%s vault night\n' "$GREEN" "$RESET"
+  op vault create Night >/dev/null && printf '  %s✓ created%s vault Night\n' "$GREEN" "$RESET"
 fi
 if confirm "Create service account 'claude-night' (read-only on night vault)?"; then
-  SA_OUT=$(op service-account create claude-night --vault "night:read_items" --format=json)
+  SA_OUT=$(op service-account create claude-night --vault "Night:read_items" --format=json)
   SA_TOK=$(printf '%s' "$SA_OUT" | jq -r '.token // .secret // empty')
   if [[ -n "$SA_TOK" ]]; then
     # one write path, loudly: a fallback that silently changed the config or
@@ -236,11 +236,11 @@ fi
 
 # ── Stage 3: canary item ──────────────────────────────────────────────────
 stage "Canary — one readable item proves the whole vault channel"
-say "night op read op://night/canary/password is the standing end-to-end check."
-if op item get canary --vault night >/dev/null 2>&1; then
+say "night op read op://Night/canary/password is the standing end-to-end check."
+if op item get canary --vault Night >/dev/null 2>&1; then
   note "canary already exists"
 else
-  op item create --category=password --title=canary --vault night password=night-canary-ok >/dev/null \
+  op item create --category=password --title=canary --vault Night password=night-canary-ok >/dev/null \
     && printf '  %s✓ created%s canary item\n' "$GREEN" "$RESET"
 fi
 step "Move/copy the few items night tasks genuinely need into 'night'. Fewer is better."

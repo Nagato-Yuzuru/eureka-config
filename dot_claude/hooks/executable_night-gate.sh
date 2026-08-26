@@ -370,7 +370,7 @@ cmd_preflight() {
         soft "op absent — night vault channel unavailable on this machine (linux custody: YUZ-80)"
     elif sa=$(FNOX_NON_INTERACTIVE=1 fnox -c "$HOME/.config/fnox/config.toml" -P night get OP_SERVICE_ACCOUNT_TOKEN 2> /dev/null) \
         && OP_SERVICE_ACCOUNT_TOKEN="$sa" timeout 20 op vault list --format=json 2> /dev/null \
-        | jq -e 'map(.name) == ["night"]' > /dev/null 2>&1; then
+        | jq -e 'map(.name) == ["Night"]' > /dev/null 2>&1; then
         ok "SA reaches exactly the night vault (keychain ACL + 1Password, end to end)"
     else
         bad "SA cannot list exactly the night vault (keychain ACL? dead token?)"

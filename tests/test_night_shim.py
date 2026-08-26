@@ -83,7 +83,7 @@ ALLOW = [
     ["gh", "api", "user", "-q", ".login"],
     ["gh", "api", "-X", "GET", "search/issues", "-f", "q=x"],
     ["gh", "pr", "list"],  # App has no PR perms; the server 403 is the tier
-    ["op", "read", "op://night/item/field"],
+    ["op", "read", "op://Night/item/field"],
     ["echo", "--force"],  # non-git programs' flags are data
 ]
 

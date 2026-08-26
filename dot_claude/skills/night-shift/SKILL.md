@@ -19,7 +19,7 @@ three channels:
   an error to fight or retry.
 - **Credentials are per-invocation** — `~/.claude/night/bin/night <cmd>` runs
   one command with tonight's lease: `night git push`, `night gh api`,
-  `night op read op://night/...`. Tokens never live in the session
+  `night op read op://Night/...`. Tokens never live in the session
   environment; each invocation resolves fresh from the lease ledger. The
   shim also carries the only command checks left in the system (git push
   force/delete/default-branch, gh release writes, mutating gh api) — a

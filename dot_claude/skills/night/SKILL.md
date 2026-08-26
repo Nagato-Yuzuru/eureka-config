@@ -34,12 +34,11 @@ session while the flag is on IS a night session.**
    Print the night surface and read it against the task list just agreed:
    `fnox -c ~/.config/fnox/config.toml -P night list` (the complete set of
    night-resolvable secrets — an undeclared credential does not exist at
-   night) and `op item list --vault night` (everything the SA can read).
-   A task needing more: move the item into the night vault / declare it in
+   night) and `op item list --vault Night` (everything the SA can read).
+   A task needing more: move the item into the Night vault / declare it in
    the night profile now, awake. A listed item no task needs: flag it —
-   fewer is better. Day-custody agent credentials (tagged
-   `night-shift-agents`, e.g. the Linear minting secret) never move into
-   the night vault.
+   fewer is better. Day-custody agent credentials (tagged `agent-system`,
+   e.g. the Linear minting secret) never move into the Night vault.
 6. Ask about background processes started today and still running — they keep
    their day environment (and anything inherited from an fnox-activated
    launch shell) all night; process memory is the one boundary no channel

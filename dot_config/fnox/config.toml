@@ -12,15 +12,15 @@ type = "keychain"
 service = "fnox"
 
 # Day-custody vault for the agent system; membership across vaults is
-# tracked by the night-shift-agents TAG, this vault is just the default
-# home. The night SA cannot read it (SA is scoped to the "night" vault;
+# tracked by the agent-system TAG, this vault is just the default home.
+# The night SA cannot read it (SA is scoped to the "Night" vault;
 # preflight asserts exactly that), so anything here is mechanically
 # day-only: at night the op sentinel kills the path in ~50ms and the
 # desktop app is locked anyway. Day resolution rides the desktop app, so
 # every mint is presence-gated.
 [providers.onepass]
 type = "1password"
-vault = "night-shift-agents"
+vault = "Night Shift Agents"
 
 # Day-side cache for activate's per-prompt hook-env resolution (memory
 # only, unix socket, same-uid). The short idle timeout keeps the in-memory
@@ -42,7 +42,7 @@ idle_timeout = "2h"
 # the app user, not the owner. Night sessions use an already-minted token,
 # never the secret; the onepass provider makes that mechanical (see above).
 [profiles.day.secrets]
-LINEAR_BOT_CLIENT_SECRET = { provider = "onepass", value = "op://night-shift-agents/linear-night-shift-agent/client_secret" }
+LINEAR_BOT_CLIENT_SECRET = { provider = "onepass", value = "op://Night Shift Agents/Linear Night Shift Agent/client_secret" }
 
 # Night profile: CREDENTIALS ONLY. This list is the complete set of night
 # credentials; an undeclared credential does not exist at night.
