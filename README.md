@@ -327,9 +327,47 @@ owns, plus reserved `$`-prefixed top-level keys:
 - Remove a feature: delete its source file. Its hooks and list elements vanish
   on the next apply; anything the user modified meanwhile is left with a
   warning to clean up manually.
+- Scope a feature to one kind of machine: split it into `<feature>.json` and
+  `<feature>-<os>.json`, then exclude the second one in `.chezmoiignore`. A file
+  that never deploys leaves its keys unmanaged on that machine. Moving a key out
+  of the shared file counts as a removal everywhere else, so it retires on the
+  next apply.
 - Resolve a conflict: align either the fragment (`chezmoi edit`) or the live
   settings, then `chezmoi apply` again. The base advances by itself once
   settings verifiably converge.
 
 Exact semantics live in the docstring of `dot_claude/modify_settings.json`
 (the engine; the snapshot script imports it), regression-tested in `tests/`.
+
+### Plugin declarations
+
+`plugins.json` holds the plugins and marketplaces that belong on every machine.
+`plugins-darwin.json` holds the ones that only make sense on macOS, today just
+`playwright`. Neither file declares a `$merge` strategy, so the default applies
+and every plugin id is owned as its own leaf. A plugin you install by hand on
+one machine is a foreign key that chezmoi never touches.
+
+Three things are left out on purpose.
+
+`~/.claude/local-plugins/` (the `ts7-lsp` and `ty-lsp` plugins) is not managed
+here, so the `local` marketplace and the two `@local` entries stay out of the
+fragments as well. A fresh machine has no such directory, and pointing at one
+would only produce two permanent rows in the `/plugin` Errors tab.
+
+The plugins currently set to `false` are not declared either. "Installed and
+switched off" is a state the `/plugin` UI already holds, and copying it into the
+source only creates a second place to keep true.
+
+There is no install step, and that is the part that catches people out. Claude
+Code adds the marketplaces from `extraKnownMarketplaces` by itself once the
+folder is trusted, but it will not install a plugin just because settings enable
+it. On a new machine the declared plugins report as not installed until you run
+the `claude plugin install` line Claude Code prints. A script that did this for
+you would have to track install scope, marketplace refresh and version pinning
+to stay idempotent, which is a lot of moving parts for a step you take once per
+machine.
+
+Day to day this is one line. Add a plugin by adding its id to `plugins.json`, or
+to `plugins-darwin.json` if it should stay on the Mac. Delete the line and the
+key disappears from `settings.json` on the next apply, as long as nobody changed
+it meanwhile. That withdraws the declaration. It does not uninstall anything.
