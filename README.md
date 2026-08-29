@@ -332,9 +332,11 @@ owns, plus reserved `$`-prefixed top-level keys:
   that never deploys leaves its keys unmanaged on that machine. Moving a key out
   of the shared file counts as a removal everywhere else, so it retires on the
   next apply.
-- Resolve a conflict: align either the fragment (`chezmoi edit`) or the live
-  settings, then `chezmoi apply` again. The base advances by itself once
-  settings verifiably converge.
+- Resolve a conflict: to keep the live value, align the fragment
+  (`chezmoi edit`); to take the declared value, paste the
+  `CLAUDE_MANAGED_FORCE='<path>,…' chezmoi apply` command the report prints,
+  trimmed to the paths you mean — per-path, desired-wins only, one-shot. The
+  base advances by itself once settings verifiably converge.
 
 Exact semantics live in the docstring of `dot_claude/modify_settings.json`
 (the engine; the snapshot script imports it), regression-tested in `tests/`.

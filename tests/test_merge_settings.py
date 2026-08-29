@@ -42,13 +42,14 @@ FRAGMENT = {
 }
 
 
-def merge(engine, current, fragment=FRAGMENT, base=None):
+def merge(engine, current, fragment=FRAGMENT, base=None, force=frozenset()):
     """Compose a single fragment (it must compose cleanly: compose raises) and merge it.
 
-    Returns the completed Merger — read ``.merged``, ``.conflicts``, ``.warnings``.
+    Returns the completed Merger — read ``.merged``, ``.conflicts``, ``.forced``,
+    ``.warnings``.
     """
     composed = engine.compose([("test.json", fragment)])
-    return engine.merge_composed(current, composed, base if base is not None else {})
+    return engine.merge_composed(current, composed, base if base is not None else {}, force=force)
 
 
 # --- merge semantics ---------------------------------------------------------
@@ -333,6 +334,33 @@ class TestConflicts:
         assert [c.path for c in conflicts] == ["autoMode"]
 
 
+class TestForce:
+    """Per-path conflict resolution in favor of desired (CLAUDE_MANAGED_FORCE)."""
+
+    def test_forced_conflict_takes_desired(self, engine):
+        r = merge(engine, {"a": 9}, fragment={"a": 1}, force=frozenset({"a"}))
+        assert r.conflicts == []
+        assert r.merged == {"a": 1}
+        assert [(c.path, c.current, c.desired) for c in r.forced] == [("a", 9, 1)]
+
+    def test_force_subset_leaves_other_conflicts(self, engine):
+        fragment = {"a": 1, "b": {"c": 2}}
+        r = merge(engine, {"a": 9, "b": {"c": 8}}, fragment=fragment, force=frozenset({"a"}))
+        assert [c.path for c in r.conflicts] == ["b.c"]
+        assert [c.path for c in r.forced] == ["a"]
+
+    def test_force_never_touches_converged_paths(self, engine):
+        r = merge(engine, {"a": 1}, fragment={"a": 1}, force=frozenset({"a"}))
+        assert r.forced == [] and r.conflicts == []
+        assert r.merged == {"a": 1}
+
+    def test_forced_object_position_takes_whole_desired_subtree(self, engine):
+        r = merge(engine, {"b": "oops"}, fragment={"b": {"c": 2}}, force=frozenset({"b"}))
+        assert r.conflicts == []
+        assert r.merged == {"b": {"c": 2}}
+        assert [c.path for c in r.forced] == ["b"]
+
+
 # --- filter I/O (main) -------------------------------------------------------
 
 
@@ -341,8 +369,11 @@ def run_filter(
     tmp_path: Path,
     fragments: dict[str, dict] | None = None,
     base: dict | None = None,
+    env_extra: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     env = dict(os.environ)
+    env.pop("CLAUDE_MANAGED_FORCE", None)  # never inherit force from the developer's shell
+    env.update(env_extra or {})
     fragment_dir = tmp_path / "claude-managed.d"
     if fragments is not None:
         fragment_dir.mkdir(exist_ok=True)
@@ -460,3 +491,49 @@ class TestFilterIO:
         result = run_filter("{}", tmp_path, fragments={"core.json": fragment})
         assert result.returncode == 0
         assert "规则 — em dash" in result.stdout
+
+
+class TestForceFilterIO:
+    """CLAUDE_MANAGED_FORCE end to end: the env var, the report, the retry command."""
+
+    def test_force_env_resolves_conflict_and_reports(self, tmp_path):
+        result = run_filter(
+            '{"a": 9}',
+            tmp_path,
+            fragments={"core.json": {"a": 1}},
+            env_extra={"CLAUDE_MANAGED_FORCE": "a"},
+        )
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == {"a": 1}
+        assert "forced `a`: 9 -> 1" in result.stderr
+
+    def test_conflict_report_ends_with_paste_ready_command(self, tmp_path):
+        result = run_filter('{"a": 9, "b": 8}', tmp_path, fragments={"core.json": {"a": 1, "b": 2}})
+        assert result.returncode == 1
+        assert "CLAUDE_MANAGED_FORCE='a,b' chezmoi apply" in result.stderr
+
+    def test_partial_force_fails_and_resuggests_consumed_paths(self, tmp_path):
+        result = run_filter(
+            '{"a": 9, "b": 8}',
+            tmp_path,
+            fragments={"core.json": {"a": 1, "b": 2}},
+            env_extra={"CLAUDE_MANAGED_FORCE": "a"},
+        )
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert "conflict at `b`" in result.stderr
+        assert "conflict at `a`" not in result.stderr
+        # nothing applied this run, so the retry command must re-include `a`
+        assert "CLAUDE_MANAGED_FORCE='b,a' chezmoi apply" in result.stderr
+
+    def test_unmatched_force_warns_and_passes_through(self, tmp_path):
+        quirky = '{"a":1}'  # byte-stable passthrough must survive a stale force var
+        result = run_filter(
+            quirky,
+            tmp_path,
+            fragments={"core.json": {"a": 1}},
+            env_extra={"CLAUDE_MANAGED_FORCE": "typo.path, ,"},
+        )
+        assert result.returncode == 0
+        assert result.stdout == quirky
+        assert "`typo.path` matched no conflict" in result.stderr

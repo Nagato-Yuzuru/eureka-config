@@ -50,6 +50,14 @@ are compose errors):
     ``$legacyHooks`` retired hook-script basenames to purge (union across
                      fragments).
 
+Ownership has two axes per path: ADDRESSING — what one cell of ownership is
+(an object key, a whole ``exact`` value, an ``ensure`` element identified by
+its value, a ``keyed`` element identified by its claim key) — and DRIFT
+POLICY — what a foreign change to an owned cell does. Only a *modified*
+``exact`` cell conflicts; a deleted ``exact`` cell, and any drift on
+``ensure``/``keyed`` cells, is reasserted silently: the list strategies
+manage mechanism (hooks, permission rules), not preference.
+
 Compose (fragments -> one effective fragment, before the three-way merge):
     objects deep-merge; ``ensure`` lists union in filename order; ``keyed``
     lists concatenate. Anything else colliding with a different value, a
@@ -76,9 +84,18 @@ Python's ``==`` says otherwise, so a bool/number drift conflicts instead of
 silently converging.
 
 Conflicts are collected across the whole tree and reported together on stderr;
-exit 1 makes chezmoi leave the target untouched. When the merge is a no-op the
-original stdin bytes are passed through verbatim, so formatting differences
-never show up as drift in ``chezmoi diff``.
+exit 1 makes chezmoi leave the target untouched. The report ends with a
+ready-to-paste ``CLAUDE_MANAGED_FORCE='<path>,<path>' chezmoi apply``: the
+one-shot escape hatch resolving exactly the named conflicts in favor of the
+fragments. There is no opposite direction — taking the live value is done by
+editing the fragment. Force paths are compared verbatim against the printed
+conflict path, comma-separated, so a path containing a comma cannot be forced
+(fails loudly as "matched no conflict"); the env var lives for one command and
+the base advances on the converged apply, so force never persists. A partial
+force still exits 1 and applies nothing (the file stays all-or-nothing); the
+suggested command then re-includes the already-forced paths. When the merge is
+a no-op the original stdin bytes are passed through verbatim, so formatting
+differences never show up as drift in ``chezmoi diff``.
 """
 
 from __future__ import annotations
@@ -385,18 +402,21 @@ def _validate(
 class Merger:
     """One merge pass of the composed fragment against current settings.
 
-    Inputs ``policy`` and ``legacy`` are the cross-cutting context the per-node
-    strategies read without threading it through every recursive call. Outputs
-    accumulate on the instance: ``merged`` is the result tree (populated by
-    ``merge_composed``; discard it when ``conflicts`` is non-empty — a conflict
-    leaves the current value in place), and ``warnings`` report
-    retired-but-modified paths left as-is.
+    Inputs ``policy``, ``legacy`` and ``force`` are the cross-cutting context
+    the per-node strategies read without threading it through every recursive
+    call. Outputs accumulate on the instance: ``merged`` is the result tree
+    (populated by ``merge_composed``; discard it when ``conflicts`` is
+    non-empty — a conflict leaves the current value in place), ``warnings``
+    report retired-but-modified paths left as-is, and ``forced`` records the
+    would-be conflicts resolved as desired because their path was in ``force``.
     """
 
     policy: dict[tuple[str, ...], Strategy]
     legacy: tuple[str, ...]
+    force: frozenset[str] = frozenset()
     merged: dict[str, Json] = field(default_factory=dict)
     conflicts: list[Conflict] = field(default_factory=list)
+    forced: list[Conflict] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     def merge(
@@ -421,7 +441,11 @@ class Merger:
                 return self._leaf(current, desired, base, path)
 
     def _conflict(self, path: tuple[str, ...], current: Json, desired: Json) -> Json:
-        self.conflicts.append(Conflict(".".join(path), current, desired))
+        record = Conflict(".".join(path), current, desired)
+        if record.path in self.force:
+            self.forced.append(record)
+            return desired
+        self.conflicts.append(record)
         return current
 
     def _object(
@@ -518,13 +542,22 @@ class Merger:
         return self._conflict(path, current, desired)
 
 
-def merge_composed(current: dict[str, Json], composed: Composed, base: dict[str, Json]) -> Merger:
+def merge_composed(
+    current: dict[str, Json],
+    composed: Composed,
+    base: dict[str, Json],
+    *,
+    force: frozenset[str] = frozenset(),
+) -> Merger:
     """Merge the composed fragment into current settings.
 
+    ``force``: conflict paths (their rendered dotted form) to resolve as the
+    fragment value instead of conflicting — the caller answers for them.
+
     Returns the completed Merger: read ``.merged`` (discard it when
-    ``.conflicts`` is non-empty) and ``.warnings``.
+    ``.conflicts`` is non-empty), ``.forced`` and ``.warnings``.
     """
-    merger = Merger(policy=composed.policy, legacy=composed.legacy)
+    merger = Merger(policy=composed.policy, legacy=composed.legacy, force=force)
     merged = merger.merge(current, composed.data, base, ())
     assert isinstance(merged, dict)  # invariant: merging two objects yields an object
     merger.merged = merged
@@ -550,6 +583,12 @@ def fragment_dir() -> Path:
 
 def base_file() -> Path:
     return _env_path("CLAUDE_BASE_FILE", Path.home() / ".claude/.claude-managed.applied.json")
+
+
+def forced_paths() -> frozenset[str]:
+    """CLAUDE_MANAGED_FORCE: comma-separated conflict paths to resolve as desired."""
+    raw = os.environ.get("CLAUDE_MANAGED_FORCE", "")
+    return frozenset(part for p in raw.split(",") if (part := p.strip()))
 
 
 def load_base(path: Path) -> dict[str, Json]:
@@ -632,7 +671,14 @@ def main() -> int:
         )
         return 1
 
-    result = merge_composed(current, composed, load_base(base_file()))
+    force = forced_paths()
+    result = merge_composed(current, composed, load_base(base_file()), force=force)
+
+    for path in sorted(force - {c.path for c in result.forced}):
+        print(
+            f"claude-managed: CLAUDE_MANAGED_FORCE `{path}` matched no conflict; ignored",
+            file=sys.stderr,
+        )
 
     if result.conflicts:
         for c in result.conflicts:
@@ -642,13 +688,24 @@ def main() -> int:
                 f"    desired: {json.dumps(c.desired, ensure_ascii=False)}",
                 file=sys.stderr,
             )
+        # Nothing applied this run, so the retry command re-includes paths
+        # already consumed by force — they conflict again next run without it.
+        retry = ",".join(c.path for c in (*result.conflicts, *result.forced))
         print(
-            "  settings.json left untouched. Align the fragments"
-            f" (chezmoi edit {directory}) or the live settings, then re-run.",
+            "  settings.json left untouched. Take a live value by aligning its fragment"
+            f" (chezmoi edit {directory}); take the desired values with:\n"
+            f"    CLAUDE_MANAGED_FORCE='{retry}' chezmoi apply",
             file=sys.stderr,
         )
         return 1
 
+    for c in result.forced:
+        print(
+            f"claude-managed: forced `{c.path}`:"
+            f" {json.dumps(c.current, ensure_ascii=False)}"
+            f" -> {json.dumps(c.desired, ensure_ascii=False)}",
+            file=sys.stderr,
+        )
     for message in result.warnings:
         print(f"claude-managed: {message}", file=sys.stderr)
 
