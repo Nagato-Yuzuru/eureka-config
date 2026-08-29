@@ -1,3 +1,6 @@
 {
-  "remoteControlAtStartup": false
+  "remoteControlAtStartup": false,
+  "attribution": {
+    "sessionUrl": false
+  }
 }
