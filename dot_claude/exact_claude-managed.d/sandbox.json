@@ -1,0 +1,10 @@
+{
+  "env": {
+    "NODE_OPTIONS": "--use-env-proxy"
+  },
+  "sandbox": {
+    "enabled": true,
+    "enableWeakerNetworkIsolation": true,
+    "allowUnsandboxedCommands": true
+  }
+}
