@@ -3,9 +3,10 @@
 
 Every artifact is one line per package in key order, in the exact syntax the
 consumer reads: Brewfile lines, dnf names and repos, mise `[tools]` entries,
-`uv tool install` specs, `<command> <recipe>` for refresh-completions. STAMP is
-the hash of the data files the tree was compiled from; the `artifact` template
-recomputes it and refuses to serve a stale tree.
+`uv tool install` specs, `<command> <recipe>` for refresh-completions and
+`<mise tool> <command>...` for its --changed filter. STAMP is the hash of the
+data files the tree was compiled from; the `artifact` template recomputes it
+and refuses to serve a stale tree.
 """
 
 from __future__ import annotations
@@ -78,6 +79,17 @@ def completions(rs: Iterable[Resolved]) -> list[str]:
     return [f"{cmd} {recipe}" for r in rs for cmd, recipe in sorted(r.completions.items())]
 
 
+def mise_completions(rs: Iterable[Resolved]) -> list[str]:
+    """`<mise tool name> <command>...` per mise-backed package with recipes — the map
+    `refresh-completions --changed` reads to turn $MISE_INSTALLED_TOOLS into the
+    commands whose completions a mise install session made stale."""
+    return [
+        f"{r.name} {' '.join(sorted(r.completions))}"
+        for r in rs
+        if r.backend == "mise" and r.completions
+    ]
+
+
 ARTIFACTS: dict[str, Callable[[Iterable[Resolved]], list[str]]] = {
     "brewfile": brewfile,
     "dnf-list": dnf_list,
@@ -85,6 +97,7 @@ ARTIFACTS: dict[str, Callable[[Iterable[Resolved]], list[str]]] = {
     "mise-tools": mise_tools,
     "uv-tools": uv_tools,
     "completions": completions,
+    "mise-completions": mise_completions,
 }
 
 

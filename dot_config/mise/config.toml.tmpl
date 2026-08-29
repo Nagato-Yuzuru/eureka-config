@@ -13,6 +13,9 @@ npm.package_manager = "pnpm"
 #   refresh-completions  regenerate the zsh completions no package manager ships
 #   audit-completions    who provides each tool's completion on this machine
 [hooks]
-# Fires after every `mise install`/`mise up` session — also when nothing was installed
-# (MISE_INSTALLED_TOOLS = []), the one case worth skipping.
-postinstall = '[ "$MISE_INSTALLED_TOOLS" = "[]" ] || mise run refresh-completions'
+# Fires after every `mise install`/`mise use`/`mise up` session, in any directory —
+# including project-local installs that touch no completion recipe. --changed keeps
+# that cheap: only the completions owned by what this session installed regenerate
+# (usually none — the task exits in milliseconds). "[]" = nothing was installed.
+# -C: recipes run against the global toolset, not the calling project's pins.
+postinstall = '[ "$MISE_INSTALLED_TOOLS" = "[]" ] || mise -C "$HOME" run refresh-completions --changed'

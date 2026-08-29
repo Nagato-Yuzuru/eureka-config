@@ -50,6 +50,7 @@ REFRESH_SCRIPT = REPO_ROOT / "run_onchange_after_refresh-completions.sh.tmpl"
 
 PLATFORMS = load_data(DATA / "platforms.toml")["platforms"]
 MACHINES = load_data(DATA / "machines.toml")["machines"]
+GENERATED = load_data(DATA / "zsh.toml")["zsh"]["generatedCompletions"]
 REAL = Inventory.load(DATA)
 
 # --- harness ------------------------------------------------------------------------------------
@@ -512,6 +513,35 @@ RENDER_CASES = [
             ("completions", "darwin-arm64"): [],
             ("uv-tools", "linux-arm64"): ["ruff"],
         },
+    ),
+    RenderCase(
+        "mise-completions-map-the-mise-name-to-sorted-commands-where-the-package-installs",
+        {
+            "hugo": {
+                "on": ["darwin", "linux"],
+                "via": "mise",
+                "mise": {"name": "hugo-extended"},
+                "completions": {"hugo": "hugo completion zsh"},
+            },
+            "rust": {
+                "on": ["linux"],
+                "via": "mise",
+                "completions": {"rustup": "rustup completions zsh rustup", "cargo": "y"},
+            },
+        },
+        {
+            ("mise-completions", "linux-arm64"): ["hugo-extended hugo", "rust cargo rustup"],
+            ("mise-completions", "darwin-arm64"): ["hugo-extended hugo"],
+        },
+    ),
+    RenderCase(
+        "mise-completions-skip-other-backends",  # their installs never fire mise's hook
+        {
+            "mise": {"on": ["darwin"], "completions": {"mise": "mise completion zsh"}},
+            "ruff": {"on": ["darwin"], "via": "uv", "completions": {"ruff": "x"}},
+            "plain": {"on": ["darwin"], "via": "mise"},
+        },
+        {("mise-completions", "darwin-arm64"): []},
     ),
 ]
 
@@ -1035,6 +1065,10 @@ def test_mise_config_renders_the_tools_table(machine: str):
     doc = tomllib.loads(rendered)
     want = [ln.split(" = ", 1)[0].strip('"') for ln in lines(REAL, "mise-tools", machine)]
     assert sorted(doc["tools"]) == sorted(want)
+    assert "refresh-completions --changed" in doc["hooks"]["postinstall"], (
+        "postinstall must stay on the changed-only path — a bare refresh regenerates "
+        "every recipe after any mise install session, in any directory"
+    )
 
 
 @pytest.mark.parametrize("machine", MACHINES)
@@ -1045,6 +1079,88 @@ def test_refresh_completions_task_renders_to_valid_bash(machine: str, tmp_path: 
     script.write_text(rendered)
     check_shell(script)
     assert heredoc(rendered, "RECIPES") == lines(REAL, "completions", machine)
+    assert heredoc(rendered, "TOOLMAP") == lines(REAL, "mise-completions", machine)
+
+
+def run_refresh_task(
+    machine: str, tmp_path: Path, args: list[str], env: Mapping[str, str]
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Render this machine's refresh-completions task and run it hermetically: a private
+    cache dir and $HOME, and a PATH of system utilities only, so recipe commands are
+    absent (skipped) unless the host system happens to ship one — assertions below
+    stay agnostic to skip vs wrote."""
+    script = tmp_path / "refresh-completions"
+    script.write_text(chezmoi_render(MISE_TASKS / "executable_refresh-completions.tmpl", machine))
+    proc = subprocess.run(
+        ["bash", str(script), *args],
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(tmp_path),
+            "ZDOTDIR": str(tmp_path),
+            "XDG_CACHE_HOME": str(tmp_path / "cache"),
+            **env,
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return proc, tmp_path / "cache" / GENERATED
+
+
+@pytest.mark.parametrize("machine", MACHINES)
+def test_refresh_changed_ignores_tools_without_recipes(machine: str, tmp_path: Path):
+    """The postinstall hook's hot path: a session that installed only tools owning no
+    recipe — any project-local `mise use` — writes nothing and exits 0 immediately."""
+    proc, out = run_refresh_task(
+        machine,
+        tmp_path,
+        ["--changed"],
+        {"MISE_INSTALLED_TOOLS": '[{"name":"no-recipe-tool","version":"1.0.0"}]'},
+    )
+    assert (proc.returncode, proc.stdout, proc.stderr) == (0, "", "")
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("machine", MACHINES)
+def test_refresh_changed_overlays_only_the_installed_tools_commands(machine: str, tmp_path: Path):
+    """`--changed` processes the installed tools' commands and nothing else; files other
+    tools own stay in place (removal is the no-arg rebuild's job)."""
+    toolmap = lines(REAL, "mise-completions", machine)
+    if not toolmap:
+        pytest.skip("no mise-backed completion recipes on this machine")
+    tool, *cmds = toolmap[0].split()
+    (tmp_path / "cache" / GENERATED).mkdir(parents=True)
+    (tmp_path / "cache" / GENERATED / "_zzz").write_text("#compdef zzz\n")
+    proc, out = run_refresh_task(
+        machine,
+        tmp_path,
+        ["--changed"],
+        {"MISE_INSTALLED_TOOLS": json.dumps([{"name": tool, "version": "1.0.0"}])},
+    )
+    assert proc.returncode == 0, proc.stderr
+    processed = {ln.split()[1] for ln in proc.stdout.splitlines()}
+    assert processed == {f"_{c}" for c in cmds}
+    assert (out / "_zzz").exists()
+    assert {p.name for p in out.iterdir()} <= {"_zzz", *(f"_{c}" for c in cmds)}
+
+
+@pytest.mark.parametrize("machine", MACHINES)
+def test_refresh_full_run_rebuilds_from_scratch(machine: str, tmp_path: Path):
+    """No args: a file whose tool left packages.toml (or never had a recipe) is gone
+    afterwards — the only mode that removes."""
+    (tmp_path / "cache" / GENERATED).mkdir(parents=True)
+    (tmp_path / "cache" / GENERATED / "_zzz").write_text("#compdef zzz\n")
+    proc, out = run_refresh_task(machine, tmp_path, [], {})
+    assert proc.returncode == 0, proc.stderr
+    assert not (out / "_zzz").exists()
+
+
+def test_refresh_changed_outside_the_hook_fails_loudly(tmp_path: Path):
+    """`--changed` without the hook's $MISE_INSTALLED_TOOLS is a misuse, not a full run."""
+    proc, out = run_refresh_task(next(iter(MACHINES)), tmp_path, ["--changed"], {})
+    assert proc.returncode != 0
+    assert "postinstall" in proc.stderr
+    assert not out.exists()
 
 
 @pytest.mark.parametrize("machine", MACHINES)

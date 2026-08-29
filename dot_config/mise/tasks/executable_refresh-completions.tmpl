@@ -2,17 +2,44 @@
 #MISE description="regenerate the zsh completions no package manager ships (mise tools, uv tools, casks)"
 # The recipes are the `completions` field of .chezmoidata/packages.toml, compiled
 # per machine by `uv run render` (.rendered/) and included by chezmoi.
-# Runs from mise's postinstall hook (~/.config/mise/config.toml), from chezmoi's
-# run_onchange_after_refresh-completions when this machine's recipe list changes,
-# and by hand.
+# Runs as `refresh-completions --changed` from mise's postinstall hook
+# (~/.config/mise/config.toml), from chezmoi's run_onchange_after_refresh-completions
+# when this machine's recipe list changes, and by hand.
 #
-# The output dir is rebuilt from scratch on every run, so a tool that leaves
-# packages.toml, or is not installed on this machine, leaves no file behind. It
-# is the LAST fpath entry (.zshrc): a completion the package manager ships
-# always wins, and what is generated here only fills gaps — declaring a recipe
-# for a tool whose backend does ship one costs a shadowed file, nothing more.
-# `mise run audit-completions` shows who provides what on this machine.
+# No args rebuilds the output dir from scratch, so a tool that leaves
+# packages.toml, or is not installed on this machine, leaves no file behind.
+# `--changed` regenerates only the commands owned by the tools in
+# $MISE_INSTALLED_TOOLS (the postinstall hook's JSON), overlaid on the existing
+# set — a session that installed nothing relevant exits in milliseconds.
+# Explicit <cmd> args overlay exactly those. Only the no-arg rebuild removes.
+#
+# The output dir is the LAST fpath entry (.zshrc): a completion the package
+# manager ships always wins, and what is generated here only fills gaps —
+# declaring a recipe for a tool whose backend does ship one costs a shadowed
+# file, nothing more. `mise run audit-completions` shows who provides what.
 set -uo pipefail
+
+# only[*]: the commands to (re)generate; empty means all of them.
+only=()
+if [[ ${1:-} == --changed ]]; then
+    : "${MISE_INSTALLED_TOOLS:?--changed is for the mise postinstall hook}"
+    # Tool names this mise session installed, backend prefix stripped ("npm:pnpm"
+    # -> "pnpm"); the map below is compared prefix-stripped too, so it does not
+    # matter which form mise reports.
+    installed=" $(grep -o '"name":[[:space:]]*"[^"]*"' <<<"$MISE_INSTALLED_TOOLS" |
+        cut -d'"' -f4 | sed 's/.*://' | tr '\n' ' ') "
+    while read -r tool cmds; do
+        if [[ -n $tool && $installed == *" ${tool##*:} "* ]]; then
+            read -ra tool_cmds <<<"$cmds"
+            only+=("${tool_cmds[@]}")
+        fi
+    done <<'TOOLMAP'
+{{ includeTemplate "artifact" (merge (dict "name" "mise-completions") .) -}}
+TOOLMAP
+    ((${#only[@]})) || exit 0
+elif (($#)); then
+    only=("$@")
+fi
 
 out="${XDG_CACHE_HOME:?set by ~/.zshenv}/{{ .zsh.generatedCompletions }}"
 mkdir -p "${out%/*}"
@@ -34,6 +61,9 @@ clap_stub() { # <cmd> <sh command printing the dynamic script>
 failed=()
 while read -r cmd recipe; do
     [[ -n $cmd ]] || continue
+    if ((${#only[@]})); then
+        case " ${only[*]} " in *" $cmd "*) ;; *) continue ;; esac
+    fi
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "skip  _$cmd ($cmd not installed)"
         continue
@@ -53,8 +83,17 @@ done <<'RECIPES'
 {{ includeTemplate "artifact" (merge (dict "name" "completions") .) -}}
 RECIPES
 
-rm -rf "$out"
-mv "$tmp" "$out"
+if ((${#only[@]})); then
+    # Overlay: replace only what was regenerated, the rest of the set stands.
+    # Removals are the no-arg rebuild's job.
+    mkdir -p "$out"
+    for f in "$tmp"/_*; do
+        [[ -e $f ]] && mv -f "$f" "$out/"
+    done
+else
+    rm -rf "$out"
+    mv "$tmp" "$out"
+fi
 # .zshrc's `compinit -C` fast path trusts the dump for 24 h; drop it so the next
 # shell registers the new set.
 rm -f "${ZDOTDIR:-$HOME}/.zcompdump" "${ZDOTDIR:-$HOME}/.zcompdump.zwc"
