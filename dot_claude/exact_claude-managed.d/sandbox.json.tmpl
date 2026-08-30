@@ -1,7 +1,8 @@
 {
   "$merge": {
     "sandbox.network.allowUnixSockets": "ensure",
-    "sandbox.filesystem.allowWrite": "ensure"
+    "sandbox.filesystem.allowWrite": "ensure",
+    "sandbox.filesystem.denyWrite": "ensure"
   },
   "env": {
     "NODE_OPTIONS": "--use-env-proxy"
@@ -18,8 +19,8 @@
       "allowWrite": [
         "{{ .chezmoi.homeDir }}/{{ .xdg.cacheHome }}/uv",
         "{{ .chezmoi.homeDir }}/{{ .xdg.cacheHome }}/pnpm",
-        "{{ .chezmoi.homeDir }}/{{ .xdg.dataHome }}/pnpm/store",
-        "{{ .chezmoi.homeDir }}/go/pkg/mod",
+        "{{ .chezmoi.homeDir }}/{{ .xdg.dataHome }}/pnpm",
+        "{{ .chezmoi.homeDir }}/go/pkg",
         "{{ .chezmoi.homeDir }}/.cargo/registry",
         "{{ .chezmoi.homeDir }}/.cargo/git",
         "{{ .chezmoi.homeDir }}/.npm/_cacache",
@@ -28,6 +29,10 @@
 {{- else }}
         "{{ .chezmoi.homeDir }}/{{ .xdg.cacheHome }}/go-build"
 {{- end }}
+      ],
+      "denyWrite": [
+        "{{ .chezmoi.homeDir }}/{{ .xdg.dataHome }}/pnpm/bin",
+        "{{ .chezmoi.homeDir }}/{{ .xdg.dataHome }}/pnpm/global"
       ]
     },
     "enabled": true,
