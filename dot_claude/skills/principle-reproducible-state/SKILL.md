@@ -1,6 +1,6 @@
 ---
 name: principle-reproducible-state
-description: "Code & delivery. Apply when installing, patching, or working around a dependency, or editing generated/tool-owned files. Every change reproducible from committed state; mutate tool-owned files through the owning tool; escalate broken deps as pin → recorded patch mechanism → fork."
+description: "Code & delivery. Apply when installing, patching, or working around a dependency, or editing generated/tool-owned files."
 ---
 
 # Reproducible from committed state

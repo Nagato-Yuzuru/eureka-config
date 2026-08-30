@@ -1,6 +1,6 @@
 ---
 name: principle-type-system-discipline
-description: "Architecture. Apply when designing types, reviewing a function signature, or writing code in any statically-typed language. Make illegal states unrepresentable, brand semantic primitives, parse external data at boundaries, refuse to lie to the compiler, exhaust variants, derive from authoritative schemas."
+description: "Architecture. Apply when designing types, reviewing a function signature, or writing code in any statically-typed language."
 ---
 
 # Type system discipline

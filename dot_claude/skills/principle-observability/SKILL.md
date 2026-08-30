@@ -1,6 +1,6 @@
 ---
 name: principle-observability
-description: "Code & delivery. Apply when writing code that handles a request, job, or message, calls external services, adds retry/fallback/timeout logic — or is about to emit any log, metric, or span. Signals record runtime nondeterminism: one wide event per unit of work at the layer owning its outcome; fields have provenance; high cardinality belongs in events, never in metric labels."
+description: "Code & delivery. Apply when writing code that handles a request, job, or message, calls external services, adds retry/fallback/timeout logic — or is about to emit any log, metric, or span."
 ---
 
 # Observability

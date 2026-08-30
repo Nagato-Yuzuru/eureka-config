@@ -1,6 +1,6 @@
 ---
 name: principle-make-operations-idempotent
-description: "Architecture. Apply when designing commands, lifecycle steps, or processing loops that run amid crashes, restarts, and retries. Converge to the same end state regardless of partial prior runs."
+description: "Architecture. Apply when designing commands, lifecycle steps, or processing loops that run amid crashes, restarts, and retries."
 ---
 
 # Make operations idempotent

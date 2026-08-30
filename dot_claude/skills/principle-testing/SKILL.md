@@ -1,6 +1,6 @@
 ---
 name: principle-testing
-description: "Code & delivery. Apply when writing or reviewing tests, or deciding whether a behavior is worth testing. A behavior isn't tested until it has a positive case asserted on specific values, a negative case asserting the specific error, and boundaries (empty/one/many/max/off-by-one). Code changing or coverage increasing is not sufficient justification for a test. Mock only at boundaries you don't own."
+description: "Code & delivery. Apply when writing or reviewing tests, or deciding whether a behavior is worth testing."
 ---
 
 # Testing

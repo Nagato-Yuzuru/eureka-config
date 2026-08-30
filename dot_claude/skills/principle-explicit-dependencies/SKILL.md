@@ -1,6 +1,6 @@
 ---
 name: principle-explicit-dependencies
-description: "Architecture. Apply when a component acquires collaborators or capabilities (clock, fs, network, storage, other services), when choosing a DI mechanism, or when a test reaches for monkeypatching — the tell that a dependency isn't injectable. Capabilities enter via construction; one grep-able composition root; core code never knows the wiring mechanism; inject only what a test would replace."
+description: "Architecture. Apply when a component acquires collaborators or capabilities (clock, fs, network, storage, other services), when choosing a DI mechanism, or when a test reaches for monkeypatching."
 ---
 
 # Explicit dependencies

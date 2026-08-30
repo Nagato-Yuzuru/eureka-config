@@ -1,6 +1,6 @@
 ---
 name: principle-comments-and-docs
-description: "Code & delivery. Apply when writing comments, doc comments, or committed docs. Comments carry why and contract, never what — telegraphic, written for the reader who was never in the room; debt/danger/deviation leads with its tag (TODO/FIXME/HACK/WARN/PERF/NOTE); doc comments are the caller's contract; change code and comment in the same edit; no commented-out code or phase-narrating comments."
+description: "Code & delivery. Apply when writing comments, doc comments, or committed docs."
 ---
 
 # Comments & documentation

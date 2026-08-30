@@ -1,6 +1,6 @@
 ---
 name: principle-api-design
-description: "Architecture. Apply when designing or reviewing a resource-oriented network API (gRPC/protobuf or Google-style REST): resource naming, standard verbs, custom and stateless methods, pagination, field masks, long-running operations. AIP (google.aip.dev) is the authority — fetch the specific AIP before citing it. Not for CLI or internal interface shape."
+description: "Architecture. Apply when designing or reviewing a resource-oriented network API (gRPC/protobuf or Google-style REST): resource naming, standard verbs, pagination, field masks, long-running operations. Not for CLI or internal interface shape."
 ---
 
 # API design

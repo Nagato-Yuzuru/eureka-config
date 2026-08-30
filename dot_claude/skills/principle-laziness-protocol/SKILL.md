@@ -1,6 +1,6 @@
 ---
 name: principle-laziness-protocol
-description: "Core. Apply when scoping a change, or when tempted to add a config option, plugin point, or abstraction layer, or to thread a new signal through existing layers. Build what was asked and no more; an abstraction earns its place at the second concrete use, not the first."
+description: "Core. Apply when scoping a change, or when tempted to add a config option, plugin point, or abstraction layer, or to thread a new signal through existing layers."
 ---
 
 # Laziness protocol

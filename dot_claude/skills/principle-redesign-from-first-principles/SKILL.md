@@ -1,6 +1,6 @@
 ---
 name: principle-redesign-from-first-principles
-description: "Core. Apply when integrating a new requirement into an existing design, or when implementation keeps producing the same shape of friction. Redesign as if the requirement had been a day-one assumption instead of bolting it on; scrap designs that fight back."
+description: "Core. Apply when integrating a new requirement into an existing design, or when implementation keeps producing the same shape of friction."
 ---
 
 # Redesign from first principles

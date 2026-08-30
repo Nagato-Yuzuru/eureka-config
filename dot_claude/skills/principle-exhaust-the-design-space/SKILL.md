@@ -1,6 +1,6 @@
 ---
 name: principle-exhaust-the-design-space
-description: "Core. Apply when a design decision would be expensive to reverse and you can name a second plausible shape. Put the candidates side by side before committing to the first one — a candidate is five lines of type signatures, not a working prototype."
+description: "Core. Apply when a design decision would be expensive to reverse and you can name a second plausible shape."
 ---
 
 # Exhaust the design space

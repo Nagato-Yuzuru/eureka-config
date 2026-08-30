@@ -1,6 +1,6 @@
 ---
 name: principle-model-the-domain
-description: "Architecture. Apply when writing stateful logic, or when code branches a lot or repeats a shape assumption across files. Encode the domain in a structure (state machine, typed model, registry, reducer, the right collection) instead of scattered conditionals."
+description: "Architecture. Apply when writing stateful logic, or when code branches a lot or repeats a shape assumption across files."
 ---
 
 # Model the domain

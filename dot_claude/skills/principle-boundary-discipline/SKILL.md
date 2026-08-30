@@ -1,6 +1,6 @@
 ---
 name: principle-boundary-discipline
-description: "Architecture. Apply when wiring validation, error handling, or framework adapters. Concentrate guards at system boundaries; trust internal types; keep business logic in pure functions. Internally, errors fail loudly: no fallbacks or catch-and-continue."
+description: "Architecture. Apply when wiring validation, error handling, or framework adapters."
 ---
 
 # Boundary discipline

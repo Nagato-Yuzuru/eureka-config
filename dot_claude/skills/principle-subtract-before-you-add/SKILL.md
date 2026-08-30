@@ -1,6 +1,6 @@
 ---
 name: principle-subtract-before-you-add
-description: "Core. Apply when sequencing an addition, refactor, or rewrite. Remove dead weight first, then build on the simpler base."
+description: "Core. Apply when sequencing an addition, refactor, or rewrite."
 ---
 
 # Subtract before you add
