@@ -19,7 +19,10 @@ linters:
     - gocognit
     - nestif
     - revive
+    - sloglint
   settings:
+    sloglint:
+      static-msg: true # variables go in attrs, not the message
     gocognit:
       min-complexity: 20
     exhaustive:

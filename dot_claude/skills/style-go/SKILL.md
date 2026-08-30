@@ -40,6 +40,7 @@ description: "Code & delivery. Apply when writing or reviewing Go. Run the golan
 - Zero value designed: either it works, or unexported fields + constructor make construction mandatory — the half-measure (constructor plus nil-guards everywhere) is the bug.
 - Wiring: hand-wire in `main` by default — **principle-explicit-dependencies** carries the invariants (gochecknoglobals/gochecknoinits are its lint shadow).
 - HTTP clients and servers get explicit timeouts; bare `http.Get` and zero-value `http.Server` don't ship.
+- Signals (logs, metrics, spans): load `principle-observability` before emitting. Emit through `log/slog` directly — message static, variables are attrs; scope fields via `logger.With(...)` once at scope entry; ambient fields come from a ctx-aware `Handler`, never re-attached per call site. Attribute names with a semantic convention come from `go.opentelemetry.io/otel/semconv`, not string literals.
 - Tests default to table-driven, `if got != want` / `cmp.Diff`; assertion libraries are regime-1 opinionated tooling — follow the repo's incumbent style.
 - Packages are named by the capability they provide; `utils`/`helpers`/`common` is a naming failure (low severity — fix when touching).
 
