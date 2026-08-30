@@ -12,7 +12,7 @@ Design operations so they converge to the correct state regardless of how many t
 **The pattern:**
 - Convergent startup: scan for existing state, clean stale artifacts, adopt live sessions
 - Content-based cleanup: compare by content equivalence, not creation order
-- Self-healing locks: use PID-based stale lock detection
+- Self-healing locks: stale-lock detection with a liveness check
 - Idempotent scheduling: failed work respawns cleanly, fresh input regenerated after each cycle
 
 **The test:**

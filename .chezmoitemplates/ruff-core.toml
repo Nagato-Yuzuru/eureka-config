@@ -26,6 +26,7 @@ select = [
   "BLE",    # blind except
   "S110",   # try-except-pass
   "S112",   # try-except-continue
+  "PGH004", # blanket noqa
   "TRY002", # raise vanilla Exception
   "G",      # no interpolation in log calls
   "LOG",    # logger acquisition/usage

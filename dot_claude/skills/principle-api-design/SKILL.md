@@ -1,9 +1,9 @@
 ---
-name: principle-interface-design
+name: principle-api-design
 description: "Architecture. Apply when designing or reviewing a resource-oriented network API (gRPC/protobuf or Google-style REST): resource naming, standard verbs, custom and stateless methods, pagination, field masks, long-running operations. AIP (google.aip.dev) is the authority — fetch the specific AIP before citing it. Not for CLI or internal interface shape."
 ---
 
-# Interface & API design
+# API design
 
 This leaf is a pointer to an external authority, not a rule of its own.
 

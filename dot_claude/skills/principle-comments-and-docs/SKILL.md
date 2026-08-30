@@ -13,5 +13,6 @@ Governs committed, shared code; the local working tree is your own.
 - **Doc comments are the caller's contract**: signature + doc must suffice without reading the body — units/timezone, lifecycle, thread-safety, what it throws, side effects.
 - **Change the code → change the comment in the same edit**; a comment you can't keep true gets deleted.
 - **No commented-out code or inline changelogs** — git remembers (`blame`, `log -L/-S`). If the absence is non-obvious, leave a `NOTE` with the why.
+- **A reference with no novel content gets deleted**, never left as a stub.
 - **Debt, danger, and deviation lead with their tag.** The closed set: `TODO(owner|#123)`, `FIXME`, `HACK` (names the root cause it dodges), `WARN`, `PERF`, `NOTE` — one canonical spelling each (`FIXME` over `BUG`, `WARN` over `XXX`), so `grep TODO` stays one pattern. Long-lived work goes in the tracker, not buried prose.
 - **No phase-narrating comments.** The recurring case is a verify or test script narrating its steps — a `# Phase 1: add cards` line above the block. Delete it; the assertion or log string is the only doc needed. Write `assert ok, 'persisted across restart'`, not a comment plus the code. Write comments clean as you go — a cleanup pass afterward reliably misses them.

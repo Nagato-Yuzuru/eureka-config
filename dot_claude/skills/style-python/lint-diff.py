@@ -1,6 +1,8 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = []
+# dependencies = [
+#     "ruff>=0.16.4",
+# ]
 # ///
 """Diff-scoped ruff: report findings only on lines added since <base-rev>.
 
