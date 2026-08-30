@@ -1,3 +1,4 @@
+# ruff: noqa: T201 — stdout is this tool's report, not debug output
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
