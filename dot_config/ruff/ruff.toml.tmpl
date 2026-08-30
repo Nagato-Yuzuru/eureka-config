@@ -1,0 +1,26 @@
+target-version = "py312"
+
+[lint]
+# Allow fullwidth punctuation commonly used in CJK documentation
+allowed-confusables = [
+  "，",
+  "。",
+  "！",
+  "？",
+  "：",
+  "；", # fullwidth sentence punctuation
+  "（",
+  "）",
+  "【",
+  "】",
+  "「",
+  "」", # fullwidth brackets
+  "、",
+  "《",
+  "》",
+  "〈",
+  "〉", # CJK-specific punctuation
+  "…",
+  "—", # ellipsis / em dash variants
+]
+{{ template "ruff-core.toml" }}

@@ -1,0 +1,47 @@
+preview = true
+explicit-preview-rules = true # only named preview rules activate
+select = [
+  "C901",    # mccabe complexity
+  "PLR1702", # too-many-nested-blocks (preview)
+  "D",      # pydocstyle — format only, presence rules ignored below
+  "DOC501", # raised exception missing from existing docstring (preview)
+  "E",      # pycodestyle errors (incl. E722 bare except)
+  "F",      # pyflakes
+  "UP",     # pyupgrade — version-gated modernization, driven by target/requires-python
+  "I",      # isort
+  "B",      # bugbear (B006 mutable defaults, B904 raise-from)
+  "SIM",    # simplify
+  "C4",     # comprehensions
+  "RUF",    # ruff-native
+  "A",      # builtins shadowing
+  "T20",    # no print in app code
+  "PIE",    # misc lints
+  "PLC",    # pylint convention (incl. PLC0415 import-outside-top-level)
+  "PLE",    # pylint error
+  "PERF",   # perflint (manual accumulator loops)
+  "FURB",   # refurb modernization
+  "PTH",    # pathlib over os.path
+  "DTZ",    # naive datetime
+  "ASYNC",  # blocking calls in async
+  "BLE",    # blind except
+  "S110",   # try-except-pass
+  "S112",   # try-except-continue
+  "TRY002", # raise vanilla Exception
+]
+ignore = ["D1"] # docstring presence is judgment, not lint
+fixable = ["ALL"]
+unfixable = ["T20"]
+
+[lint.pydocstyle]
+convention = "google"
+
+[lint.mccabe]
+max-complexity = 12
+
+[lint.flake8-bandit]
+check-typed-exception = true # flag typed except-pass too
+
+[lint.per-file-ignores]
+"tests/**" = ["T20", "S101"]
+"__init__.py" = ["F401"]
+"scripts/**" = ["T20"]
