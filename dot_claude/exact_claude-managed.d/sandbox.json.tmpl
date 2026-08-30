@@ -1,4 +1,8 @@
 {
+  "$merge": {
+    "sandbox.network.allowUnixSockets": "ensure",
+    "sandbox.filesystem.allowWrite": "ensure"
+  },
   "env": {
     "NODE_OPTIONS": "--use-env-proxy"
   },
@@ -10,6 +14,22 @@
       ]
     },
 {{- end }}
+    "filesystem": {
+      "allowWrite": [
+        "{{ .chezmoi.homeDir }}/{{ .xdg.cacheHome }}/uv",
+        "{{ .chezmoi.homeDir }}/{{ .xdg.cacheHome }}/pnpm",
+        "{{ .chezmoi.homeDir }}/{{ .xdg.dataHome }}/pnpm/store",
+        "{{ .chezmoi.homeDir }}/go/pkg/mod",
+        "{{ .chezmoi.homeDir }}/.cargo/registry",
+        "{{ .chezmoi.homeDir }}/.cargo/git",
+        "{{ .chezmoi.homeDir }}/.npm/_cacache",
+{{- if eq .chezmoi.os "darwin" }}
+        "{{ .chezmoi.homeDir }}/Library/Caches/go-build"
+{{- else }}
+        "{{ .chezmoi.homeDir }}/{{ .xdg.cacheHome }}/go-build"
+{{- end }}
+      ]
+    },
     "enabled": true,
     "enableWeakerNetworkIsolation": true,
     "allowUnsandboxedCommands": true
