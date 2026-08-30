@@ -12,6 +12,7 @@ Writing code is cheap for you, which makes over-engineering nearly free to produ
 **The pattern:**
 
 - **Build what was asked.** No config options, plugin points, or abstraction layers for hypothetical future needs; no speculative validators, parsers, or guards beyond what the spec demands — design for observed usage. Introduce an abstraction at the second concrete use, not the first. When the request itself names a future ("we'll probably want YAML later"), satisfy it in the smallest shape that works today — a dict literal, not a registration API.
+- **Smallest shape still leaves the seam.** Declining to build a future is not walling it off: give the place it would land a clean landing spot — a general name (`load_config`, not `load_json_config`), the behavior isolated in one function, one obvious spot the change would go — so the later addition is a local diff, not a rewrite. The seam is free (naming, placement, isolation); machinery — options, registries, abstract types — waits for the second use.
 - **Minimize the diff.** The smallest change that solves the problem beats the elegant restructuring nobody asked for.
 - **Question the threading.** If a task asks you to pass a new signal through types, schemas, or pipeline layers, stop and look for a path that doesn't need the signal at all.
 
