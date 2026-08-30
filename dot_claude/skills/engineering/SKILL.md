@@ -14,7 +14,7 @@ Each principle is its own skill, listed alongside this one and prefixed by area 
 
 ## Dependencies clear a bar
 
-No skill of its own — this section is the rule. Prefer stdlib and already-declared deps. A new third-party package needs a reason: actively maintained, typed, and pulling in less than it saves.
+Prefer stdlib and already-declared deps. A new third-party package needs a reason: actively maintained, typed, and pulling in less than it saves.
 
 ## Operating procedures
 

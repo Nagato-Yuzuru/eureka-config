@@ -16,4 +16,4 @@ When evolving a system, remove complexity first, then build. Deletion gives you 
 
 **The test:** name what the diff deleted before it built. If the answer is nothing and the base wasn't already minimal, the subtraction pass was skipped.
 
-Deciding what not to build at all is **principle-laziness-protocol**; this leaf orders the work.
+Deciding what not to build at all is **principle-laziness-protocol**; this principle orders the work.

@@ -40,4 +40,4 @@ Interior computation emits nothing.
 - Is this field already stamped by middleware or the scope above?
 - Would two of these lines be one event with more fields?
 
-The style leaves (**style-python**, **style-go**) ground emission in specific syntax and carry the lintable half.
+The style skills (**style-python**, **style-go**) ground emission in specific syntax and carry the lintable half.
