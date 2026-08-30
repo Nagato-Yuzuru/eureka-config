@@ -35,6 +35,12 @@ SID = "11111111-2222-3333-4444-555555555555"
 # spells it /private/tmp on macOS and /tmp on Linux.
 TMP_ROOT = Path(os.path.realpath("/tmp"))
 
+# Where under TMP_ROOT the suite creates things. Every assertion holds at any
+# depth under the root, so prefer $TMPDIR when it resolves inside: Claude Code's
+# Bash sandbox grants $TMPDIR but not bare TMP_ROOT.
+_ENV_TMP = Path(os.path.realpath(os.environ.get("TMPDIR", "/tmp")))
+TMP_BASE = _ENV_TMP if TMP_ROOT in _ENV_TMP.parents else TMP_ROOT
+
 # Everything else the gate allows is derived from $HOME and --project, which the
 # fixtures own, so any root outside TMP_ROOT is foreign. The repo qualifies.
 SANDBOX = REPO_ROOT / ".pytest-sandbox"
@@ -144,7 +150,7 @@ class TestWorkspace:
 
 class TestTmp:
     def test_private_tmp_allows_rw_even_foreign_and_old(self, home, project):
-        d = tempfile.mkdtemp(dir=TMP_ROOT)
+        d = tempfile.mkdtemp(dir=TMP_BASE)
         f = Path(d) / "old.log"
         f.write_text("x")
         os.utime(f, (0, 0))  # ancient mtime — must not matter, no birthtime logic
@@ -152,7 +158,7 @@ class TestTmp:
         assert check(home, f, "w", project) == ALLOW
 
     def test_tmp_symlink_spelling_still_allows(self, home, project):
-        d = tempfile.mkdtemp(dir=TMP_ROOT)
+        d = tempfile.mkdtemp(dir=TMP_BASE)
         f = Path(d) / "f.txt"
         f.write_text("x")
         assert check(home, "/tmp/" + f.relative_to(TMP_ROOT).as_posix(), "r", project) == ALLOW
@@ -177,7 +183,7 @@ class TestSymlinks:
     def test_link_in_tmp_to_outside_secret_asks(self, home, project):
         secret = home / "secret.txt"
         secret.write_text("key")
-        d = tempfile.mkdtemp(dir=TMP_ROOT)
+        d = tempfile.mkdtemp(dir=TMP_BASE)
         link = Path(d) / "grab"
         link.symlink_to(secret)
         assert check(home, link, "r", project) == ASK
@@ -185,7 +191,7 @@ class TestSymlinks:
     def test_link_resolving_into_workspace_allows(self, home, project):
         inside = project / "real.txt"
         inside.write_text("x")
-        d = tempfile.mkdtemp(dir=TMP_ROOT)
+        d = tempfile.mkdtemp(dir=TMP_BASE)
         link = Path(d) / "into-proj"
         link.symlink_to(inside)
         assert check(home, link, "r", project) == ALLOW
@@ -238,7 +244,7 @@ class TestStores:
         """The deny compares $HOME-derived store paths against a resolved target.
         With HOME under TMP_ROOT the two spellings used to diverge, and the deny
         silently stopped matching while the whole tree read as allowed."""
-        h = Path(tempfile.mkdtemp(dir=TMP_ROOT)) / "home"
+        h = Path(tempfile.mkdtemp(dir=TMP_BASE)) / "home"
         (h / ".claude" / "hooks").mkdir(parents=True)
         try:
             grants = h / ".claude" / "hooks" / "path-gate-grants.json"
