@@ -4,13 +4,22 @@
 # whenever the rendered content changes, i.e. whenever this machine's set changes.
 set -euo pipefail
 
+# What the machine's package manager could not do, carried to the exit status so the failure
+# is still reported, without aborting the steps that do not depend on it.
+status=0
+
 {{ if eq .chezmoi.os "darwin" -}}
 if ! command -v brew >/dev/null 2>&1; then
     echo "Homebrew not found. Skipping installation." >&2
     exit 0
 fi
 
-brew bundle install --file=- <<'EOF'
+# On a Tier 3 Mac a formula with no bottle for this machine is routine, not exceptional
+# (docs.brew.sh/Support-Tiers). `brew bundle` already installs everything it can and reports
+# the rest at the end, so only its exit status needs handling: letting it abort would stop
+# the bootstrap tools, the uv tools, and — this being a `run_onchange_before_` script —
+# every dotfile chezmoi was about to write, over one unbottled package.
+brew bundle install --file=- <<'EOF' || status=$?
 {{ includeTemplate "artifact" (merge (dict "name" "brewfile") .) -}}
 EOF
 {{- end }}
@@ -39,13 +48,28 @@ xargs -r sudo dnf -y install <<'EOF'
 EOF
 {{- end }}
 
-# Python CLIs, one venv each under `uv tool dir`, entry points in ~/.local/bin.
-# uv is a system package installed above. `uv tool install` is idempotent: an
-# already-installed tool is left alone (upgrades are `uv tool upgrade`, by hand,
-# like the system packages'); a `name@version` line re-pins it when the pin moves.
+# Bootstrap tools installed by the project's own installer: mise and uv are backends this
+# script uses, and nothing else here can supply them where no package manager builds for
+# this machine. After the system packages, which is where the ones they need come from on a
+# Linux box; before anything that needs mise or uv. Each command is declared to converge, so
+# re-running this script re-runs them harmlessly.
+while IFS= read -r cmd; do
+    [ -n "$cmd" ] || continue
+    sh -c "$cmd"
+done <<'EOF'
+{{ includeTemplate "artifact" (merge (dict "name" "upstream-installs") .) -}}
+EOF
+
+# Python CLIs, one venv each under `uv tool dir`, entry points in ~/.local/bin. uv is
+# installed above, by this machine's package manager or by its own installer. `uv tool
+# install` is idempotent: an already-installed tool is left alone (upgrades are
+# `uv tool upgrade`, by hand, like the system packages'); a `name@version` line re-pins
+# it when the pin moves.
 while read -r spec; do
     [ -n "$spec" ] || continue
     uv tool install "$spec"
 done <<'EOF'
 {{ includeTemplate "artifact" (merge (dict "name" "uv-tools") .) -}}
 EOF
+
+exit "$status"

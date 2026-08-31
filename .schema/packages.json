@@ -176,6 +176,10 @@
           "$ref": "#/$defs/Mise",
           "default": null
         },
+        "upstream": {
+          "$ref": "#/$defs/Upstream",
+          "default": null
+        },
         "uv": {
           "$ref": "#/$defs/Uv",
           "default": null
@@ -185,7 +189,8 @@
           "enum": [
             "system",
             "mise",
-            "uv"
+            "uv",
+            "upstream"
           ],
           "title": "Via",
           "type": "string"
@@ -331,6 +336,80 @@
       "title": "SystemPackage",
       "type": "object"
     },
+    "Upstream": {
+      "additionalProperties": false,
+      "description": "Installed by the project's own installer, because no package manager here can.\n\n`command` runs again whenever this machine's rendered set changes, so it must\nconverge rather than assume a clean machine: keep the installer's own skip or\noverwrite behaviour (`MISE_INSTALL_SKIP_IF_EXISTS`), never add uninstall steps.",
+      "properties": {
+        "command": {
+          "minLength": 1,
+          "title": "Command",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "Upstream",
+      "type": "object"
+    },
+    "UpstreamPackage": {
+      "additionalProperties": false,
+      "properties": {
+        "completions": {
+          "additionalProperties": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "default": {},
+          "minProperties": 1,
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "Completions",
+          "type": "object"
+        },
+        "on": {
+          "items": {
+            "description": "a machine tag: an OS, or os/arch",
+            "enum": [
+              "darwin",
+              "linux",
+              "darwin/arm64",
+              "darwin/amd64",
+              "linux/arm64",
+              "linux/amd64"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "On",
+          "type": "array"
+        },
+        "overrides": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Override"
+          },
+          "title": "Overrides",
+          "type": "array"
+        },
+        "upstream": {
+          "$ref": "#/$defs/Upstream"
+        },
+        "via": {
+          "const": "upstream",
+          "title": "Via",
+          "type": "string"
+        }
+      },
+      "required": [
+        "on",
+        "via",
+        "upstream"
+      ],
+      "title": "UpstreamPackage",
+      "type": "object"
+    },
     "Uv": {
       "additionalProperties": false,
       "properties": {
@@ -426,6 +505,9 @@
           },
           {
             "$ref": "#/$defs/UvPackage"
+          },
+          {
+            "$ref": "#/$defs/UpstreamPackage"
           }
         ]
       },

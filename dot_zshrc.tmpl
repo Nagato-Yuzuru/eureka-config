@@ -8,6 +8,11 @@ elif [[ -x /usr/local/bin/brew ]]; then
 fi
 {{- end }}
 
+# .zshenv puts ~/.local/bin first, but `brew shellenv` above prepends its own prefix and
+# takes the lead back. mise and uv install there from upstream, so re-assert it — otherwise
+# `mise activate` below runs whatever copy a package manager left behind.
+path=("$HOME/.local/bin" ${path:#$HOME/.local/bin})
+
 # MISE
 
 eval "$(mise activate zsh)"
@@ -84,8 +89,6 @@ source $zsh_plugins_zsh
 # bashcompinit (above) runs it under zsh.
 command -v terraform &>/dev/null && complete -o nospace -C "$(command -v terraform)" terraform
 command -v tofu &>/dev/null && complete -o nospace -C "$(command -v tofu)" tofu
-
-# antidote load
 
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
 zstyle ':completion:*' menu select

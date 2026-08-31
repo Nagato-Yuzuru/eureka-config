@@ -12,7 +12,7 @@ from __future__ import annotations
 import tomllib
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, get_args
+from typing import Any, assert_never, get_args
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -35,6 +35,7 @@ from inventory.model import (
     Resolved,
     Selector,
     SystemPackage,
+    UpstreamPackage,
     UvPackage,
 )
 
@@ -129,6 +130,11 @@ def matches_os_arch(sel: Selector, os_: str, arch: str) -> bool:
             return o == os_
         case OsArchSel(os=o, arch=a):
             return o == os_ and a == arch
+        # `Selector` is an open sum (model.py). Without this a new variant falls off the end
+        # returning None, `any(...)` reads that as False, and the package installs nowhere —
+        # silently, on every machine. The arm makes the type checker demand the missing case.
+        case _:
+            assert_never(sel)
 
 
 def matches(sel: Selector, machine: Machine, platforms: Mapping[str, Platform]) -> bool:
@@ -151,14 +157,25 @@ _DISCRIMINATING = {
     for b, vs in _UNIONS.items()
 }
 
+# The subset that *chooses* a variant: required by one of them (`cask`, `copr`, `repofile`).
+# Only these may clear the block. `name` is discriminating but optional — it is absent from
+# Cask by accident of shape, not because writing it means "make this a formula", and a rename
+# patch that silently demoted a cask would be indistinguishable from one that renamed it.
+_SELECTS_VARIANT = {
+    b: {f for v in vs for f, info in v.model_fields.items() if info.is_required()}
+    for b, vs in _UNIONS.items()
+}
+
 
 def patched(pkg: Package, overrides: Iterable[Override]) -> dict[str, Any]:
     """The package's own fields with the overrides merged over them, in order — the raw
     form of what `parse_package` turns back into a package. Two things replace instead of
     merging, because merging could only produce a shape the types reject: a patch that
     switches `via` starts the how afresh (the previous backend's block goes), and a patch
-    that sets a union block's discriminating field (formula -> cask, copr -> repofile)
-    drops the block's previous discriminating fields."""
+    that chooses a different variant of a union block (formula -> cask, copr -> repofile)
+    drops the block's previous discriminating fields. A patch that only sets a shared or
+    optional field is a merge into the variant already chosen — patching `name` onto a cask
+    is a rename the types then reject, not a demotion to a formula."""
     eff = pkg.model_dump(exclude_unset=True, by_alias=True, exclude={"overrides"})
     via = pkg.via
     for ov in overrides:
@@ -167,7 +184,7 @@ def patched(pkg: Package, overrides: Iterable[Override]) -> dict[str, Any]:
             eff = {k: v for k, v in eff.items() if k not in BACKENDS}
             via = patch["via"]
         for block, disc in _DISCRIMINATING.items():
-            if block in eff and disc & set(patch.get(block, {})):
+            if block in eff and _SELECTS_VARIANT[block] & set(patch.get(block, {})):
                 eff[block] = {k: v for k, v in eff[block].items() if k not in disc}
         eff = deep_merge(eff, patch)
     return eff
@@ -180,6 +197,8 @@ def _tag_machines(sel: Selector) -> list[tuple[str, str]]:
             return [(o, a) for a in get_args(Arch)]
         case OsArchSel(os=o, arch=a):
             return [(o, a)]
+        case _:
+            assert_never(sel)
 
 
 class Inventory:
@@ -247,22 +266,22 @@ class Inventory:
         pkg = self.effective(key, machine_id)
         if not any(matches(sel, m, self.platforms) for sel in pkg.on):
             return None
+        # Only the spec is chosen here; `Resolved.backend` reads the backend off it.
         match pkg:
             case SystemPackage():
-                backend = self.platforms[m.platform].system
-                if backend == "brew":
+                if self.platforms[m.platform].system == "brew":
                     spec = pkg.brew
                     name = spec.cask if isinstance(spec, Cask) else spec.name
                 else:
                     spec = pkg.dnf
                     name = spec.name
             case MisePackage():
-                backend, spec, name = "mise", pkg.mise, pkg.mise.name
+                spec, name = pkg.mise, pkg.mise.name
             case UvPackage():
-                backend, spec, name = "uv", pkg.uv, pkg.uv.name
-        return Resolved(
-            key=key, backend=backend, name=name or key, spec=spec, completions=pkg.completions
-        )
+                spec, name = pkg.uv, pkg.uv.name
+            case UpstreamPackage():
+                spec, name = pkg.upstream, None  # named by its key
+        return Resolved(key=key, name=name or key, spec=spec, completions=pkg.completions)
 
     def resolved(self, machine_id: str) -> list[Resolved]:
         """Every package that installs on `machine_id`, in key order (what the renderers take)."""

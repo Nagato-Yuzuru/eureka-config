@@ -7,6 +7,10 @@ discriminator: `system` (the machine's platform picks brew or dnf, so both
 blocks may appear) or exactly one tool backend with exactly its block. Which
 system package manager a platform has is a platform fact (`Platform.system`),
 declared once, never assumed from the OS.
+
+`upstream` is the backend for what no package manager can install here: the
+bootstrap tools (mise, uv) are the other backends, so they cannot come through
+one, and their projects ship the installer that is their recommended source.
 """
 
 from __future__ import annotations
@@ -30,8 +34,8 @@ from pydantic import (
 Os = Literal["darwin", "linux"]
 Arch = Literal["arm64", "amd64"]
 SystemBackend = Literal["brew", "dnf"]
-Backend = Literal["brew", "dnf", "mise", "uv"]
-Via = Literal["system", "mise", "uv"]
+Backend = Literal["brew", "dnf", "mise", "uv", "upstream"]
+Via = Literal["system", "mise", "uv", "upstream"]
 BACKENDS: tuple[Backend, ...] = get_args(Backend)
 VIAS: tuple[Via, ...] = get_args(Via)
 
@@ -165,7 +169,18 @@ class Uv(Strict):
     version: NonEmpty | None = None  # spelled `name@version` for `uv tool install`
 
 
-Spec = Brew | Dnf | Mise | Uv
+class Upstream(Strict):
+    """Installed by the project's own installer, because no package manager here can.
+
+    `command` runs again whenever this machine's rendered set changes, so it must
+    converge rather than assume a clean machine: keep the installer's own skip or
+    overwrite behaviour (`MISE_INSTALL_SKIP_IF_EXISTS`), never add uninstall steps.
+    """
+
+    command: NonEmpty  # sh, run as written; no default — an empty install is not one
+
+
+Spec = Brew | Dnf | Mise | Uv | Upstream
 
 
 class Override(Strict):
@@ -179,6 +194,7 @@ class Override(Strict):
     dnf: Dnf | None = None
     mise: Mise | None = None
     uv: Uv | None = None
+    upstream: Upstream | None = None
 
     @property
     def patch(self) -> dict[str, Any]:
@@ -209,6 +225,11 @@ class UvPackage(_Package):
     uv: Uv = Uv()
 
 
+class UpstreamPackage(_Package):
+    via: Literal["upstream"]
+    upstream: Upstream  # required: the command is the whole of the how
+
+
 def _via(v: Any) -> Any:
     """The discriminator: `via` of a raw line (absent means system) or of a package."""
     if isinstance(v, Mapping):
@@ -221,7 +242,8 @@ def _via(v: Any) -> Any:
 Package = Annotated[
     Annotated[SystemPackage, Tag("system")]
     | Annotated[MisePackage, Tag("mise")]
-    | Annotated[UvPackage, Tag("uv")],
+    | Annotated[UvPackage, Tag("uv")]
+    | Annotated[UpstreamPackage, Tag("upstream")],
     Discriminator(_via),
 ]
 PACKAGE = TypeAdapter(Package)
@@ -274,11 +296,27 @@ DOCS: dict[str, type[Strict]] = {
 # --- resolved: what a renderer sees ------------------------------------------------------------
 
 
+# Which backend a spec belongs to. The brew and dnf halves come from their unions, so a new
+# variant of either lands here by being added there.
+_BACKEND_OF: dict[type, Backend] = {
+    **dict.fromkeys(get_args(Brew), "brew"),
+    **dict.fromkeys(get_args(Dnf), "dnf"),
+    Mise: "mise",
+    Uv: "uv",
+    Upstream: "upstream",
+}
+
+
 class Resolved(Strict):
     """One package as it installs on one machine. The only input the renderers take."""
 
     key: NonEmpty
-    backend: Backend
     name: NonEmpty  # name on that backend (the cask's, for a cask)
     spec: Spec
     completions: dict[NonEmpty, NonEmpty]
+
+    @property
+    def backend(self) -> Backend:
+        """Read off the spec, not stored beside it: the two cannot disagree, so a `uv` label
+        over a Mise spec cannot validate and then vanish from every artifact unremarked."""
+        return _BACKEND_OF[type(self.spec)]

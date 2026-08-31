@@ -8,6 +8,10 @@ python.uv_venv_auto = "source" # use uv
 env_cache = true
 env_cache_ttl = "6h"
 npm.package_manager = "pnpm"
+# mise installs from mise.run (packages.toml), so no `brew upgrade`/`dnf upgrade` carries it.
+# It talks to aqua, GitHub releases and language registries that drift, so a stale
+# CLI breaks tool resolution, not just mise itself. Interval: auto_update_check_duration.
+auto_update = true
 
 # Tasks are files in ~/.config/mise/tasks/, rendered by chezmoi from packages.toml:
 #   refresh-completions  regenerate the zsh completions no package manager ships

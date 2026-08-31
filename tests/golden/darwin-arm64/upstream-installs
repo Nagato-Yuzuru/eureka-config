@@ -1,0 +1,1 @@
+curl https://mise.run | MISE_INSTALL_SKIP_IF_EXISTS=1 sh

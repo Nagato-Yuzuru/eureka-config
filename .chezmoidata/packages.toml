@@ -10,11 +10,15 @@
 #   on        list of machine tags it installs on: darwin, linux, or os/arch
 #             (darwin/amd64, ...).
 #   via       system (default: the platform's package manager, platforms.toml —
-#             brew on macos, dnf on fedora) | mise | uv. The discriminator: it
-#             decides which blocks may follow. Rule: one global version -> system;
-#             multi-version -> mise; a Python CLI -> uv (`uv tool install`; uv
-#             itself is a system package, so the install script runs it right
-#             after brew/dnf).
+#             brew on macos, dnf on fedora) | mise | uv | upstream. The
+#             discriminator: it decides which blocks may follow. Rule: one global
+#             version -> system; multi-version -> mise; a Python CLI -> uv
+#             (`uv tool install`); a bootstrap tool no package manager here can
+#             supply -> upstream. mise and uv are themselves backends, so the
+#             install script settles them in between: upstream commands run after
+#             brew/dnf (where their own dependencies come from on a Linux box) and
+#             before `uv tool install`. A package manager that fails on one package
+#             does not abort the rest; it carries to the script's exit status.
 #   brew      { name | cask }        system only; read on macos. A cask is a cask,
 #                                    not a formula with a flag.
 #   dnf       { name } + one source  system only; read on fedora. The source is
@@ -27,6 +31,13 @@
 #                                    ones installed with the tool.
 #   uv        { name | version }     via: uv only. name on PyPI; version spelled
 #                                    `name@version`.
+#   upstream  { command }            via: upstream only. The project's own
+#                                    installer, run as written. It runs again
+#                                    whenever this machine's rendered set changes,
+#                                    so it must converge rather than assume a clean
+#                                    machine — keep the installer's own skip or
+#                                    overwrite behaviour. It installs; removing the
+#                                    copy an old backend left is done by hand.
 #   completions map of command -> sh command whose stdout is that command's zsh
 #             completion. Compiled into ~/.config/mise/tasks/refresh-completions
 #             (run by mise's postinstall hook, and by chezmoi whenever this
@@ -75,15 +86,30 @@ completions = { starship = "starship completions zsh" }
 [packages.antidote]
 on = ["darwin"]
 
-# completions: jdx's rpm ships none; brew's formula does. Needs `usage` (below) at completion time.
+# mise.run is the recommended source on macOS and Linux alike: the single-binary release is
+# built with mise's optimised profile (the brew formula is slower and larger), and it is the
+# only one `mise self-update` can advance — auto_update in dot_config/mise/config.toml.tmpl
+# replaces the `brew upgrade`/`dnf upgrade`.
+# completions: no installer ships one, so the recipe is load-bearing on every machine.
+# Needs `usage` (below) at completion time.
 [packages.mise]
 on = ["darwin", "linux"]
-dnf = { repofile = "https://mise.jdx.dev/rpm/mise.repo" }
+via = "upstream"
+upstream = { command = "curl https://mise.run | MISE_INSTALL_SKIP_IF_EXISTS=1 sh" }
 completions = { mise = "mise completion zsh" }
 
-# always latest, never multi-version — and needed by chezmoi's own scripts before mise tools exist
+# always latest, never multi-version — and needed by chezmoi's own scripts before mise tools exist.
+# darwin/amd64: Homebrew builds no Intel bottle for uv, and only the standalone installer leaves
+# `uv self update` working (a package-managed uv has it disabled). UV_NO_MODIFY_PATH keeps the
+# installer out of the chezmoi-managed shell profiles, here and on every later self-update.
+# completions: neither the standalone installer nor brew's formula ships one (no _uv in its
+# site-functions), so the recipe is the only source on a Mac.
 [packages.uv]
 on = ["darwin", "linux"]
+overrides = [
+  { when = "darwin/amd64", via = "upstream", upstream = { command = "curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh" } },
+]
+completions = { uv = "uv generate-shell-completion zsh" }
 
 [packages.make]
 on = ["darwin", "linux"]
@@ -146,8 +172,13 @@ dnf = { name = "ShellCheck" }
 [packages.git-cliff]
 on = ["darwin"]
 
+# darwin/amd64: no Intel bottle, and building it is not the point — mise's aqua
+# backend takes the same upstream release binary. completions: brew's formula ships one and
+# outranks the recipe on arm64; on amd64 the recipe is the only source.
 [packages.ast-grep]
 on = ["darwin"]
+overrides = [{ when = "darwin/amd64", via = "mise" }]
+completions = { ast-grep = "ast-grep completions zsh" }
 
 [packages.duckdb]
 on = ["darwin"]

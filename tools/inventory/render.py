@@ -3,10 +3,10 @@
 
 Every artifact is one line per package in key order, in the exact syntax the
 consumer reads: Brewfile lines, dnf names and repos, mise `[tools]` entries,
-`uv tool install` specs, `<command> <recipe>` for refresh-completions and
-`<mise tool> <command>...` for its --changed filter. STAMP is the hash of the
-data files the tree was compiled from; the `artifact` template recomputes it
-and refuses to serve a stale tree.
+`uv tool install` specs, upstream installer commands, `<command> <recipe>` for
+refresh-completions and `<mise tool> <command>...` for its --changed filter.
+STAMP is the hash of the data files the tree was compiled from; the `artifact`
+template recomputes it and refuses to serve a stale tree.
 """
 
 from __future__ import annotations
@@ -18,23 +18,38 @@ from pathlib import Path
 from typing import Any
 
 from inventory.inventory import DATA_FILES, Inventory
-from inventory.model import DOCS, Cask, CoprRpm, Mise, RepofileRpm, Resolved, Uv
+from inventory.model import (
+    DOCS,
+    Cask,
+    CoprRpm,
+    Formula,
+    Mise,
+    RepofileRpm,
+    Resolved,
+    Rpm,
+    Upstream,
+    Uv,
+)
 
 RENDERED_DIR = ".rendered"
 STAMP = "STAMP"
 SCHEMA_DIR = ".schema"  # .schema/<data file stem>.json, what each `#:schema` line names
+# The reviewed snapshot of the artifacts. Committed, and nothing but `render golden` writes it:
+# a config edit shows up here as the diff it causes across every machine, which is the part no
+# one predicts. Kept out of .rendered/ because chezmoi reads that one at apply time.
+GOLDEN_DIR = "tests/golden"
 
 
 def brewfile(rs: Iterable[Resolved]) -> list[str]:
     return [
         f'cask "{r.name}"' if isinstance(r.spec, Cask) else f'brew "{r.name}"'
         for r in rs
-        if r.backend == "brew"
+        if isinstance(r.spec, Formula | Cask)
     ]
 
 
 def dnf_list(rs: Iterable[Resolved]) -> list[str]:
-    return [r.name for r in rs if r.backend == "dnf"]
+    return [r.name for r in rs if isinstance(r.spec, Rpm | CoprRpm | RepofileRpm)]
 
 
 def dnf_repos(rs: Iterable[Resolved]) -> list[str]:
@@ -55,7 +70,7 @@ def mise_tools(rs: Iterable[Resolved]) -> list[str]:
     writes them back, so its rewrites do not drift from the render."""
     out = []
     for r in rs:
-        if r.backend == "mise" and isinstance(r.spec, Mise):
+        if isinstance(r.spec, Mise):
             name, version = json.dumps(r.name), json.dumps(r.spec.version)
             if not r.spec.components:
                 out.append(f"{name} = {version}")
@@ -70,8 +85,14 @@ def uv_tools(rs: Iterable[Resolved]) -> list[str]:
     return [
         f"{r.name}@{r.spec.version}" if r.spec.version else r.name
         for r in rs
-        if r.backend == "uv" and isinstance(r.spec, Uv)
+        if isinstance(r.spec, Uv)
     ]
+
+
+def upstream_installs(rs: Iterable[Resolved]) -> list[str]:
+    """One installer command per line, run as written. They are the bootstrap tools, so
+    the install script runs them before anything that needs them."""
+    return [r.spec.command for r in rs if isinstance(r.spec, Upstream)]
 
 
 def completions(rs: Iterable[Resolved]) -> list[str]:
@@ -86,7 +107,7 @@ def mise_completions(rs: Iterable[Resolved]) -> list[str]:
     return [
         f"{r.name} {' '.join(sorted(r.completions))}"
         for r in rs
-        if r.backend == "mise" and r.completions
+        if isinstance(r.spec, Mise) and r.completions
     ]
 
 
@@ -96,6 +117,7 @@ ARTIFACTS: dict[str, Callable[[Iterable[Resolved]], list[str]]] = {
     "dnf-repos": dnf_repos,
     "mise-tools": mise_tools,
     "uv-tools": uv_tools,
+    "upstream-installs": upstream_installs,
     "completions": completions,
     "mise-completions": mise_completions,
 }
@@ -146,16 +168,20 @@ def schemas() -> dict[str, str]:
     return out
 
 
-def render_tree(inv: Inventory, data_dir: Path) -> dict[str, str]:
-    """Relative path -> content for the whole `.rendered/` tree. The JSON Schemas are a
-    separate tree: the editor reads them, not chezmoi, and they come from the types."""
-    files = {
+def artifact_tree(inv: Inventory) -> dict[str, str]:
+    """Relative path -> content, artifacts only. What the golden holds: STAMP hashes the data
+    files, so a reworded comment would churn it while changing no artifact."""
+    return {
         f"{mid}/{name}": text
         for mid in inv.machines
         for name, text in render_machine(inv, mid).items()
     }
-    files[STAMP] = stamp(data_dir) + "\n"
-    return files
+
+
+def render_tree(inv: Inventory, data_dir: Path) -> dict[str, str]:
+    """Relative path -> content for the whole `.rendered/` tree. The JSON Schemas are a
+    separate tree: the editor reads them, not chezmoi, and they come from the types."""
+    return artifact_tree(inv) | {STAMP: stamp(data_dir) + "\n"}
 
 
 def write_tree(files: Mapping[str, str], out_dir: Path) -> list[str]:

@@ -2,14 +2,17 @@
 types (tools/inventory/model.py), resolution (inventory.py) and the artifacts chezmoi
 includes from .rendered/ (render.py, `uv run render`).
 
-Table-driven. Each row is one fact about the model:
+Table-driven, and every row is about the compiler, not about what .chezmoidata happens to
+say today:
 - RENDER_CASES   synthetic packages -> exact lines each artifact holds on each machine
 - REJECTS        malformed entries -> the message naming the entry
-- INVARIANTS     facts the real inventory must keep, per machine
-Plus: .rendered/ is what the data compiles to today (the check `uv run render --check`
-runs before every commit), the chezmoi consumers render to valid shell/toml with the
-artifact's lines inside, and the `artifact` template refuses stale data and machines
-nobody declared.
+
+What the real data compiles to belongs in tests/golden/, never in an assertion here: a row
+restating a package's backend has to be edited in the same commit as the change it guards.
+`uv run render golden` accepts a change.
+
+Plus: the chezmoi consumers render to valid shell/toml with the artifact's lines inside, and
+the `artifact` template refuses stale data and machines nobody declared.
 """
 
 from __future__ import annotations
@@ -32,10 +35,13 @@ from inventory.inventory import DATA_FILES, Inventory, InventoryError, load_data
 from inventory.model import DOCS
 from inventory.render import (
     ARTIFACTS,
+    GOLDEN_DIR,
     RENDERED_DIR,
     SCHEMA_DIR,
+    artifact_tree,
     render,
     render_tree,
+    schemas,
     stale,
     write_tree,
 )
@@ -44,6 +50,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA = REPO_ROOT / ".chezmoidata"
 RENDERED = REPO_ROOT / RENDERED_DIR
 SCHEMA = REPO_ROOT / SCHEMA_DIR
+GOLDEN = REPO_ROOT / GOLDEN_DIR
 MISE_TASKS = REPO_ROOT / "dot_config" / "mise" / "tasks"
 INSTALL_SCRIPT = REPO_ROOT / "run_onchange_before_install-packages.sh.tmpl"
 REFRESH_SCRIPT = REPO_ROOT / "run_onchange_after_refresh-completions.sh.tmpl"
@@ -54,6 +61,20 @@ GENERATED = load_data(DATA / "zsh.toml")["zsh"]["generatedCompletions"]
 REAL = Inventory.load(DATA)
 
 # --- harness ------------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _built_trees() -> None:
+    """`.rendered/` and `.schema/` are gitignored build output, so a fresh clone has neither and
+    every test that reads them would fail before the suite ever compiled anything. Build them
+    up front, the way `uv run render` does.
+
+    chezmoi rebuilds `.rendered/` too: `.chezmoi.toml.tmpl` runs the compiler from a
+    read-source-state hook, so every `chezmoi_render` below refreshes it as a side effect. No
+    test may therefore assert that the tree on disk is stale — tests/golden/ holds snapshots.
+    """
+    write_tree(render_tree(REAL, DATA), RENDERED)
+    write_tree(schemas(), SCHEMA)
 
 
 def inventory(packages: Mapping[str, Any]) -> Inventory:
@@ -83,9 +104,10 @@ def chezmoi_render(path: Path, machine: str, source: Path = REPO_ROOT) -> str:
 
 
 def heredoc(text: str, tag: str) -> list[str]:
-    """Non-blank lines of the first `<<'TAG' … TAG` block in a rendered script."""
-    body = text.split(f"<<'{tag}'\n", 1)[1].split(f"\n{tag}\n", 1)[0]
-    return [ln for ln in body.splitlines() if ln.strip()]
+    """Non-blank lines of the first `<<'TAG' … TAG` block in a rendered script. The marker
+    need not end its line: `cmd <<'EOF' || status=$?` opens a heredoc like any other."""
+    rest = text.split(f"<<'{tag}'", 1)[1].split("\n", 1)[1]
+    return [ln for ln in rest.split(f"\n{tag}\n", 1)[0].splitlines() if ln.strip()]
 
 
 def check_shell(script: Path, shell: str = "bash") -> None:
@@ -106,6 +128,13 @@ class RenderCase:
 
 RENDER_CASES = [
     RenderCase(
+        # Artifacts are keyed content: declaration order leaking into them would rewrite every
+        # file on a reordered packages.toml, and chezmoi re-runs the install script on content.
+        "artifact-lines-follow-key-order-not-declaration-order",
+        {"zzz": {"on": ["darwin"]}, "aaa": {"on": ["darwin"]}},
+        {("brewfile", "darwin-arm64"): ['brew "aaa"', 'brew "zzz"']},
+    ),
+    RenderCase(
         "default-backend-is-the-platforms-system-manager",
         {"foo": {"on": ["darwin", "linux"]}},
         {
@@ -125,17 +154,6 @@ RENDER_CASES = [
         },
     ),
     RenderCase(
-        "via-uv-renders-only-into-uv-tools",
-        {"ruff": {"on": ["darwin", "linux"], "via": "uv"}},
-        {
-            ("uv-tools", "darwin-arm64"): ["ruff"],
-            ("uv-tools", "linux-arm64"): ["ruff"],
-            ("brewfile", "darwin-arm64"): [],
-            ("dnf-list", "linux-arm64"): [],
-            ("mise-tools", "darwin-arm64"): [],
-        },
-    ),
-    RenderCase(
         "version-is-emitted-for-mise",
         {"rust": {"on": ["darwin"], "via": "mise", "mise": {"version": "stable"}}},
         {("mise-tools", "darwin-arm64"): ['"rust" = "stable"']},
@@ -144,17 +162,6 @@ RENDER_CASES = [
         "uv-spells-name-and-version-as-name-at-version",
         {"foo": {"on": ["darwin"], "via": "uv", "uv": {"name": "foo-cli", "version": "1.2"}}},
         {("uv-tools", "darwin-arm64"): ["foo-cli@1.2"]},
-    ),
-    RenderCase(
-        "uv-version-override-pins-only-that-machine",
-        {
-            "foo": {
-                "on": ["darwin", "linux"],
-                "via": "uv",
-                "overrides": [{"when": "linux", "uv": {"version": "1"}}],
-            }
-        },
-        {("uv-tools", "darwin-arm64"): ["foo"], ("uv-tools", "linux-arm64"): ["foo@1"]},
     ),
     RenderCase(
         "components-render-an-inline-table",
@@ -244,15 +251,6 @@ RENDER_CASES = [
         },
     ),
     RenderCase(
-        "package-absent-from-on-renders-nowhere",
-        {"foo": {"on": ["linux"]}, "bar": {"on": ["darwin"], "via": "mise"}},
-        {
-            ("brewfile", "darwin-arm64"): [],
-            ("mise-tools", "linux-arm64"): [],
-            ("dnf-list", "linux-arm64"): ["foo"],
-        },
-    ),
-    RenderCase(
         "os-arch-tag-matches-only-that-arch",
         {"foo": {"on": ["darwin/amd64"]}},
         {("brewfile", "darwin-amd64"): ['brew "foo"'], ("brewfile", "darwin-arm64"): []},
@@ -270,21 +268,6 @@ RENDER_CASES = [
             ("mise-tools", "darwin-arm64"): ['"uv" = "latest"'],
             ("mise-tools", "linux-arm64"): [],
             ("dnf-list", "linux-arm64"): ["uv"],
-        },
-    ),
-    RenderCase(
-        "override-when-os-arch-matches-only-that-arch",
-        {
-            "pnpm": {
-                "on": ["darwin", "linux"],
-                "via": "mise",
-                "overrides": [{"when": "darwin/amd64", "mise": {"name": "npm:pnpm"}}],
-            }
-        },
-        {
-            ("mise-tools", "darwin-amd64"): ['"npm:pnpm" = "latest"'],
-            ("mise-tools", "darwin-arm64"): ['"pnpm" = "latest"'],
-            ("mise-tools", "linux-arm64"): ['"pnpm" = "latest"'],
         },
     ),
     RenderCase(
@@ -379,34 +362,20 @@ RENDER_CASES = [
         "dnf-repos-lists-copr-and-repofile-only-for-packages-installed-here-via-system",
         {
             "starship": {"on": ["darwin", "linux"], "dnf": {"copr": "atim/starship"}},
-            "mise": {"on": ["linux"], "dnf": {"repofile": "https://mise.jdx.dev/rpm/mise.repo"}},
+            "vendored": {"on": ["linux"], "dnf": {"repofile": "https://vendor/x.repo"}},
             "mac-only": {"on": ["darwin"], "dnf": {"copr": "nope/nope"}},
         },
         {
             ("dnf-repos", "linux-arm64"): [
-                "repofile https://mise.jdx.dev/rpm/mise.repo",
                 "copr atim/starship",
+                "repofile https://vendor/x.repo",
             ]
-        },
-    ),
-    RenderCase(
-        "on-may-mix-os-and-os-arch-tags",
-        {"foo": {"on": ["darwin", "linux/arm64"]}},
-        {
-            ("brewfile", "darwin-arm64"): ['brew "foo"'],
-            ("brewfile", "darwin-amd64"): ['brew "foo"'],
-            ("dnf-list", "linux-arm64"): ["foo"],
         },
     ),
     RenderCase(
         "no-packages-renders-nothing",
         {},
         {(a, "darwin-arm64"): [] for a in ARTIFACTS} | {(a, "linux-arm64"): [] for a in ARTIFACTS},
-    ),
-    RenderCase(
-        "empty-overrides-is-a-no-op",
-        {"foo": {"on": ["darwin"], "via": "mise", "overrides": []}},
-        {("mise-tools", "darwin-arm64"): ['"foo" = "latest"']},
     ),
     RenderCase(
         "override-that-matches-no-machine-is-inert",
@@ -421,17 +390,6 @@ RENDER_CASES = [
             ("mise-tools", "linux-arm64"): ['"foo" = "latest"'],
             ("mise-tools", "darwin-arm64"): ['"foo" = "latest"'],
         },
-    ),
-    RenderCase(
-        "os-level-when-applies-to-arch-limited-package",
-        {
-            "foo": {
-                "on": ["darwin/arm64"],
-                "via": "mise",
-                "overrides": [{"when": "darwin", "mise": {"version": "2"}}],
-            }
-        },
-        {("mise-tools", "darwin-arm64"): ['"foo" = "2"'], ("mise-tools", "darwin-amd64"): []},
     ),
     RenderCase(
         "shared-copr-is-emitted-once-per-package",  # the install script's guard makes repeats no-ops
@@ -458,15 +416,6 @@ RENDER_CASES = [
         },
     ),
     RenderCase(
-        "completions-on-a-system-package-render-on-every-backend",  # fpath order arbitrates
-        {"mise": {"on": ["darwin", "linux"], "completions": {"mise": "mise completion zsh"}}},
-        {
-            ("completions", "darwin-arm64"): ["mise mise completion zsh"],
-            ("completions", "linux-arm64"): ["mise mise completion zsh"],
-            ("brewfile", "darwin-arm64"): ['brew "mise"'],
-        },
-    ),
-    RenderCase(
         "completions-map-renders-one-line-per-command-sorted-and-keeps-shell-syntax",
         {
             "rust": {
@@ -483,35 +432,6 @@ RENDER_CASES = [
                 "cargo x | grep -q '^n' && clap_stub cargo 'C=zsh cargo' || y",
                 "rustup rustup completions zsh rustup",
             ]
-        },
-    ),
-    RenderCase(
-        "completions-on-a-cask-render-under-the-command-name",
-        {
-            "1password-cli": {
-                "on": ["darwin"],
-                "brew": {"cask": "1password-cli"},
-                "completions": {"op": "op completion zsh"},
-            }
-        },
-        {
-            ("completions", "darwin-arm64"): ["op op completion zsh"],
-            ("brewfile", "darwin-arm64"): ['cask "1password-cli"'],
-        },
-    ),
-    RenderCase(
-        "completions-on-a-uv-tool-render-where-it-installs",
-        {
-            "ruff": {
-                "on": ["linux"],
-                "via": "uv",
-                "completions": {"ruff": "ruff generate-shell-completion zsh"},
-            }
-        },
-        {
-            ("completions", "linux-arm64"): ["ruff ruff generate-shell-completion zsh"],
-            ("completions", "darwin-arm64"): [],
-            ("uv-tools", "linux-arm64"): ["ruff"],
         },
     ),
     RenderCase(
@@ -543,6 +463,22 @@ RENDER_CASES = [
         },
         {("mise-completions", "darwin-arm64"): []},
     ),
+    RenderCase(
+        "upstream-renders-its-command-and-reaches-no-package-manager",
+        {
+            "boot": {
+                "on": ["darwin", "linux"],
+                "via": "upstream",
+                "upstream": {"command": "curl https://x/install.sh | sh"},
+            }
+        },
+        {
+            ("upstream-installs", "darwin-arm64"): ["curl https://x/install.sh | sh"],
+            ("upstream-installs", "linux-arm64"): ["curl https://x/install.sh | sh"],
+            ("brewfile", "darwin-arm64"): [],
+            ("dnf-list", "linux-arm64"): [],
+        },
+    ),
 ]
 
 
@@ -570,49 +506,51 @@ class Reject:
 
 REJECTS = [
     Reject(
-        "unknown-key", {"foo": {"on": ["darwin"], "nope": "1"}}, "packages.foo.nope: Extra inputs"
+        "unknown-key",
+        {"foo": {"on": ["darwin"], "nope": "1"}},
+        "packages.foo.nope: Extra inputs are not permitted",
     ),
     Reject("missing-on", {"foo": {"via": "mise"}}, "packages.foo.on: Field required"),
     Reject(
-        "on-not-a-list", {"foo": {"on": "darwin"}}, "packages.foo.on: Input should be a valid list"
+        "on-empty",
+        {"foo": {"on": []}},
+        "packages.foo.on: List should have at least 1 item after validation, not 0",
     ),
-    Reject("on-empty", {"foo": {"on": []}}, "packages.foo.on: List should have at least 1 item"),
     Reject("on-unknown-tag", {"foo": {"on": ["mars"]}}, "packages.foo.on.0: unknown tag 'mars'"),
+    Reject(  # a real OS with an arch we do not render for: the tag is what is wrong, not a field
+        "on-known-os-unknown-arch",
+        {"foo": {"on": ["darwin/x86_64"]}},
+        "packages.foo.on.0: unknown tag 'darwin/x86_64'",
+    ),
+    Reject(
+        # `name` is discriminating (Cask lacks it) but does not choose a variant, so it may not
+        # clear the block: renaming a cask has to fail loudly, not turn it into a formula.
+        "a-name-patch-may-not-demote-a-cask-to-a-formula",
+        {
+            "app": {
+                "on": ["darwin"],
+                "brew": {"cask": "app"},
+                "overrides": [{"when": "darwin/amd64", "brew": {"name": "app"}}],
+            }
+        },
+        "packages.app.overrides[darwin/amd64].brew: a formula ({ name }) or a cask"
+        " ({ cask }), not both",
+    ),
     Reject(
         "via-invalid",
         {"foo": {"on": ["darwin"], "via": "pip"}},
-        "packages.foo: via must be system|mise|uv",
-    ),
-    Reject(
-        "name-field-is-a-map",
-        {"foo": {"on": ["darwin"], "via": "mise", "mise": {"name": {"darwin": "x"}}}},
-        "packages.foo.mise.name: Input should be a valid string",
+        "packages.foo: via must be system|mise|uv|upstream",
     ),
     # the point of the blocks: a backend's parameters cannot land on another backend
-    Reject(
-        "brew-block-on-a-mise-package",
-        {"foo": {"on": ["darwin"], "via": "mise", "brew": {"cask": "x"}}},
-        "packages.foo.brew: no brew block on a `via: mise` package",
-    ),
-    Reject(
-        "dnf-block-on-a-mise-package",
-        {"foo": {"on": ["linux"], "via": "mise", "dnf": {"copr": "a/b"}}},
-        "packages.foo.dnf: no dnf block on a `via: mise` package",
-    ),
     Reject(
         "mise-block-on-a-system-package",
         {"foo": {"on": ["darwin"], "mise": {"version": "1"}}},
         "packages.foo.mise: no mise block on a `via: system` package",
     ),
-    Reject(
-        "uv-block-on-a-mise-package",
-        {"foo": {"on": ["darwin"], "via": "mise", "uv": {"version": "1"}}},
-        "packages.foo.uv: no uv block on a `via: mise` package",
-    ),
-    Reject(
-        "version-outside-a-block",  # brew and dnf have no version; the field lives where it means something
-        {"foo": {"on": ["darwin"], "version": "9"}},
-        "packages.foo.version: Extra inputs are not permitted",
+    Reject(  # the command is the whole of the how, so there is no default to fall back on
+        "upstream-without-a-command",
+        {"foo": {"on": ["darwin"], "via": "upstream"}},
+        "packages.foo.upstream: Field required",
     ),
     Reject(
         "brew-is-a-formula-or-a-cask-not-both",
@@ -629,11 +567,6 @@ REJECTS = [
         "unknown-key-inside-a-union-block-is-named",
         {"foo": {"on": ["linux"], "dnf": {"nope": "1"}}},
         "packages.foo.dnf.nope: Extra inputs are not permitted",
-    ),
-    Reject(
-        "overrides-not-a-list",
-        {"foo": {"on": ["darwin"], "overrides": {"when": "linux"}}},
-        "packages.foo.overrides: Input should be a valid list",
     ),
     Reject(
         "override-missing-when",
@@ -653,18 +586,7 @@ REJECTS = [
     Reject(
         "override-via-invalid",
         {"foo": {"on": ["darwin"], "overrides": [{"when": "linux", "via": "pip"}]}},
-        "packages.foo.overrides[linux].via: Input should be 'system', 'mise' or 'uv'",
-    ),
-    Reject(
-        "override-value-not-string",
-        {
-            "foo": {
-                "on": ["darwin"],
-                "via": "mise",
-                "overrides": [{"when": "linux", "mise": {"version": 1}}],
-            }
-        },
-        "packages.foo.overrides[linux].mise.version: Input should be a valid string",
+        "packages.foo.overrides[linux].via: Input should be 'system', 'mise', 'uv' or 'upstream'",
     ),
     Reject(
         "override-that-matches-nothing-is-still-checked",
@@ -677,34 +599,14 @@ REJECTS = [
         "packages.foo.overrides[linux/amd64].mise: no mise block on a `via: system` package",
     ),
     Reject(
-        "components-not-a-list",
-        {"foo": {"on": ["darwin"], "via": "mise", "mise": {"components": "rust-src"}}},
-        "packages.foo.mise.components: Input should be a valid list",
-    ),
-    Reject(
         "components-empty",
         {"foo": {"on": ["darwin"], "via": "mise", "mise": {"components": []}}},
-        "packages.foo.mise.components: List should have at least 1 item",
-    ),
-    Reject(
-        "components-entry-not-a-string",
-        {"foo": {"on": ["darwin"], "via": "mise", "mise": {"components": [1]}}},
-        "packages.foo.mise.components.0: Input should be a valid string",
-    ),
-    Reject(
-        "completions-not-a-map",
-        {"foo": {"on": ["darwin"], "completions": "foo completion zsh"}},
-        "packages.foo.completions: Input should be a valid dictionary",
+        "packages.foo.mise.components: List should have at least 1 item after validation, not 0",
     ),
     Reject(
         "completions-empty",
         {"foo": {"on": ["darwin"], "completions": {}}},
-        "packages.foo.completions: Dictionary should have at least 1 item",
-    ),
-    Reject(
-        "completions-recipe-not-a-string",
-        {"foo": {"on": ["darwin"], "completions": {"foo": ["foo", "completion"]}}},
-        "packages.foo.completions.foo: Input should be a valid string",
+        "packages.foo.completions: Dictionary should have at least 1 item after validation, not 0",
     ),
     Reject(
         "completions-recipe-empty",
@@ -716,27 +618,6 @@ REJECTS = [
         {"foo": {"on": ["darwin"], "overrides": [{"when": "linux", "completions": {"foo": "x"}}]}},
         "packages.foo.overrides[linux]: cannot override 'completions'",
     ),
-    Reject(  # inside an override the same union rule applies, and is named as such
-        "override-brew-both-flavours",
-        {
-            "foo": {
-                "on": ["darwin"],
-                "overrides": [{"when": "linux", "brew": {"name": "a", "cask": "b"}}],
-            }
-        },
-        "packages.foo.overrides[linux].brew: a formula ({ name }) or a cask ({ cask }), not both",
-    ),
-    Reject(
-        "override-unknown-key-inside-a-block",
-        {
-            "foo": {
-                "on": ["darwin"],
-                "via": "mise",
-                "overrides": [{"when": "linux", "mise": {"nope": 1}}],
-            }
-        },
-        "packages.foo.overrides[linux].mise.nope: Extra inputs are not permitted",
-    ),
 ]
 
 
@@ -746,7 +627,9 @@ REJECTS = [
 def test_validation_rejects(packages: Mapping[str, Any], message: str):
     with pytest.raises(InventoryError) as e:
         inventory(packages)
-    assert message in str(e.value), str(e.value)
+    # Equality, not `in`: a substring cannot see the lines _explain exists to suppress, so a
+    # dropped dedupe or noise filter passes under it.
+    assert str(e.value) == message
 
 
 def test_machine_must_name_a_declared_platform():
@@ -773,98 +656,6 @@ def test_platform_system_manager_is_one_we_render_for():
 # --- real data ----------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True)
-class Invariant:
-    id: str
-    artifact: str
-    machine: str
-    contains: list[str] = field(default_factory=list)
-    excludes: list[str] = field(default_factory=list)
-    exact: list[str] | None = None
-
-
-INVARIANTS = [
-    Invariant(
-        "intel-mac-pnpm-via-npm",
-        "mise-tools",
-        "darwin-amd64",
-        contains=['"npm:pnpm" = "latest"'],
-        excludes=['"pnpm" = "latest"'],
-    ),
-    Invariant(
-        "arm-mac-pnpm-via-default",
-        "mise-tools",
-        "darwin-arm64",
-        contains=['"pnpm" = "latest"'],
-        excludes=['"npm:pnpm" = "latest"'],
-    ),
-    Invariant(
-        "rust-toolchain-ships-the-editor-components-on-mac",
-        "mise-tools",
-        "darwin-arm64",
-        contains=['"rust" = { version = "stable", components = ["rust-analyzer", "rust-src"] }'],
-    ),
-    Invariant(
-        "rust-toolchain-ships-the-editor-components-on-linux",
-        "mise-tools",
-        "linux-arm64",
-        contains=['"rust" = { version = "stable", components = ["rust-analyzer", "rust-src"] }'],
-    ),
-    Invariant("uv-not-in-mise-on-mac", "mise-tools", "darwin-arm64", excludes=['"uv" = "latest"']),
-    Invariant("uv-not-in-mise-on-linux", "mise-tools", "linux-arm64", excludes=['"uv" = "latest"']),
-    Invariant("uv-from-brew", "brewfile", "darwin-arm64", contains=['brew "uv"']),
-    Invariant("uv-from-dnf", "dnf-list", "linux-arm64", contains=["uv"]),
-    Invariant("mac-installs-nothing-via-dnf", "dnf-list", "darwin-arm64", exact=[]),
-    Invariant("linux-has-no-brewfile", "brewfile", "linux-arm64", exact=[]),
-    # Python CLIs ride uv on every machine, never a system package or mise.
-    Invariant("ruff-and-ty-via-uv-on-mac", "uv-tools", "darwin-arm64", contains=["ruff", "ty"]),
-    Invariant("ruff-and-ty-via-uv-on-linux", "uv-tools", "linux-arm64", contains=["ruff", "ty"]),
-    Invariant("ruff-not-in-mise", "mise-tools", "darwin-arm64", excludes=['"ruff" = "latest"']),
-    Invariant("ruff-not-in-brew", "brewfile", "darwin-arm64", excludes=['brew "ruff"']),
-    Invariant(
-        "uv-tools-declare-their-completions",
-        "completions",
-        "linux-arm64",
-        contains=["ruff ruff generate-shell-completion zsh", "ty ty generate-shell-completion zsh"],
-    ),
-    # The two system tools Fedora's repos ship no zsh completion for; brew's copy wins on a Mac.
-    Invariant(
-        "mise-and-starship-recipes-reach-linux",
-        "completions",
-        "linux-arm64",
-        contains=["mise mise completion zsh", "starship starship completions zsh"],
-    ),
-    Invariant(
-        "workstation-only-tools-generate-no-completion-on-linux",
-        "completions",
-        "linux-arm64",
-        excludes=["kubectl kubectl completion zsh", "op op completion zsh"],
-    ),
-    # Both ship it on both backends (Fedora rpm and brew formula alike): no recipe.
-    Invariant(
-        "uv-has-no-recipe",
-        "completions",
-        "darwin-arm64",
-        excludes=["uv uv generate-shell-completion zsh"],
-    ),
-    Invariant(
-        "prek-uses-the-clap-stub",
-        "completions",
-        "linux-arm64",
-        contains=["prek clap_stub prek 'COMPLETE=zsh prek'"],
-    ),
-]
-
-
-@pytest.mark.parametrize("inv", [pytest.param(i, id=i.id) for i in INVARIANTS])
-def test_real_data_invariant(inv: Invariant):
-    got = lines(REAL, inv.artifact, inv.machine)
-    assert set(inv.contains) <= set(got), inv.contains
-    assert not set(inv.excludes) & set(got), inv.excludes
-    if inv.exact is not None:
-        assert got == inv.exact
-
-
 @pytest.mark.parametrize("machine", MACHINES)
 @pytest.mark.parametrize(
     "artifact", [a for a in ARTIFACTS if a != "dnf-repos"]
@@ -884,15 +675,24 @@ def test_completions_commands_are_unique_per_machine(machine: str):
 # --- .rendered/: the compiled tree chezmoi includes ---------------------------------------------
 
 
-def test_rendered_tree_is_what_the_data_compiles_to():
-    """`uv run render --check`, in-process: every artifact and STAMP on disk, no extras."""
-    assert stale(render_tree(REAL, DATA), RENDERED) == []
+def _machine_showing(artifact: str) -> str:
+    """A machine whose copy of `artifact` has content. Every artifact is empty on some machine,
+    and an empty file equals every other empty file — asking for one would pass a template that
+    ignored the name it was given."""
+    for machine in MACHINES:
+        if (RENDERED / machine / artifact).read_text().strip():
+            return machine
+    raise AssertionError(f"{artifact} is empty on every machine, so it can pin nothing")
 
 
-@pytest.mark.parametrize("machine", MACHINES)
 @pytest.mark.parametrize("artifact", ARTIFACTS)
-def test_artifact_template_serves_this_machines_file(artifact: str, machine: str, tmp_path: Path):
-    """The template's hash of the data files agrees with STAMP, and it picks the machine's dir."""
+def test_artifact_template_serves_the_named_file_from_this_machines_dir(
+    artifact: str, tmp_path: Path
+):
+    """One machine per artifact is enough: swapping the machine-id halves breaks every one of
+    these, and serving a fixed name breaks all but the one that name belongs to. The stamp
+    guard is a separate fact — test_artifact_template_refuses_a_stale_tree owns it."""
+    machine = _machine_showing(artifact)
     tmpl = tmp_path / "t.tmpl"
     tmpl.write_text('{{ includeTemplate "artifact" (merge (dict "name" "' + artifact + '") .) }}')
     assert chezmoi_render(tmpl, machine) == (RENDERED / machine / artifact).read_text()
@@ -950,6 +750,22 @@ def test_each_data_file_validates_against_its_schema(name: str):
     first = (DATA / name).read_text().splitlines()[0]
     assert first == f"#:schema ../{SCHEMA_DIR}/{Path(name).stem}.json"
     schema_for(name).validate(load_data(DATA / name))
+
+
+def test_artifacts_match_the_golden():
+    """The committed snapshot of what the real data compiles to. It fails on any change to an
+    artifact — intended or not — and `uv run render golden` is how an intended one is accepted,
+    in a commit where the diff shows what else moved with it."""
+    assert stale(artifact_tree(REAL), GOLDEN) == []
+
+
+def test_no_schema_offers_the_editor_a_null_it_cannot_write():
+    """`X | None` fields come out of pydantic as `anyOf: [{…}, {type: null}]`. TOML has no null,
+    so leaving that branch in tells the editor `name = null` is a legal line in a file format
+    that cannot express it — which is the whole reason _no_null exists."""
+    # The rendered text, not a re-dump of it: json.dumps over a dict of strings escapes the
+    # inner quotes, and `"null"` would never match.
+    assert [name for name, text in schemas().items() if '"null"' in text] == []
 
 
 SCHEMA_REJECTS = [
@@ -1048,15 +864,64 @@ def test_install_script_renders_to_valid_shell(machine: str, tmp_path: Path):
     if _os(machine) == "darwin":
         assert "brew bundle install --file=-" in rendered
         assert "dnf" not in rendered
-        assert heredoc(rendered, "EOF") == lines(REAL, "brewfile", machine)
+        pkg_block = rendered.split("brew bundle install --file=-", 1)[1]
+        assert heredoc(pkg_block, "EOF") == lines(REAL, "brewfile", machine)
     else:
         assert "xargs -r sudo dnf -y install" in rendered
         assert "brew" not in rendered
-        assert heredoc(rendered, "EOF") == lines(REAL, "dnf-repos", machine)
+        pkg_block = rendered.split("copr enable", 1)[1]
+        assert heredoc(pkg_block, "EOF") == lines(REAL, "dnf-repos", machine)
     assert rendered.index("uv tool install") > rendered.index("<<'EOF'"), "uv tools come after uv"
     check_shell(script)
     uv_block = rendered.split("uv tool install", 1)[1]
     assert heredoc(uv_block, "EOF") == lines(REAL, "uv-tools", machine)
+
+
+@pytest.mark.parametrize("machine", MACHINES)
+def test_install_script_settles_the_bootstrap_tools_between_the_packages_and_the_uv_tools(
+    machine: str,
+):
+    """After the system packages, which is where the upstream installers' own dependencies
+    come from on a Linux box; before `uv tool install`, which needs the uv they may supply."""
+    rendered = chezmoi_render(INSTALL_SCRIPT, machine)
+    want = lines(REAL, "upstream-installs", machine)
+    assert want, "mise comes from upstream on every machine"
+    assert heredoc(rendered.split('sh -c "$cmd"', 1)[1], "EOF") == want
+    packages = "brew bundle install" if _os(machine) == "darwin" else "sudo dnf -y install"
+    assert rendered.index(packages) < rendered.index('sh -c "$cmd"')
+    assert rendered.index('sh -c "$cmd"') < rendered.index("uv tool install")
+
+
+@pytest.mark.parametrize("machine", [m for m in MACHINES if _os(m) == "darwin"])
+def test_a_failing_package_manager_does_not_skip_the_rest_of_the_apply(
+    machine: str, tmp_path: Path
+):
+    """An unbottled formula is routine on a Tier 3 Mac, and this is a `run_onchange_before_`
+    script: aborting on one would skip the bootstrap tools, the uv tools, and every dotfile of
+    the apply. The failure still has to reach chezmoi, so the script exits non-zero anyway.
+
+    Run with the package manager stubbed to fail and `sh`/`uv` stubbed to record: what the
+    later steps get called with is the behaviour, not the shell spelling that achieves it.
+    """
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    (stub / "brew").write_text("#!/bin/sh\nexit 1\n")
+    for name in ("sh", "uv"):
+        (stub / name).write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{tmp_path}/{name}.log"\n')
+    for f in stub.iterdir():
+        f.chmod(0o755)
+    script = tmp_path / "install-packages.sh"
+    script.write_text(chezmoi_render(INSTALL_SCRIPT, machine))
+    proc = subprocess.run(
+        ["bash", str(script)],
+        env={"PATH": f"{stub}:/usr/bin:/bin", "HOME": str(tmp_path)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert proc.returncode != 0, "a failed package must still reach chezmoi"
+    assert "mise.run" in (tmp_path / "sh.log").read_text(), "bootstrap installers were skipped"
+    assert "tool install" in (tmp_path / "uv.log").read_text(), "uv tools were skipped"
 
 
 @pytest.mark.parametrize("machine", MACHINES)

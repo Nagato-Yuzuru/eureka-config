@@ -15,7 +15,16 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from inventory.inventory import Inventory, InventoryError
-from inventory.render import RENDERED_DIR, SCHEMA_DIR, render_tree, schemas, stale, write_tree
+from inventory.render import (
+    GOLDEN_DIR,
+    RENDERED_DIR,
+    SCHEMA_DIR,
+    artifact_tree,
+    render_tree,
+    schemas,
+    stale,
+    write_tree,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 log = logging.getLogger("inventory")
@@ -23,7 +32,7 @@ log = logging.getLogger("inventory")
 
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="render", description=__doc__)
-    ap.add_argument("what", nargs="?", choices=("all", "schema"), default="all")
+    ap.add_argument("what", nargs="?", choices=("all", "schema", "golden"), default="all")
     ap.add_argument("--check", action="store_true", help="report stale files, write nothing")
     ap.add_argument("--root", type=Path, default=REPO_ROOT, help="chezmoi source dir")
     args = ap.parse_args(argv)
@@ -31,14 +40,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     data_dir = args.root / ".chezmoidata"
     # `schema` comes from the types alone, so it works while a data file is broken;
     # `all` writes neither tree when the data does not parse.
-    trees = [(schemas(), args.root / SCHEMA_DIR, SCHEMA_DIR)]
-    if args.what == "all":
+    trees = [] if args.what == "golden" else [(schemas(), args.root / SCHEMA_DIR, SCHEMA_DIR)]
+    if args.what != "schema":
         try:
-            rendered = render_tree(Inventory.load(data_dir), data_dir)
+            inv = Inventory.load(data_dir)
         except InventoryError as e:
             log.error("%s", e)
             return 2
-        trees.append((rendered, args.root / RENDERED_DIR, RENDERED_DIR))
+        if args.what == "golden":
+            trees.append((artifact_tree(inv), args.root / GOLDEN_DIR, GOLDEN_DIR))
+        else:
+            trees.append((render_tree(inv, data_dir), args.root / RENDERED_DIR, RENDERED_DIR))
     found_stale = False
     for files, out_dir, shown in trees:
         if args.check:
