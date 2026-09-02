@@ -5,7 +5,7 @@ description: "Apply when an artifact reaches its final state — pre-commit, pre
 
 # Sweep
 
-Residue — text only the production history can justify: correction scars, rejected-alternative narration, session jargon, restating descriptions — is invisible to its author. You wrote the artifact, therefore it looks clean to you, therefore looking clean carries no information. The sweep runs on the finalization event itself, on every terminal artifact, every time.
+Residue — text only the production history can justify: the "(not X)" a "don't X" leaves behind, session labels, iteration narration, one-instance literals in general guidance — is invisible to its author. You wrote the artifact, therefore it looks clean to you, therefore looking clean carries no information. The sweep runs on the finalization event itself, on every terminal artifact, every time.
 
 ## 1. Dispatch
 
