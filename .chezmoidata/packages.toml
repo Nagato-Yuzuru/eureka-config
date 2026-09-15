@@ -339,7 +339,7 @@ via = "mise"
 completions = { k9s = "k9s completion zsh" }
 
 [packages.buf]
-on = ["darwin"]
+on = ["darwin", "linux"]
 via = "mise"
 completions = { buf = "buf completion zsh" }
 
