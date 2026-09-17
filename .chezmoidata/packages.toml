@@ -430,6 +430,10 @@ completions = { ty = "ty generate-shell-completion zsh" }
 [packages.clang]
 on = ["linux"]
 
+[packages.clangd]
+on = ["linux"]
+dnf.name = "clang-tools-extra"
+
 [packages.llvm] # llvm-strip -g, the DWARF strip every libbpf build ends with
 on = ["linux"]
 
