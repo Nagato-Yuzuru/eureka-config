@@ -13,6 +13,9 @@ npm.package_manager = "pnpm"
 # CLI breaks tool resolution, not just mise itself. Interval: auto_update_check_duration.
 auto_update = true
 
+[settings.github]
+credential_command = "gh auth token"
+
 # Tasks are files in ~/.config/mise/tasks/, rendered by chezmoi from packages.toml:
 #   refresh-completions  regenerate the zsh completions no package manager ships
 #   audit-completions    who provides each tool's completion on this machine
