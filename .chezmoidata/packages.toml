@@ -287,7 +287,6 @@ mise = { version = "lts" }
 [packages.pnpm]
 on = ["darwin", "linux"]
 via = "mise"
-overrides = [{ when = "darwin/amd64", mise = { name = "npm:pnpm" } }]
 completions = { pnpm = "pnpm completion zsh" }
 
 [packages.golangci-lint]
