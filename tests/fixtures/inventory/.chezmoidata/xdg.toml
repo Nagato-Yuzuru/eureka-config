@@ -1,0 +1,4 @@
+[xdg]
+dataHome = "synthetic/data"
+stateHome = "synthetic/state"
+cacheHome = "synthetic/cache"

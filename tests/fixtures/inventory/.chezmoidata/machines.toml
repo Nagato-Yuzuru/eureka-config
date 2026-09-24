@@ -1,0 +1,7 @@
+# Every os/arch pair the model can spell, so every tag a synthetic package uses resolves
+# to a machine.
+[machines]
+darwin-arm64 = { platform = "brewhost", arch = "arm64" }
+darwin-amd64 = { platform = "brewhost", arch = "amd64" }
+linux-arm64 = { platform = "dnfhost", arch = "arm64" }
+linux-amd64 = { platform = "dnfhost", arch = "amd64" }

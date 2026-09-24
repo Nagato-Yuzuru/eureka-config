@@ -1,0 +1,5 @@
+# Synthetic inventory for tests/test_inventory.py: one platform per system package manager.
+# The names differ from the real ones so that no test can lean on them.
+[platforms]
+brewhost = { os = "darwin", system = "brew" }
+dnfhost = { os = "linux", system = "dnf" }

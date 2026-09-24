@@ -12,12 +12,16 @@ to be edited in the same commit as the change it guards. The real data is held o
 invariants every valid inventory satisfies.
 
 Plus: the chezmoi consumers render to valid shell/toml with the artifact's lines inside, and
-the `artifact` template refuses stale data and machines nobody declared.
+the `artifact` template refuses stale data and machines nobody declared. Those run against a
+synthetic chezmoi source (the `source` fixture): tests/fixtures/inventory/.chezmoidata, its
+compiled `.rendered/`, and copies of the templates under test — chosen so that every artifact
+is non-empty and machine-specific, which a real-data consumer test could not rely on.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import tomllib
@@ -44,57 +48,93 @@ from inventory.render import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DATA = REPO_ROOT / ".chezmoidata"
-RENDERED = REPO_ROOT / RENDERED_DIR
+DATA = REPO_ROOT / ".chezmoidata"  # the real data: invariants only
 SCHEMA = REPO_ROOT / SCHEMA_DIR
-MISE_TASKS = REPO_ROOT / "dot_config" / "mise" / "tasks"
-INSTALL_SCRIPT = REPO_ROOT / "run_onchange_before_install-packages.sh.tmpl"
-REFRESH_SCRIPT = REPO_ROOT / "run_onchange_after_refresh-completions.sh.tmpl"
-
-PLATFORMS = load_data(DATA / "platforms.toml")["platforms"]
-MACHINES = load_data(DATA / "machines.toml")["machines"]
-GENERATED = load_data(DATA / "zsh.toml")["zsh"]["generatedCompletions"]
 REAL = Inventory.load(DATA)
+
+# The synthetic inventory every other test runs on (see its packages.toml for the design).
+FIXTURE_DATA = Path(__file__).resolve().parent / "fixtures" / "inventory" / ".chezmoidata"
+SYN = Inventory.load(FIXTURE_DATA)
+MACHINES = list(SYN.machines)
+GENERATED = load_data(FIXTURE_DATA / "zsh.toml")["zsh"]["generatedCompletions"]
+CACHE_HOME = load_data(FIXTURE_DATA / "xdg.toml")["xdg"]["cacheHome"]
+
+# The chezmoi templates under test, relative to a source dir.
+MISE_TASKS = Path("dot_config") / "mise" / "tasks"
+INSTALL_SCRIPT = Path("run_onchange_before_install-packages.sh.tmpl")
+REFRESH_SCRIPT = Path("run_onchange_after_refresh-completions.sh.tmpl")
+MISE_CONFIG = Path("dot_config") / "mise" / "config.toml.tmpl"
+REFRESH_TASK = MISE_TASKS / "executable_refresh-completions.tmpl"
+AUDIT_TASK = MISE_TASKS / "executable_audit-completions.tmpl"
+CONSUMERS = (INSTALL_SCRIPT, REFRESH_SCRIPT, MISE_CONFIG, REFRESH_TASK, AUDIT_TASK)
 
 # --- harness ------------------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _built_trees() -> None:
-    """`.rendered/` and `.schema/` are gitignored build output, so a fresh clone has neither and
-    every test that reads them would fail before the suite ever compiled anything. Build them
-    up front, the way `uv run render` does.
-
-    chezmoi rebuilds `.rendered/` too: `.chezmoi.toml.tmpl` runs the compiler from a
-    read-source-state hook, so every `chezmoi_render` below refreshes it as a side effect. No
-    test may therefore assert that the tree on disk is stale.
-    """
-    write_tree(render_tree(REAL, DATA), RENDERED)
+def _rebuilt_schema() -> None:
+    """`.schema/` is committed (the editor reads it before anything could build it); only
+    `.rendered/` is gitignored build output. Rebuild the schema from the types up front, the
+    way `uv run render` does, so the schema tests below read what the types say now — and a
+    committed copy that lags them shows up as a file this run modified."""
     write_tree(schemas(), SCHEMA)
 
 
+@pytest.fixture(scope="session")
+def source(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A self-contained chezmoi source dir: the synthetic .chezmoidata, its compiled
+    `.rendered/` and `.schema/`, the real `.chezmoitemplates/` and the consumer templates.
+    Read-only for the session; a test that edits it works on `_source_copy`."""
+    src = tmp_path_factory.mktemp("synthetic") / "source"
+    shutil.copytree(FIXTURE_DATA, src / ".chezmoidata")
+    shutil.copytree(REPO_ROOT / ".chezmoitemplates", src / ".chezmoitemplates")
+    for rel in CONSUMERS:
+        (src / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO_ROOT / rel, src / rel)
+    write_tree(render_tree(SYN, src / ".chezmoidata"), src / RENDERED_DIR)
+    write_tree(schemas(), src / SCHEMA_DIR)
+    return src
+
+
+def _source_copy(source: Path, tmp_path: Path) -> Path:
+    return Path(shutil.copytree(source, tmp_path / "source"))
+
+
 def inventory(packages: Mapping[str, Any]) -> Inventory:
-    """The real platforms and machines, synthetic packages."""
-    return Inventory(PLATFORMS, MACHINES, packages)
+    """The synthetic platforms and machines, the packages given."""
+    return Inventory(
+        load_data(FIXTURE_DATA / "platforms.toml")["platforms"],
+        load_data(FIXTURE_DATA / "machines.toml")["machines"],
+        packages,
+    )
 
 
 def lines(inv: Inventory, artifact: str, machine: str) -> list[str]:
     return render(artifact, inv.resolved(machine)).splitlines()
 
 
-def chezmoi_render(path: Path, machine: str, source: Path = REPO_ROOT) -> str:
-    os_, arch = MACHINES[machine]["platform"], MACHINES[machine]["arch"]
-    os_ = PLATFORMS[os_]["os"]
-    proc = subprocess.run(
+def _os(machine: str) -> str:
+    return SYN.platforms[SYN.machines[machine].platform].os
+
+
+def chezmoi_execute(tmpl: Path, source: Path, os_: str, arch: str) -> subprocess.CompletedProcess:
+    """`chezmoi execute-template` as the given os/arch. An empty config (not the user's): its
+    read-source-state hook would run `make` against a source dir that has no Makefile."""
+    return subprocess.run(
         [
             "chezmoi", "execute-template", "--source", str(source),
+            "--config-format", "toml", "--config", os.devnull,
             "--override-data", json.dumps({"chezmoi": {"os": os_, "arch": arch}}),
-            "--file", str(path),
+            "--file", str(tmpl),
         ],
         text=True,
         capture_output=True,
         check=False,
     )  # fmt: skip
+
+
+def chezmoi_render(tmpl: Path, machine: str, source: Path) -> str:
+    proc = chezmoi_execute(tmpl, source, _os(machine), SYN.machines[machine].arch)
     assert proc.returncode == 0, proc.stderr
     return proc.stdout
 
@@ -630,12 +670,16 @@ def test_validation_rejects(packages: Mapping[str, Any], message: str):
 
 def test_machine_must_name_a_declared_platform():
     with pytest.raises(InventoryError, match="machines.x: unknown platform 'nope'"):
-        Inventory(PLATFORMS, {"x": {"platform": "nope", "arch": "arm64"}}, {})
+        Inventory(
+            {"macos": {"os": "darwin", "system": "brew"}},
+            {"x": {"platform": "nope", "arch": "arm64"}},
+            {},
+        )
 
 
-def test_load_rejects_a_stray_top_level_table(tmp_path: Path):
+def test_load_rejects_a_stray_top_level_table(source: Path, tmp_path: Path):
     """A misspelt table would otherwise vanish silently: every document is checked whole."""
-    src = _source_copy(tmp_path)
+    src = _source_copy(source, tmp_path)
     with (src / ".chezmoidata" / "machines.toml").open("a") as f:
         f.write('\n[machine]\nlaptop = { platform = "macos", arch = "arm64" }\n')
     with pytest.raises(InventoryError, match="machine: Extra inputs are not permitted"):
@@ -652,7 +696,7 @@ def test_platform_system_manager_is_one_we_render_for():
 # --- real data ----------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("machine", MACHINES)
+@pytest.mark.parametrize("machine", REAL.machines)
 @pytest.mark.parametrize(
     "artifact", [a for a in ARTIFACTS if a != "dnf-repos"]
 )  # shared repos repeat
@@ -661,72 +705,69 @@ def test_real_data_has_no_duplicate_lines(artifact: str, machine: str):
     assert len(got) == len(set(got)), sorted(ln for ln in got if got.count(ln) > 1)
 
 
-@pytest.mark.parametrize("machine", MACHINES)
+@pytest.mark.parametrize("machine", REAL.machines)
 def test_completions_commands_are_unique_per_machine(machine: str):
     """Two packages claiming the same command would race for one _<cmd> file."""
     cmds = [ln.split(" ", 1)[0] for ln in lines(REAL, "completions", machine)]
     assert len(cmds) == len(set(cmds)), sorted(c for c in cmds if cmds.count(c) > 1)
 
 
-# --- .rendered/: the compiled tree chezmoi includes ---------------------------------------------
+# --- the synthetic source: what the consumer tests can rely on ----------------------------------
+
+# Artifacts only one kind of system package manager fills; every other artifact, any machine can.
+SYSTEM_ONLY = {"brewfile": "brew", "dnf-list": "dnf", "dnf-repos": "dnf"}
 
 
-def _machine_showing(artifact: str) -> str:
-    """A machine whose copy of `artifact` has content. Every artifact is empty on some machine,
-    and an empty file equals every other empty file — asking for one would pass a template that
-    ignored the name it was given."""
-    for machine in MACHINES:
-        if (RENDERED / machine / artifact).read_text().strip():
-            return machine
-    raise AssertionError(f"{artifact} is empty on every machine, so it can pin nothing")
+def holds(artifact: str, machine: str) -> bool:
+    system = SYSTEM_ONLY.get(artifact)
+    return system is None or SYN.platforms[SYN.machines[machine].platform].system == system
 
 
 @pytest.mark.parametrize("artifact", ARTIFACTS)
-def test_artifact_template_serves_the_named_file_from_this_machines_dir(
-    artifact: str, tmp_path: Path
-):
-    """One machine per artifact is enough: swapping the machine-id halves breaks every one of
-    these, and serving a fixed name breaks all but the one that name belongs to. The stamp
-    guard is a separate fact — test_artifact_template_refuses_a_stale_tree owns it."""
-    machine = _machine_showing(artifact)
+def test_fixture_artifact_is_non_empty_and_machine_specific_wherever_it_can_be(artifact: str):
+    """The premise of every consumer test below. An empty artifact makes `heredoc == lines`
+    compare [] with [], and two machines with the same copy let a template that read the wrong
+    machine's directory pass."""
+    texts = {m: render(artifact, SYN.resolved(m)) for m in MACHINES}
+    held = {m: t for m, t in texts.items() if holds(artifact, m)}
+    assert held and all(held.values()), [m for m, t in held.items() if not t]
+    assert len(set(held.values())) == len(held), "two machines share one copy"
+    assert all(t == "" for m, t in texts.items() if m not in held)
+
+
+# --- .rendered/: the compiled tree chezmoi includes ---------------------------------------------
+
+
+def _artifact_tmpl(tmp_path: Path, artifact: str) -> Path:
     tmpl = tmp_path / "t.tmpl"
     tmpl.write_text('{{ includeTemplate "artifact" (merge (dict "name" "' + artifact + '") .) }}')
-    assert chezmoi_render(tmpl, machine) == (RENDERED / machine / artifact).read_text()
+    return tmpl
 
 
-def _source_copy(tmp_path: Path) -> Path:
-    src = tmp_path / "source"
-    src.mkdir()
-    for d in (".chezmoidata", ".chezmoitemplates", RENDERED_DIR, SCHEMA_DIR):
-        shutil.copytree(REPO_ROOT / d, src / d)
-    return src
+@pytest.mark.parametrize("machine", MACHINES)
+@pytest.mark.parametrize("artifact", ARTIFACTS)
+def test_artifact_template_serves_the_named_file_from_this_machines_dir(
+    artifact: str, machine: str, source: Path, tmp_path: Path
+):
+    """Each artifact differs between machines and from the other artifacts, so a template that
+    read another machine's directory, or a fixed name, serves the wrong text. The stamp guard
+    is a separate fact — test_artifact_template_refuses_a_stale_tree owns it."""
+    got = chezmoi_render(_artifact_tmpl(tmp_path, artifact), machine, source)
+    assert got == (source / RENDERED_DIR / machine / artifact).read_text()
 
 
-def test_artifact_template_refuses_a_stale_tree(tmp_path: Path):
-    src = _source_copy(tmp_path)
+def test_artifact_template_refuses_a_stale_tree(source: Path, tmp_path: Path):
+    src = _source_copy(source, tmp_path)
     with (src / ".chezmoidata" / DATA_FILES[1]).open("a") as f:
         f.write("\n# an edit nobody rendered\n")
-    tmpl = tmp_path / "t.tmpl"
-    tmpl.write_text('{{ includeTemplate "artifact" (merge (dict "name" "brewfile") .) }}')
     with pytest.raises(AssertionError, match=r"\.rendered/ is stale"):
-        chezmoi_render(tmpl, "darwin-arm64", source=src)
+        chezmoi_render(_artifact_tmpl(tmp_path, "brewfile"), MACHINES[0], src)
 
 
-def test_artifact_template_refuses_an_undeclared_machine(tmp_path: Path):
-    tmpl = tmp_path / "t.tmpl"
-    tmpl.write_text('{{ includeTemplate "artifact" (merge (dict "name" "brewfile") .) }}')
-    proc = subprocess.run(
-        [
-            "chezmoi", "execute-template", "--source", str(REPO_ROOT),
-            # 386 is a real GOARCH that model.py's Arch literal cannot spell, so no
-            # machines.toml entry can ever make this machine a declared one.
-            "--override-data", json.dumps({"chezmoi": {"os": "linux", "arch": "386"}}),
-            "--file", str(tmpl),
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
-    )  # fmt: skip
+def test_artifact_template_refuses_an_undeclared_machine(source: Path, tmp_path: Path):
+    # 386 is a real GOARCH that model.py's Arch literal cannot spell, so no machines.toml
+    # entry can ever make this machine a declared one.
+    proc = chezmoi_execute(_artifact_tmpl(tmp_path, "brewfile"), source, "linux", "386")
     assert proc.returncode != 0
     assert "linux-386 is not declared" in proc.stderr
 
@@ -791,21 +832,21 @@ def test_write_tree_only_touches_what_changed_and_removes_what_left(tmp_path: Pa
     assert stale(smaller, out) == []
 
 
-def test_all_writes_both_trees(tmp_path: Path):
+def test_all_writes_both_trees(source: Path, tmp_path: Path):
     """One `render` restores whatever was clobbered, in .rendered/ and .schema/ alike."""
-    src = _source_copy(tmp_path)
-    dirty = (f"{RENDERED_DIR}/linux-amd64/dnf-list", f"{SCHEMA_DIR}/machines.json")
+    src = _source_copy(source, tmp_path)
+    dirty = (f"{RENDERED_DIR}/{MACHINES[-1]}/uv-tools", f"{SCHEMA_DIR}/machines.json")
     for rel in dirty:
         (src / rel).write_text("clobbered\n")
     assert main(["all", "--root", str(src)]) == 0
     for rel in dirty:
-        assert (src / rel).read_text() == (REPO_ROOT / rel).read_text()
+        assert (src / rel).read_text() == (source / rel).read_text()
 
 
-def test_render_schema_needs_no_valid_data(tmp_path: Path):
+def test_render_schema_needs_no_valid_data(source: Path, tmp_path: Path):
     """`uv run render schema` comes from the types alone: it still works — and `all` does not —
     while a data file is broken, which is when the editor needs the schema most."""
-    src = _source_copy(tmp_path)
+    src = _source_copy(source, tmp_path)
     with (src / ".chezmoidata" / "packages.toml").open("a") as f:
         f.write('\n[packages.oops]\non = ["mars"]\n')
     assert main(["all", "--root", str(src)]) == 2
@@ -817,42 +858,53 @@ def test_render_schema_needs_no_valid_data(tmp_path: Path):
 
 # --- the consumers: scripts and configs that embed the artifacts --------------------------------
 
+BASH = shutil.which("bash") or "/bin/bash"
 
-def _os(machine: str) -> str:
-    return PLATFORMS[MACHINES[machine]["platform"]]["os"]
+
+def stub_bin(tmp_path: Path, scripts: Mapping[str, str]) -> Path:
+    """A PATH directory holding one `#!/bin/sh` executable per name, with the given body."""
+    stub = tmp_path / "bin"
+    stub.mkdir(exist_ok=True)
+    for name, body in scripts.items():
+        (stub / name).write_text(f"#!/bin/sh\n{body}\n")
+        (stub / name).chmod(0o755)
+    return stub
+
+
+def recorder(log: Path) -> str:
+    """A stub body appending its argv, one call per line, to `log`."""
+    return f'printf "%s\\n" "$*" >> "{log}"'
 
 
 @pytest.mark.parametrize("machine", MACHINES)
-def test_install_script_renders_to_valid_shell(machine: str, tmp_path: Path):
+def test_install_script_renders_to_valid_shell(machine: str, source: Path, tmp_path: Path):
     """System packages through this machine's package manager only, then the uv tools."""
-    rendered = chezmoi_render(INSTALL_SCRIPT, machine)
+    rendered = chezmoi_render(source / INSTALL_SCRIPT, machine, source)
     script = tmp_path / "install-packages.sh"
     script.write_text(rendered)
+    check_shell(script)
     if _os(machine) == "darwin":
-        assert "brew bundle install --file=-" in rendered
         assert "dnf" not in rendered
         pkg_block = rendered.split("brew bundle install --file=-", 1)[1]
-        assert heredoc(pkg_block, "EOF") == lines(REAL, "brewfile", machine)
+        assert heredoc(pkg_block, "EOF") == lines(SYN, "brewfile", machine)
     else:
-        assert "xargs -r sudo dnf -y install" in rendered
         assert "brew" not in rendered
-        pkg_block = rendered.split("copr enable", 1)[1]
-        assert heredoc(pkg_block, "EOF") == lines(REAL, "dnf-repos", machine)
-    assert rendered.index("uv tool install") > rendered.index("<<'EOF'"), "uv tools come after uv"
-    check_shell(script)
+        repo_block = rendered.split("copr enable", 1)[1]
+        assert heredoc(repo_block, "EOF") == lines(SYN, "dnf-repos", machine)
+        pkg_block = rendered.split("xargs -r sudo dnf -y install", 1)[1]
+        assert heredoc(pkg_block, "EOF") == lines(SYN, "dnf-list", machine)
     uv_block = rendered.split("uv tool install", 1)[1]
-    assert heredoc(uv_block, "EOF") == lines(REAL, "uv-tools", machine)
+    assert heredoc(uv_block, "EOF") == lines(SYN, "uv-tools", machine)
 
 
 @pytest.mark.parametrize("machine", MACHINES)
 def test_install_script_settles_the_bootstrap_tools_between_the_packages_and_the_uv_tools(
-    machine: str,
+    machine: str, source: Path
 ):
     """After the system packages, which is where the upstream installers' own dependencies
     come from on a Linux box; before `uv tool install`, which needs the uv they may supply."""
-    rendered = chezmoi_render(INSTALL_SCRIPT, machine)
-    want = lines(REAL, "upstream-installs", machine)
-    assert want, "mise comes from upstream on every machine"
+    rendered = chezmoi_render(source / INSTALL_SCRIPT, machine, source)
+    want = lines(SYN, "upstream-installs", machine)
     assert heredoc(rendered.split('sh -c "$cmd"', 1)[1], "EOF") == want
     packages = "brew bundle install" if _os(machine) == "darwin" else "sudo dnf -y install"
     assert rendered.index(packages) < rendered.index('sh -c "$cmd"')
@@ -861,7 +913,7 @@ def test_install_script_settles_the_bootstrap_tools_between_the_packages_and_the
 
 @pytest.mark.parametrize("machine", [m for m in MACHINES if _os(m) == "darwin"])
 def test_a_failing_package_manager_does_not_skip_the_rest_of_the_apply(
-    machine: str, tmp_path: Path
+    machine: str, source: Path, tmp_path: Path
 ):
     """An unbottled formula is routine on a Tier 3 Mac, and this is a `run_onchange_before_`
     script: aborting on one would skip the bootstrap tools, the uv tools, and every dotfile of
@@ -870,33 +922,36 @@ def test_a_failing_package_manager_does_not_skip_the_rest_of_the_apply(
     Run with the package manager stubbed to fail and `sh`/`uv` stubbed to record: what the
     later steps get called with is the behaviour, not the shell spelling that achieves it.
     """
-    stub = tmp_path / "bin"
-    stub.mkdir()
-    (stub / "brew").write_text("#!/bin/sh\nexit 1\n")
-    for name in ("sh", "uv"):
-        (stub / name).write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{tmp_path}/{name}.log"\n')
-    for f in stub.iterdir():
-        f.chmod(0o755)
+    stub = stub_bin(
+        tmp_path,
+        {
+            "brew": "exit 1",
+            "sh": recorder(tmp_path / "sh.log"),
+            "uv": recorder(tmp_path / "uv.log"),
+        },
+    )
     script = tmp_path / "install-packages.sh"
-    script.write_text(chezmoi_render(INSTALL_SCRIPT, machine))
+    script.write_text(chezmoi_render(source / INSTALL_SCRIPT, machine, source))
     proc = subprocess.run(
-        ["bash", str(script)],
+        [BASH, str(script)],
         env={"PATH": f"{stub}:/usr/bin:/bin", "HOME": str(tmp_path)},
         text=True,
         capture_output=True,
         check=False,
     )
     assert proc.returncode != 0, "a failed package must still reach chezmoi"
-    assert "mise.run" in (tmp_path / "sh.log").read_text(), "bootstrap installers were skipped"
-    assert "tool install" in (tmp_path / "uv.log").read_text(), "uv tools were skipped"
+    assert (tmp_path / "sh.log").read_text().splitlines() == [
+        f"-c {cmd}" for cmd in lines(SYN, "upstream-installs", machine)
+    ], "bootstrap installers were skipped"
+    assert (tmp_path / "uv.log").read_text().splitlines() == [
+        f"tool install {spec}" for spec in lines(SYN, "uv-tools", machine)
+    ], "uv tools were skipped"
 
 
 @pytest.mark.parametrize("machine", MACHINES)
-def test_mise_config_renders_the_tools_table(machine: str):
-    rendered = chezmoi_render(REPO_ROOT / "dot_config" / "mise" / "config.toml.tmpl", machine)
-    doc = tomllib.loads(rendered)
-    want = [ln.split(" = ", 1)[0].strip('"') for ln in lines(REAL, "mise-tools", machine)]
-    assert sorted(doc["tools"]) == sorted(want)
+def test_mise_config_renders_the_tools_table(machine: str, source: Path):
+    doc = tomllib.loads(chezmoi_render(source / MISE_CONFIG, machine, source))
+    assert doc["tools"] == tomllib.loads("\n".join(lines(SYN, "mise-tools", machine)))
     assert "refresh-completions --changed" in doc["hooks"]["postinstall"], (
         "postinstall must stay on the changed-only path — a bare refresh regenerates "
         "every recipe after any mise install session, in any directory"
@@ -904,27 +959,26 @@ def test_mise_config_renders_the_tools_table(machine: str):
 
 
 @pytest.mark.parametrize("machine", MACHINES)
-def test_refresh_completions_task_renders_to_valid_bash(machine: str, tmp_path: Path):
+def test_refresh_completions_task_renders_to_valid_bash(machine: str, source: Path, tmp_path: Path):
     """The recipe heredoc is `read` line by line: one `<cmd> <recipe>` per line, no blank cmd."""
     script = tmp_path / "refresh-completions"
-    rendered = chezmoi_render(MISE_TASKS / "executable_refresh-completions.tmpl", machine)
+    rendered = chezmoi_render(source / REFRESH_TASK, machine, source)
     script.write_text(rendered)
     check_shell(script)
-    assert heredoc(rendered, "RECIPES") == lines(REAL, "completions", machine)
-    assert heredoc(rendered, "TOOLMAP") == lines(REAL, "mise-completions", machine)
+    assert heredoc(rendered, "RECIPES") == lines(SYN, "completions", machine)
+    assert heredoc(rendered, "TOOLMAP") == lines(SYN, "mise-completions", machine)
 
 
 def run_refresh_task(
-    machine: str, tmp_path: Path, args: list[str], env: Mapping[str, str]
+    source: Path, machine: str, tmp_path: Path, args: list[str], env: Mapping[str, str]
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Render this machine's refresh-completions task and run it hermetically: a private
-    cache dir and $HOME, and a PATH of system utilities only, so recipe commands are
-    absent (skipped) unless the host system happens to ship one — assertions below
-    stay agnostic to skip vs wrote."""
+    cache dir and $HOME, and a PATH of system utilities only. No synthetic recipe command
+    exists there, so every recipe the run selects reports `skip  _<cmd>`."""
     script = tmp_path / "refresh-completions"
-    script.write_text(chezmoi_render(MISE_TASKS / "executable_refresh-completions.tmpl", machine))
+    script.write_text(chezmoi_render(source / REFRESH_TASK, machine, source))
     proc = subprocess.run(
-        ["bash", str(script), *args],
+        [BASH, str(script), *args],
         env={
             "PATH": "/usr/bin:/bin",
             "HOME": str(tmp_path),
@@ -940,10 +994,11 @@ def run_refresh_task(
 
 
 @pytest.mark.parametrize("machine", MACHINES)
-def test_refresh_changed_ignores_tools_without_recipes(machine: str, tmp_path: Path):
+def test_refresh_changed_ignores_tools_without_recipes(machine: str, source: Path, tmp_path: Path):
     """The postinstall hook's hot path: a session that installed only tools owning no
     recipe — any project-local `mise use` — writes nothing and exits 0 immediately."""
     proc, out = run_refresh_task(
+        source,
         machine,
         tmp_path,
         ["--changed"],
@@ -954,16 +1009,16 @@ def test_refresh_changed_ignores_tools_without_recipes(machine: str, tmp_path: P
 
 
 @pytest.mark.parametrize("machine", MACHINES)
-def test_refresh_changed_overlays_only_the_installed_tools_commands(machine: str, tmp_path: Path):
+def test_refresh_changed_overlays_only_the_installed_tools_commands(
+    machine: str, source: Path, tmp_path: Path
+):
     """`--changed` processes the installed tools' commands and nothing else; files other
     tools own stay in place (removal is the no-arg rebuild's job)."""
-    toolmap = lines(REAL, "mise-completions", machine)
-    if not toolmap:
-        pytest.skip("no mise-backed completion recipes on this machine")
-    tool, *cmds = toolmap[0].split()
+    tool, *cmds = lines(SYN, "mise-completions", machine)[0].split()
     (tmp_path / "cache" / GENERATED).mkdir(parents=True)
     (tmp_path / "cache" / GENERATED / "_zzz").write_text("#compdef zzz\n")
     proc, out = run_refresh_task(
+        source,
         machine,
         tmp_path,
         ["--changed"],
@@ -977,46 +1032,107 @@ def test_refresh_changed_overlays_only_the_installed_tools_commands(machine: str
 
 
 @pytest.mark.parametrize("machine", MACHINES)
-def test_refresh_full_run_rebuilds_from_scratch(machine: str, tmp_path: Path):
+def test_refresh_full_run_rebuilds_from_scratch(machine: str, source: Path, tmp_path: Path):
     """No args: a file whose tool left packages.toml (or never had a recipe) is gone
     afterwards — the only mode that removes."""
     (tmp_path / "cache" / GENERATED).mkdir(parents=True)
     (tmp_path / "cache" / GENERATED / "_zzz").write_text("#compdef zzz\n")
-    proc, out = run_refresh_task(machine, tmp_path, [], {})
+    proc, out = run_refresh_task(source, machine, tmp_path, [], {})
     assert proc.returncode == 0, proc.stderr
     assert not (out / "_zzz").exists()
 
 
-def test_refresh_changed_outside_the_hook_fails_loudly(tmp_path: Path):
+def test_refresh_changed_outside_the_hook_fails_loudly(source: Path, tmp_path: Path):
     """`--changed` without the hook's $MISE_INSTALLED_TOOLS is a misuse, not a full run."""
-    proc, out = run_refresh_task(next(iter(MACHINES)), tmp_path, ["--changed"], {})
+    proc, out = run_refresh_task(source, MACHINES[0], tmp_path, ["--changed"], {})
     assert proc.returncode != 0
     assert "postinstall" in proc.stderr
     assert not out.exists()
 
 
 @pytest.mark.parametrize("machine", MACHINES)
-def test_onchange_refresh_script_keys_on_this_machines_recipes(machine: str, tmp_path: Path):
+def test_onchange_refresh_script_keys_on_this_machines_recipes(
+    machine: str, source: Path, tmp_path: Path
+):
     """chezmoi re-runs it when its rendered content changes, so the recipe list is rendered
-    into it verbatim; the toolset gate defers to mise's postinstall hook on a new machine."""
+    into it verbatim."""
     script = tmp_path / "refresh-completions.sh"
-    rendered = chezmoi_render(REFRESH_SCRIPT, machine)
+    rendered = chezmoi_render(source / REFRESH_SCRIPT, machine, source)
     script.write_text(rendered)
     check_shell(script)
-    guards = ("command -v mise", "mise ls --missing", "export XDG_CACHE_HOME=")
-    assert all(g in rendered for g in guards)
-    assert all(rendered.index(g) < rendered.index("mise run refresh-completions") for g in guards)
-    assert "mise run refresh-completions ||" in rendered, "a failed recipe must not fail the apply"
-    assert heredoc(rendered, "RECIPES") == lines(REAL, "completions", machine)
+    assert heredoc(rendered, "RECIPES") == lines(SYN, "completions", machine)
+
+
+def run_onchange_refresh(
+    source: Path, tmp_path: Path, mise: str | None, env: Mapping[str, str] = {}
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Run the onchange refresh script with nothing on PATH but, when `mise` is a stub body
+    (a `case "$1"` arm list), a `mise` that runs it after logging `<args>|$XDG_CACHE_HOME`.
+    Returns the process and the logged calls."""
+    log = tmp_path / "mise.log"
+    stubs = {}
+    if mise is not None:
+        stubs["mise"] = (
+            f'printf "%s|%s\\n" "$*" "${{XDG_CACHE_HOME-}}" >> "{log}"\ncase "$1" in\n{mise}\nesac'
+        )
+    stub = stub_bin(tmp_path, stubs)
+    script = tmp_path / "refresh-completions.sh"
+    script.write_text(chezmoi_render(source / REFRESH_SCRIPT, MACHINES[0], source))
+    proc = subprocess.run(
+        [BASH, str(script)],
+        env={"PATH": str(stub), "HOME": str(tmp_path), **env},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return proc, log.read_text().splitlines() if log.exists() else []
+
+
+def test_onchange_refresh_without_mise_defers_without_failing_the_apply(
+    source: Path, tmp_path: Path
+):
+    proc, _ = run_onchange_refresh(source, tmp_path, mise=None)
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_onchange_refresh_defers_while_the_toolset_is_incomplete(source: Path, tmp_path: Path):
+    """`mise ls --missing` listing anything means `mise install` has not run: its postinstall
+    hook owns the first generation, so no `mise run` here."""
+    proc, calls = run_onchange_refresh(source, tmp_path, mise='ls) echo "kit stable" ;;')
+    assert proc.returncode == 0, proc.stderr
+    assert calls == ["ls --missing|"]
+
+
+@pytest.mark.parametrize(
+    ("preset", "want"),
+    [(None, f"$HOME/{CACHE_HOME}"), ("/elsewhere/cache", "/elsewhere/cache")],
+    ids=["unset-derives-from-home", "set-is-kept"],
+)
+def test_onchange_refresh_runs_the_task_with_the_cache_dir(
+    preset: str | None, want: str, source: Path, tmp_path: Path
+):
+    """An apply from a shell that never read ~/.zshenv still hands the task its cache dir."""
+    env = {} if preset is None else {"XDG_CACHE_HOME": preset}
+    proc, calls = run_onchange_refresh(source, tmp_path, mise="*) ;;", env=env)
+    assert proc.returncode == 0, proc.stderr
+    want = want.replace("$HOME", str(tmp_path))
+    assert calls == [f"ls --missing|{preset or ''}", f"run refresh-completions|{want}"]
+
+
+def test_onchange_refresh_survives_a_failing_task(source: Path, tmp_path: Path):
+    """A failed recipe leaves one completion missing; it must not fail the apply."""
+    proc, calls = run_onchange_refresh(source, tmp_path, mise="run) exit 3 ;;")
+    assert proc.returncode == 0, proc.stderr
+    assert calls[-1].startswith("run refresh-completions|")
 
 
 @pytest.mark.parametrize("machine", MACHINES)
-def test_audit_completions_task_renders_to_valid_zsh(machine: str, tmp_path: Path):
+def test_audit_completions_task_renders_to_valid_zsh(machine: str, source: Path, tmp_path: Path):
     script = tmp_path / "audit-completions"
-    rendered = chezmoi_render(MISE_TASKS / "executable_audit-completions.tmpl", machine)
+    rendered = chezmoi_render(source / AUDIT_TASK, machine, source)
     script.write_text(rendered)
     check_shell(script, "zsh")
-    assert ("brew packages" in rendered) == (_os(machine) == "darwin")
-    assert ("rpm -ql" in rendered) == (_os(machine) == "linux")
-    assert heredoc(rendered, "UVTOOLS") == lines(REAL, "uv-tools", machine)
-    assert heredoc(rendered, "RECIPES") == lines(REAL, "completions", machine)
+    system = "brewfile" if _os(machine) == "darwin" else "dnf-list"
+    assert heredoc(rendered, "PACKAGES") == lines(SYN, system, machine)
+    assert heredoc(rendered, "UVTOOLS") == lines(SYN, "uv-tools", machine)
+    assert heredoc(rendered, "RECIPES") == lines(SYN, "completions", machine)
