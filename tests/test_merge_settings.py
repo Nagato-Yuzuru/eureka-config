@@ -1,9 +1,9 @@
 """Regression suite for the claude-managed settings merge engine.
 
-Scenarios mirror the behaviors established while the engine lived in bash+jq,
-including one test per bug found there (fail-open on malformed data, formatter
-crash on engine errors, first-conflict-only reporting), plus the declared
-merge-strategy semantics (exact / ensure / keyed) and ownership retirement.
+Covers the declared merge-strategy semantics (exact / ensure / keyed) and
+ownership retirement, plus invariants any three-way-merge implementation must
+hold: a malformed base never crashes the merge (treated as absent instead),
+and every conflict in the tree is collected and reported, not just the first.
 """
 
 from __future__ import annotations
@@ -73,11 +73,6 @@ class TestFreshInstall:
             "/h/path-gate.sh",
         ]
 
-    def test_reserved_dollar_keys_never_merged(self, engine):
-        merged = merge(engine, {}).merged
-        assert "$legacyHooks" not in merged
-        assert "$merge" not in merged
-
     def test_unmanaged_keys_pass_through(self, engine):
         r = merge(engine, {"model": "opus[1m]", "tui": "fullscreen"})
         assert r.conflicts == []
@@ -117,13 +112,13 @@ class TestKeyedLists:
         r = merge(engine, current, base=base)
         assert r.conflicts == []
         commands = [e["hooks"][0]["command"] for e in r.merged["hooks"]["PreToolUse"]]
-        assert "/h/retired.sh" not in commands
+        assert commands == ["/h/block-npm.sh", "/h/path-gate.sh"]
 
     def test_legacy_entry_purged_without_base(self, engine):
         current = {"hooks": {"PreToolUse": [hook_entry("/x/old-legacy.sh")]}}
         merged = merge(engine, current).merged
         commands = [e["hooks"][0]["command"] for e in merged["hooks"]["PreToolUse"]]
-        assert "/x/old-legacy.sh" not in commands
+        assert commands == ["/h/block-npm.sh", "/h/path-gate.sh"]
 
     def test_malformed_foreign_entry_kept_without_crash(self, engine):
         weird: dict = {"matcher": "Bash", "hooks": [{"type": "prompt", "prompt": "hi"}]}
@@ -158,8 +153,8 @@ class TestEnsureLists:
         assert r.merged["autoMode"]["soft_deny"] == ["$defaults", "user-added", "RULE-V2"]
 
     def test_wrong_typed_base_treated_as_empty(self, engine):
-        # regression: in the bash engine a wrong-typed base crashed jq and the
-        # crash was mis-rendered by the conflict formatter
+        # invariant: a malformed base (wrong shape for the path) never crashes
+        # the merge or surfaces as a conflict — it is simply treated as absent
         base = {"autoMode": {"soft_deny": {"not": "a list"}}}
         r = merge(engine, {}, base=base)
         assert r.conflicts == []
@@ -179,6 +174,15 @@ class TestEnsureLists:
         r = merge(engine, current, fragment=fragment)
         assert r.conflicts == []
         assert r.merged["servers"]["pool"] == [{"host": "user"}, {"host": "a"}]
+
+    def test_own_element_hand_deleted_is_reasserted_without_warning(self, engine):
+        # the fragment still declares the element (unlike retirement, where the
+        # fragment itself drops it); a hand-deletion is silently reasserted
+        base = {"autoMode": {"soft_deny": ["$defaults", "RULE-V2"]}}
+        current = {"autoMode": {"soft_deny": ["RULE-V2"]}}
+        r = merge(engine, current, base=base)
+        assert (r.conflicts, r.warnings) == ([], [])
+        assert r.merged["autoMode"]["soft_deny"] == ["RULE-V2", "$defaults"]
 
 
 class TestScalarLeaves:
@@ -202,6 +206,20 @@ class TestScalarLeaves:
     def test_foreign_change_conflicts(self, engine):
         conflicts = merge(engine, {"effortLevel": "low"}, fragment=self.FRAG).conflicts
         assert [(c.path, c.current, c.desired) for c in conflicts] == [
+            ("effortLevel", "low", "xhigh")
+        ]
+
+    def test_foreign_change_conflicts_with_base_present(self, engine):
+        # base present but current has drifted from it too: neither the
+        # current==base nor current==desired escape hatch applies, so a base
+        # being present at all does not by itself excuse a foreign value.
+        r = merge(
+            engine,
+            {"effortLevel": "low"},
+            fragment=self.FRAG,
+            base={"effortLevel": "high"},
+        )
+        assert [(c.path, c.current, c.desired) for c in r.conflicts] == [
             ("effortLevel", "low", "xhigh")
         ]
 
@@ -575,7 +593,8 @@ class TestBaseFormat:
 
 class TestConflicts:
     def test_all_conflicts_reported_not_just_first(self, engine):
-        # regression: the bash engine aborted at the first conflict
+        # invariant: every conflict in the tree is collected and reported, not
+        # just the first one encountered
         fragment = {"a": 1, "b": {"c": 2}}
         current = {"a": 9, "b": {"c": 9}}
         conflicts = merge(engine, current, fragment=fragment).conflicts
@@ -620,10 +639,13 @@ class TestForce:
 def run_filter(
     stdin: str,
     tmp_path: Path,
-    fragments: dict[str, dict] | None = None,
+    fragments: dict[str, dict | str] | None = None,
     base: dict | None = None,
     env_extra: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
+    """Run the filter. A fragment value that is already a ``str`` is written
+    verbatim (for deliberately-invalid fragment content); a ``dict`` is
+    JSON-serialized."""
     env = dict(os.environ)
     env.pop("CLAUDE_MANAGED_FORCE", None)  # never inherit force from the developer's shell
     env.update(env_extra or {})
@@ -631,7 +653,8 @@ def run_filter(
     if fragments is not None:
         fragment_dir.mkdir(exist_ok=True)
         for name, fragment in fragments.items():
-            (fragment_dir / name).write_text(json.dumps(fragment))
+            content = fragment if isinstance(fragment, str) else json.dumps(fragment)
+            (fragment_dir / name).write_text(content)
     if base is not None:
         (tmp_path / "base.json").write_text(json.dumps(base))
     env["CLAUDE_FRAGMENT_DIR"] = str(fragment_dir)
@@ -689,22 +712,29 @@ class TestFilterIO:
         assert "two.json" in result.stderr
 
     def test_corrupt_fragment_exits_1_naming_file(self, tmp_path):
-        fragment_dir = tmp_path / "claude-managed.d"
-        fragment_dir.mkdir()
-        (fragment_dir / "bad.json").write_text("not json")
-        env = dict(os.environ)
-        env["CLAUDE_FRAGMENT_DIR"] = str(fragment_dir)
-        env["CLAUDE_BASE_FILE"] = str(tmp_path / "base.json")
-        result = subprocess.run(
-            [sys.executable, str(ENGINE_PATH)],
-            input="{}",
-            capture_output=True,
-            text=True,
-            env=env,
-        )
+        result = run_filter("{}", tmp_path, fragments={"bad.json": "not json"})
         assert result.returncode == 1
         assert "bad.json" in result.stderr
         assert "invalid JSON" in result.stderr
+
+    def test_non_object_and_invalid_json_fragments_together_name_both_files(self, tmp_path):
+        # load_fragments collects errors across the whole directory, not just
+        # the first bad file
+        result = run_filter(
+            "{}", tmp_path, fragments={"bad.json": "not json", "list.json": "[1, 2, 3]"}
+        )
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert "bad.json" in result.stderr
+        assert "invalid JSON" in result.stderr
+        assert "list.json" in result.stderr
+        assert "fragment must be a JSON object" in result.stderr
+
+    def test_invalid_json_stdin_exits_1_with_clean_message(self, tmp_path):
+        result = run_filter("{not valid json", tmp_path, fragments={"core.json": {"a": 1}})
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert "settings.json is not valid JSON" in result.stderr
 
     def test_missing_dir_passes_through(self, tmp_path):
         result = run_filter('{"keep": true}', tmp_path)

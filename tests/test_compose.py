@@ -142,11 +142,14 @@ class TestKeyedComposition:
 
 class TestPolicyComposition:
     def test_same_pattern_same_strategy_from_two_files_ok(self, engine):
-        compose(
+        # redeclaring the same pattern with the same strategy from a second
+        # file is not a contradiction, and composes to exactly one entry
+        composed = compose(
             engine,
             a={"$merge": {"s.ask": "ensure"}, "s": {"ask": ["A"]}},
             b={"$merge": {"s.ask": "ensure"}, "s": {"ask": ["B"]}},
         )
+        assert composed.policy == {("s", "ask"): "ensure"}
 
     def test_same_pattern_different_strategy_errors(self, engine):
         errors = compose_errors(
@@ -163,7 +166,9 @@ class TestPolicyComposition:
             a={"$merge": {"hooks.*": "keyed"}},
             b={"$merge": {"hooks.PreToolUse": "ensure"}},
         )
-        assert any("merge-strategy conflict" in e for e in errors)
+        assert errors == [
+            "merge-strategy conflict on `hooks.PreToolUse`: a.json says keyed, b.json says ensure"
+        ]
 
     def test_pattern_nested_under_declared_ancestor_errors(self, engine):
         # no strategy recurses, so `env.PATH` under `env: exact` is dead config
@@ -174,6 +179,19 @@ class TestPolicyComposition:
         )
         assert any(
             "`env.PATH` (b.json) is nested under declared `env` (a.json)" in e for e in errors
+        )
+
+    def test_pattern_nested_under_declared_ancestor_errors_regardless_of_order(self, engine):
+        # attribution follows pattern hierarchy (which is the ancestor, which
+        # is nested), not which file declared its pattern first: here the
+        # nested pattern is declared first and the ancestor second.
+        errors = compose_errors(
+            engine,
+            a={"$merge": {"env.PATH": "ensure"}},
+            b={"$merge": {"env": "exact"}},
+        )
+        assert any(
+            "`env.PATH` (a.json) is nested under declared `env` (b.json)" in e for e in errors
         )
 
     def test_nested_pattern_errors_even_with_same_strategy(self, engine):
@@ -220,6 +238,21 @@ class TestReservedKeys:
     def test_legacy_hooks_non_string_entry_errors(self, engine):
         errors = compose_errors(engine, a={"$legacyHooks": ["ok.sh", 3]})
         assert any("$legacyHooks entries must all be strings" in e for e in errors)
+
+
+class TestErrorCollection:
+    """All compose errors are collected across the whole set of fragments."""
+
+    def test_independent_errors_from_different_files_all_reported(self, engine):
+        # two unrelated authoring bugs, in two unrelated files, in one compose
+        errors = compose_errors(
+            engine,
+            a={"$mrege": {}},
+            b={"$legacyHooks": "not-a-list"},
+        )
+        assert len(errors) == 2
+        assert any("a.json" in e and "unknown reserved key `$mrege`" in e for e in errors)
+        assert any("b.json" in e and "$legacyHooks must be a list of strings" in e for e in errors)
 
 
 class TestEmpty:

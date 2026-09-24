@@ -76,6 +76,21 @@ def main() -> int:
         current = json.loads(settings_path.read_text())
     except FileNotFoundError:
         current = {}
+    except json.JSONDecodeError:
+        # Same live file the modify_ target itself would refuse to parse; that
+        # target already reported this to the user this apply. Quiet no-op,
+        # like the "not composable"/"not converged" cases below.
+        print(
+            "claude-managed: settings.json is not valid JSON; base snapshot left untouched",
+            file=sys.stderr,
+        )
+        return 0
+    if not isinstance(current, dict):
+        print(
+            "claude-managed: settings.json is not a JSON object; base snapshot left untouched",
+            file=sys.stderr,
+        )
+        return 0
 
     base_path = engine.base_file()
     result = engine.merge_composed(current, composed, engine.load_base(base_path))

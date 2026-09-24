@@ -33,10 +33,12 @@ CONVERGED = {"permissions": {"ask": ["Agent(model:*fable*)", "Extra"]}, "a": 1, 
 
 def run_snapshot(
     tmp_path: Path,
-    settings: dict | None,
+    settings: dict | list | str | None,
     fragments: dict[str, dict] | None = FRAGMENTS,
     base: dict | None = None,
 ):
+    """Run the snapshot script. A ``str`` settings value is written verbatim
+    (for deliberately-invalid content); anything else is JSON-serialized."""
     env = dict(os.environ)
     fragment_dir = tmp_path / "claude-managed.d"
     if fragments is not None:
@@ -44,7 +46,8 @@ def run_snapshot(
         for name, fragment in fragments.items():
             (fragment_dir / name).write_text(json.dumps(fragment))
     if settings is not None:
-        (tmp_path / "settings.json").write_text(json.dumps(settings))
+        content = settings if isinstance(settings, str) else json.dumps(settings)
+        (tmp_path / "settings.json").write_text(content)
     if base is not None:
         (tmp_path / "base.json").write_text(json.dumps(base))
     env |= {
@@ -142,6 +145,21 @@ class TestSnapshot:
         assert result.returncode == 0
         assert "not converged" in result.stderr
         assert json.loads((tmp_path / "base.json").read_text()) == stale
+
+    def test_corrupt_settings_leaves_base_untouched(self, tmp_path):
+        # same live file the modify_ filter would itself refuse to parse; a
+        # quiet no-op here, like the "not composable"/"not converged" cases
+        stale = {"old": "base"}
+        result = run_snapshot(tmp_path, "not json at all", base=stale)
+        assert result.returncode == 0
+        assert "not valid JSON" in result.stderr
+        assert json.loads((tmp_path / "base.json").read_text()) == stale
+
+    def test_non_object_settings_leaves_base_untouched(self, tmp_path):
+        result = run_snapshot(tmp_path, [1, 2, 3])
+        assert result.returncode == 0
+        assert "not a JSON object" in result.stderr
+        assert not (tmp_path / "base.json").exists()
 
     def test_uncomposable_fragments_leave_base_untouched(self, tmp_path):
         result = run_snapshot(
