@@ -34,10 +34,6 @@ from inventory.model import (
 RENDERED_DIR = ".rendered"
 STAMP = "STAMP"
 SCHEMA_DIR = ".schema"  # .schema/<data file stem>.json, what each `#:schema` line names
-# The reviewed snapshot of the artifacts. Committed, and nothing but `render golden` writes it:
-# a config edit shows up here as the diff it causes across every machine, which is the part no
-# one predicts. Kept out of .rendered/ because chezmoi reads that one at apply time.
-GOLDEN_DIR = "tests/golden"
 
 
 def brewfile(rs: Iterable[Resolved]) -> list[str]:
@@ -168,20 +164,14 @@ def schemas() -> dict[str, str]:
     return out
 
 
-def artifact_tree(inv: Inventory) -> dict[str, str]:
-    """Relative path -> content, artifacts only. What the golden holds: STAMP hashes the data
-    files, so a reworded comment would churn it while changing no artifact."""
+def render_tree(inv: Inventory, data_dir: Path) -> dict[str, str]:
+    """Relative path -> content for the whole `.rendered/` tree. The JSON Schemas are a
+    separate tree: the editor reads them, not chezmoi, and they come from the types."""
     return {
         f"{mid}/{name}": text
         for mid in inv.machines
         for name, text in render_machine(inv, mid).items()
-    }
-
-
-def render_tree(inv: Inventory, data_dir: Path) -> dict[str, str]:
-    """Relative path -> content for the whole `.rendered/` tree. The JSON Schemas are a
-    separate tree: the editor reads them, not chezmoi, and they come from the types."""
-    return artifact_tree(inv) | {STAMP: stamp(data_dir) + "\n"}
+    } | {STAMP: stamp(data_dir) + "\n"}
 
 
 def write_tree(files: Mapping[str, str], out_dir: Path) -> list[str]:

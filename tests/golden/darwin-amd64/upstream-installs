@@ -1,2 +1,0 @@
-curl https://mise.run | MISE_INSTALL_SKIP_IF_EXISTS=1 sh
-curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh

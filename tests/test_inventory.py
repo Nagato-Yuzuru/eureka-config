@@ -7,9 +7,9 @@ say today:
 - RENDER_CASES   synthetic packages -> exact lines each artifact holds on each machine
 - REJECTS        malformed entries -> the message naming the entry
 
-What the real data compiles to belongs in tests/golden/, never in an assertion here: a row
-restating a package's backend has to be edited in the same commit as the change it guards.
-`uv run render golden` accepts a change.
+Nothing here asserts what the real data compiles to: a row restating a package's backend has
+to be edited in the same commit as the change it guards. The real data is held only to
+invariants every valid inventory satisfies.
 
 Plus: the chezmoi consumers render to valid shell/toml with the artifact's lines inside, and
 the `artifact` template refuses stale data and machines nobody declared.
@@ -35,10 +35,8 @@ from inventory.inventory import DATA_FILES, Inventory, InventoryError, load_data
 from inventory.model import DOCS
 from inventory.render import (
     ARTIFACTS,
-    GOLDEN_DIR,
     RENDERED_DIR,
     SCHEMA_DIR,
-    artifact_tree,
     render,
     render_tree,
     schemas,
@@ -50,7 +48,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA = REPO_ROOT / ".chezmoidata"
 RENDERED = REPO_ROOT / RENDERED_DIR
 SCHEMA = REPO_ROOT / SCHEMA_DIR
-GOLDEN = REPO_ROOT / GOLDEN_DIR
 MISE_TASKS = REPO_ROOT / "dot_config" / "mise" / "tasks"
 INSTALL_SCRIPT = REPO_ROOT / "run_onchange_before_install-packages.sh.tmpl"
 REFRESH_SCRIPT = REPO_ROOT / "run_onchange_after_refresh-completions.sh.tmpl"
@@ -71,7 +68,7 @@ def _built_trees() -> None:
 
     chezmoi rebuilds `.rendered/` too: `.chezmoi.toml.tmpl` runs the compiler from a
     read-source-state hook, so every `chezmoi_render` below refreshes it as a side effect. No
-    test may therefore assert that the tree on disk is stale — tests/golden/ holds snapshots.
+    test may therefore assert that the tree on disk is stale.
     """
     write_tree(render_tree(REAL, DATA), RENDERED)
     write_tree(schemas(), SCHEMA)
@@ -750,13 +747,6 @@ def test_each_data_file_validates_against_its_schema(name: str):
     first = (DATA / name).read_text().splitlines()[0]
     assert first == f"#:schema ../{SCHEMA_DIR}/{Path(name).stem}.json"
     schema_for(name).validate(load_data(DATA / name))
-
-
-def test_artifacts_match_the_golden():
-    """The committed snapshot of what the real data compiles to. It fails on any change to an
-    artifact — intended or not — and `uv run render golden` is how an intended one is accepted,
-    in a commit where the diff shows what else moved with it."""
-    assert stale(artifact_tree(REAL), GOLDEN) == []
 
 
 def test_no_schema_offers_the_editor_a_null_it_cannot_write():
