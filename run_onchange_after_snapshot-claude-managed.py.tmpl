@@ -18,6 +18,10 @@ with zero conflicts. If the fragments don't compose, or the merge target
 failed or was skipped, the base stays put — a stale base can only produce
 fail-safe conflicts, never silent overwrites, and it can never run ahead of
 settings and manufacture false ones.
+
+The base records the composed policy next to the data (``base_snapshot`` in the
+engine owns the format), so retirement can follow the strategies the values
+were written under even after their declaring fragment is gone.
 """
 
 # chezmoi's glob resolves relative patterns against the DESTINATION dir, so the
@@ -82,7 +86,7 @@ def main() -> int:
         )
         return 0  # the modify target already reported the real problem
 
-    text = json.dumps(composed.data, indent=2, ensure_ascii=False) + "\n"
+    text = json.dumps(engine.base_snapshot(composed), indent=2, ensure_ascii=False) + "\n"
     try:
         if base_path.read_text() == text:
             return 0

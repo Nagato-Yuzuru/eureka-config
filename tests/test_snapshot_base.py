@@ -24,8 +24,10 @@ FRAGMENTS = {
     },
     "extra.json": {"$merge": {"permissions.ask": "ensure"}, "permissions": {"ask": ["Extra"]}},
 }
-# What compose(FRAGMENTS) yields — the base snapshot must store exactly this.
+# What compose(FRAGMENTS) yields, plus the policy it was composed under — the
+# base snapshot must store exactly this.
 COMPOSED = {"permissions": {"ask": ["Agent(model:*fable*)", "Extra"]}, "a": 1}
+RECORDED = {"$merge": {"permissions.ask": "ensure"}, **COMPOSED}
 CONVERGED = {"permissions": {"ask": ["Agent(model:*fable*)", "Extra"]}, "a": 1, "unmanaged": True}
 
 
@@ -56,12 +58,51 @@ def run_snapshot(
     )
 
 
+def run_filter(stdin: str, env_extra: dict[str, str]) -> subprocess.CompletedProcess:
+    env = dict(os.environ)
+    env.update(env_extra)
+    env.pop("CLAUDE_MANAGED_FORCE", None)
+    return subprocess.run(
+        [sys.executable, str(ENGINE_PATH)], input=stdin, capture_output=True, text=True, env=env
+    )
+
+
 class TestSnapshot:
-    def test_converged_settings_advance_base_to_composed_fragment(self, tmp_path):
+    def test_converged_settings_advance_base_to_composed_fragment_and_policy(self, tmp_path):
         result = run_snapshot(tmp_path, CONVERGED)
         assert result.returncode == 0
         base = json.loads((tmp_path / "base.json").read_text())
-        assert base == COMPOSED
+        assert base == RECORDED
+
+    def test_legacy_base_without_policy_is_upgraded_on_converged_apply(self, tmp_path):
+        result = run_snapshot(tmp_path, CONVERGED, base=COMPOSED)
+        assert result.returncode == 0
+        assert "advanced" in result.stdout
+        assert json.loads((tmp_path / "base.json").read_text()) == RECORDED
+
+    def test_written_base_round_trips_through_the_filter(self, tmp_path):
+        """The base the snapshot writes is read back by the filter: converged
+        settings stay byte-identical, and deleting the sole declaring fragment
+        then retires its ensure list per element via the recorded policy."""
+        run_snapshot(tmp_path, CONVERGED)
+        settings = json.dumps(CONVERGED)
+        env = {
+            "CLAUDE_FRAGMENT_DIR": str(tmp_path / "claude-managed.d"),
+            "CLAUDE_BASE_FILE": str(tmp_path / "base.json"),
+        }
+        converged = run_filter(settings, env)
+        assert (converged.returncode, converged.stdout) == (0, settings)
+
+        (tmp_path / "claude-managed.d" / "extra.json").unlink()
+        (tmp_path / "claude-managed.d" / "core.json").write_text(json.dumps({"a": 1}))
+        live = {**CONVERGED, "permissions": {"ask": ["Agent(model:*fable*)", "user", "Extra"]}}
+        retired = run_filter(json.dumps(live), env)
+        assert retired.returncode == 0, retired.stderr
+        assert json.loads(retired.stdout) == {
+            "permissions": {"ask": ["user"]},
+            "a": 1,
+            "unmanaged": True,
+        }
 
     def test_bool_number_drift_is_not_converged(self, tmp_path):
         """Python's `==` unifies bool with int (`True == 1`); convergence is
@@ -87,7 +128,7 @@ class TestSnapshot:
         result = run_snapshot(tmp_path, settings={}, fragments={}, base={"a": 1})
         assert result.returncode == 0
         assert "advanced" in result.stdout
-        assert json.loads((tmp_path / "base.json").read_text()) == {}
+        assert json.loads((tmp_path / "base.json").read_text()) == {"$merge": {}}
 
     def test_unconverged_settings_leave_base_untouched(self, tmp_path):
         result = run_snapshot(tmp_path, {"a": 1})  # ask rules not merged yet

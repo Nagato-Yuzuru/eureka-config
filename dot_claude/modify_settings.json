@@ -24,6 +24,13 @@ Data / state / command:
              the target. The base is what distinguishes "our own value evolved
              -> converge" from "someone else changed it -> conflict", and "left
              the fragment -> retire" from "foreign -> keep".
+             Format: the composed data plus a top-level ``"$merge"`` holding
+             the composed policy in fragment syntax (``{"dotted.path":
+             strategy}``, always written, possibly ``{}``) — so a base is
+             itself a valid fragment. Composed data never has ``$`` keys, so
+             the reserved key is unambiguous. A base without ``$merge`` (written
+             before policies were recorded) is still read: data as-is, no
+             recorded policy.
     command  this filter.
 
 Reserved keys (top level of each fragment, never merged; unknown ``$`` keys
@@ -78,6 +85,20 @@ modified since last apply is foreign now — kept with a warning, never a
 conflict: we no longer claim the path, so blocking the apply over it would be
 wrong. Once the base advances past the retired path the warning stops and the
 value is permanently foreign.
+A retired path's strategy is looked up in the base's recorded policy — the one
+its values were written under — so deleting a feature's fragment (which takes
+its ``$merge`` declarations with it) still retires its lists correctly. The
+recorded strategy only selects per-cell list retirement: a retired list
+recorded ``ensure``/``keyed`` retires per cell — exactly our cells (``ensure``
+elements in base, ``keyed`` entries whose claim key is in base or
+``$legacyHooks``) are removed, foreign cells kept, silently; a list left empty
+is removed. Everything else follows the rule above, whatever the recorded
+strategy (an object recorded ``exact`` still recurses per key), and a list not
+recorded as ``ensure``/``keyed`` stays one leaf even if a fragment now declares
+it one. A base with no recorded policy falls back to the current composed
+policy; on such a base, deleting a list's sole declaring fragment in the same
+apply retires the list as a leaf — the first apply after upgrading should not
+also delete fragments.
 
 Equality is JSON-typed throughout: ``true`` never equals ``1`` even though
 Python's ``==`` says otherwise, so a bool/number drift conflicts instead of
@@ -395,6 +416,44 @@ def _validate(
             pass
 
 
+# --- base snapshot: composed fragment as of the last converged apply ----------
+
+
+@dataclass(slots=True)
+class Base:
+    """The parsed base: composed data plus the policy it was written under.
+
+    ``policy`` is None for a base written before policies were recorded.
+    """
+
+    data: dict[str, Json]
+    policy: dict[tuple[str, ...], Strategy] | None
+
+
+def parse_base(raw: dict[str, Json]) -> Base:
+    """Parse a base snapshot (see the module docstring for its format).
+
+    Raises:
+        ExceptionGroup: of ValueError / TypeError when a recorded ``$merge`` is
+        malformed.
+    """
+    data = strip_reserved(raw)
+    if "$merge" not in raw:
+        return Base(data=data, policy=None)
+    policy: dict[tuple[str, ...], Strategy] = {}
+    errors: list[Exception] = []
+    _collect_policy("base", raw["$merge"], policy, {}, errors)
+    if errors:
+        raise ExceptionGroup("malformed recorded policy", errors)
+    return Base(data=data, policy=policy)
+
+
+def base_snapshot(composed: Composed) -> dict[str, Json]:
+    """The base to record for a converged composed fragment; inverse of ``parse_base``."""
+    policy: dict[str, Json] = {".".join(p): s for p, s in composed.policy.items()}
+    return {"$merge": policy, **composed.data}
+
+
 # --- three-way merge ----------------------------------------------------------
 
 
@@ -402,9 +461,11 @@ def _validate(
 class Merger:
     """One merge pass of the composed fragment against current settings.
 
-    Inputs ``policy``, ``legacy`` and ``force`` are the cross-cutting context
-    the per-node strategies read without threading it through every recursive
-    call. Outputs accumulate on the instance: ``merged`` is the result tree
+    Inputs ``policy``, ``retire_policy``, ``legacy`` and ``force`` are the
+    cross-cutting context the per-node strategies read without threading it
+    through every recursive call. ``retire_policy`` governs retired paths: the
+    base's recorded policy, or the current composed policy for a base without
+    one. Outputs accumulate on the instance: ``merged`` is the result tree
     (populated by ``merge_composed``; discard it when ``conflicts`` is
     non-empty — a conflict leaves the current value in place), ``warnings``
     report retired-but-modified paths left as-is, and ``forced`` records the
@@ -412,6 +473,7 @@ class Merger:
     """
 
     policy: dict[tuple[str, ...], Strategy]
+    retire_policy: dict[tuple[str, ...], Strategy]
     legacy: tuple[str, ...]
     force: frozenset[str] = frozenset()
     merged: dict[str, Json] = field(default_factory=dict)
@@ -480,8 +542,12 @@ class Merger:
         (an object left empty was wholly ours and is dropped). Anything
         modified since last apply is foreign now — kept with a warning, never
         a conflict: we no longer claim the path, so blocking over it would be
-        wrong.
+        wrong. ``ensure``/``keyed`` lists (per ``retire_policy``) retire per
+        cell instead: see ``_retire_list``.
         """
+        match strategy_for(self.retire_policy, path), current, base:
+            case ("ensure" | "keyed") as strategy, list(), list():
+                return self._retire_list(strategy, current, base)
         if _same(current, base):
             return _ABSENT
         if isinstance(current, dict) and isinstance(base, dict):
@@ -498,6 +564,26 @@ class Merger:
             f"retired `{'.'.join(path)}` was modified since last apply; left in place"
         )
         return current
+
+    def _retire_list(
+        self, strategy: Literal["ensure", "keyed"], current: list[Json], base: list[Json]
+    ) -> list[Json] | _Absent:
+        """Retire a whole ``ensure``/``keyed`` list: drop exactly our cells.
+
+        Our cells are addressed as while the list was live — ``ensure``
+        elements by value in base, ``keyed`` entries by the claim keys in base
+        plus ``$legacyHooks`` — so foreign cells survive and a drifted own
+        ``keyed`` entry is still ours (removed), while a drifted ``ensure``
+        element is a different value and so foreign (kept). Silent, like list
+        drift: no warning. A list left empty was wholly ours and is dropped.
+        """
+        if strategy == "ensure":
+            kept = [x for x in current if not _contains(base, x)]
+        else:
+            ours = {_hook_key(entry) for entry in base} | set(self.legacy)
+            ours.discard("")
+            kept = [entry for entry in current if _hook_key(entry) not in ours]
+        return kept if kept else _ABSENT
 
     def _keyed_list(
         self,
@@ -545,11 +631,14 @@ class Merger:
 def merge_composed(
     current: dict[str, Json],
     composed: Composed,
-    base: dict[str, Json],
+    base: Base,
     *,
     force: frozenset[str] = frozenset(),
 ) -> Merger:
     """Merge the composed fragment into current settings.
+
+    Retired paths are governed by the base's recorded policy, or by the
+    composed one when the base recorded none (written before policies were).
 
     ``force``: conflict paths (their rendered dotted form) to resolve as the
     fragment value instead of conflicting — the caller answers for them.
@@ -557,8 +646,13 @@ def merge_composed(
     Returns the completed Merger: read ``.merged`` (discard it when
     ``.conflicts`` is non-empty), ``.forced`` and ``.warnings``.
     """
-    merger = Merger(policy=composed.policy, legacy=composed.legacy, force=force)
-    merged = merger.merge(current, composed.data, base, ())
+    merger = Merger(
+        policy=composed.policy,
+        retire_policy=composed.policy if base.policy is None else base.policy,
+        legacy=composed.legacy,
+        force=force,
+    )
+    merged = merger.merge(current, composed.data, base.data, ())
     assert isinstance(merged, dict)  # invariant: merging two objects yields an object
     merger.merged = merged
     return merger
@@ -591,23 +685,31 @@ def forced_paths() -> frozenset[str]:
     return frozenset(part for p in raw.split(",") if (part := p.strip()))
 
 
-def load_base(path: Path) -> dict[str, Json]:
-    """Last-applied composed-fragment snapshot; {} (fail-safe) when missing or malformed.
+def load_base(path: Path) -> Base:
+    """Last-applied composed-fragment snapshot; empty (fail-safe) when missing or malformed.
 
     Fail-safe direction: without a base, our own updates surface as conflicts
-    instead of silently overwriting foreign changes.
+    instead of silently overwriting foreign changes. A malformed recorded
+    policy alone drops just the policy (retirement falls back to the composed
+    one), keeping the data.
     """
+    empty = Base(data={}, policy=None)
     try:
-        base = json.loads(path.read_text())
+        raw = json.loads(path.read_text())
     except FileNotFoundError:
-        return {}
+        return empty
     except json.JSONDecodeError as exc:
         print(f"claude-managed: ignoring corrupt base {path}: {exc}", file=sys.stderr)
-        return {}
-    if not isinstance(base, dict):
+        return empty
+    if not isinstance(raw, dict):
         print(f"claude-managed: ignoring non-object base {path}", file=sys.stderr)
-        return {}
-    return base
+        return empty
+    try:
+        return parse_base(raw)
+    except ExceptionGroup as eg:
+        for exc in eg.exceptions:
+            print(f"claude-managed: ignoring base policy in {path}: {exc}", file=sys.stderr)
+        return Base(data=strip_reserved(raw), policy=None)
 
 
 def load_fragments(directory: Path) -> list[tuple[str, dict[str, Json]]]:

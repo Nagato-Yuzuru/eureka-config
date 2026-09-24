@@ -14,6 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from conftest import ENGINE_PATH
 
 
@@ -49,7 +50,12 @@ def merge(engine, current, fragment=FRAGMENT, base=None, force=frozenset()):
     ``.warnings``.
     """
     composed = engine.compose([("test.json", fragment)])
-    return engine.merge_composed(current, composed, base if base is not None else {}, force=force)
+    return engine.merge_composed(current, composed, engine.parse_base(base or {}), force=force)
+
+
+def recorded(fragment: dict, data: dict) -> dict:
+    """A base as the snapshot writes it: data under the fragment's recorded policy."""
+    return {"$merge": fragment.get("$merge", {}), **data}
 
 
 # --- merge semantics ---------------------------------------------------------
@@ -301,13 +307,17 @@ class TestRetirement:
         assert (r.conflicts, r.warnings) == ([], [])
         assert r.merged == {}
 
-    def test_modified_list_kept_with_warning(self, engine):
+    def test_modified_undeclared_list_kept_whole_with_warning(self, engine):
+        # No $merge declaration covers the path, so the list retires as one
+        # exact leaf: any foreign change keeps all of it, our elements included.
         base = {"autoMode": {"soft_deny": ["$defaults"]}}
         current = {"autoMode": {"soft_deny": ["$defaults", "user-added"]}}
         r = merge(engine, current, fragment={}, base=base)
         assert r.conflicts == []
         assert r.merged == current
-        assert any("retired `autoMode.soft_deny`" in w for w in r.warnings)
+        assert r.warnings == [
+            "retired `autoMode.soft_deny` was modified since last apply; left in place"
+        ]
 
     def test_key_still_declared_is_not_retired(self, engine):
         r = merge(
@@ -318,6 +328,249 @@ class TestRetirement:
         )
         assert (r.conflicts, r.warnings) == ([], [])
         assert r.merged == {"effortLevel": "xhigh"}
+
+
+class TestListRetirement:
+    """A whole ensure/keyed list leaving the fragment drops exactly our cells.
+
+    Unless a test says otherwise the base records the policy the fragment
+    declares, and the declaration stays in the fragment (another list it
+    governs is still live); only the retired list's data is gone.
+    """
+
+    KEYED = {
+        "$merge": {"hooks.*": "keyed"},
+        "$legacyHooks": ["old-legacy.sh"],
+        "hooks": {"PreToolUse": [hook_entry("/h/live.sh")]},
+    }
+    ENSURE = {
+        "$merge": {"permissions.ask": "ensure", "permissions.deny": "ensure"},
+        "permissions": {"ask": ["A"]},
+    }
+
+    def test_keyed_keeps_only_foreign_entries(self, engine):
+        base = {"hooks": {"PostToolUse": [hook_entry("/h/a.sh"), hook_entry("/h/b.sh")]}}
+        current = {
+            "hooks": {
+                "PostToolUse": [
+                    hook_entry("/h/a.sh"),
+                    hook_entry("/other/peon.sh", timeout=9),
+                    hook_entry("/h/b.sh"),
+                ]
+            }
+        }
+        r = merge(engine, current, fragment=self.KEYED, base=recorded(self.KEYED, base))
+        assert (r.conflicts, r.warnings) == ([], [])
+        assert r.merged["hooks"] == {
+            "PreToolUse": [hook_entry("/h/live.sh")],
+            "PostToolUse": [hook_entry("/other/peon.sh", timeout=9)],
+        }
+
+    def test_ensure_keeps_only_foreign_elements(self, engine):
+        base = {"permissions": {"ask": ["A"], "deny": ["X", "Y"]}}
+        current = {"permissions": {"ask": ["A"], "deny": ["X", "user", "Y", "user2"]}}
+        r = merge(engine, current, fragment=self.ENSURE, base=recorded(self.ENSURE, base))
+        assert (r.conflicts, r.warnings) == ([], [])
+        assert r.merged["permissions"] == {"ask": ["A"], "deny": ["user", "user2"]}
+
+    def test_keyed_all_own_removes_key(self, engine):
+        base = {"hooks": {"PostToolUse": [hook_entry("/h/a.sh"), hook_entry("/h/b.sh")]}}
+        # Order drifted, so the list is no longer == base, yet every entry is ours.
+        current = {"hooks": {"PostToolUse": [hook_entry("/h/b.sh"), hook_entry("/h/a.sh")]}}
+        r = merge(engine, current, fragment=self.KEYED, base=recorded(self.KEYED, base))
+        assert (r.conflicts, r.warnings) == ([], [])
+        assert r.merged == {"hooks": {"PreToolUse": [hook_entry("/h/live.sh")]}}
+
+    def test_ensure_all_own_removes_key(self, engine):
+        base = {"permissions": {"ask": ["A"], "deny": ["X", "Y"]}}
+        # A subset of our elements (one already deleted by hand) is still all ours.
+        current = {"permissions": {"ask": ["A"], "deny": ["Y"]}}
+        r = merge(engine, current, fragment=self.ENSURE, base=recorded(self.ENSURE, base))
+        assert (r.conflicts, r.warnings) == ([], [])
+        assert r.merged == {"permissions": {"ask": ["A"]}}
+
+    def test_keyed_drifted_own_entry_removed_silently(self, engine):
+        # Keyed cells are addressed by claim key: a foreign edit to our entry's
+        # body does not make it foreign, and list drift never warns.
+        base = {"hooks": {"PostToolUse": [hook_entry("/h/a.sh", timeout=5)]}}
+        current = {
+            "hooks": {
+                "PostToolUse": [
+                    hook_entry("/h/a.sh", matcher="Edit", timeout=99),
+                    hook_entry("/other/peon.sh"),
+                ]
+            }
+        }
+        r = merge(engine, current, fragment=self.KEYED, base=recorded(self.KEYED, base))
+        assert (r.conflicts, r.warnings) == ([], [])
+        assert r.merged["hooks"]["PostToolUse"] == [hook_entry("/other/peon.sh")]
+
+    def test_ensure_drifted_own_element_is_foreign_and_kept_silently(self, engine):
+        # Ensure cells are addressed by value: an edited element is a different
+        # value, i.e. foreign — kept, without a warning.
+        fragment = {"$merge": {"s.live": "ensure", "s.pool": "ensure"}, "s": {"live": [1]}}
+        base = {"s": {"live": [1], "pool": [{"host": "a", "port": 1}, {"host": "b"}]}}
+        current = {"s": {"live": [1], "pool": [{"host": "a", "port": 2}, {"host": "b"}]}}
+        r = merge(engine, current, fragment=fragment, base=recorded(fragment, base))
+        assert (r.conflicts, r.warnings) == ([], [])
+        assert r.merged["s"]["pool"] == [{"host": "a", "port": 2}]
+
+    def test_ensure_retirement_is_json_typed(self, engine):
+        # base recorded 1; a live true is foreign, not ours
+        fragment = {"$merge": {"s.live": "ensure", "s.pool": "ensure"}, "s": {"live": [0]}}
+        base = {"s": {"live": [0], "pool": [1]}}
+        current = {"s": {"live": [0], "pool": [True, 1]}}
+        r = merge(engine, current, fragment=fragment, base=recorded(fragment, base))
+        assert (r.conflicts, r.warnings) == ([], [])
+        assert r.merged["s"]["pool"] == [True]
+
+    def test_keyed_legacy_entry_purged_on_retirement(self, engine):
+        base = {"hooks": {"PostToolUse": [hook_entry("/h/a.sh")]}}
+        current = {
+            "hooks": {
+                "PostToolUse": [
+                    hook_entry("/x/old-legacy.sh"),
+                    hook_entry("/h/a.sh"),
+                    hook_entry("/other/peon.sh"),
+                ]
+            }
+        }
+        r = merge(engine, current, fragment=self.KEYED, base=recorded(self.KEYED, base))
+        assert (r.conflicts, r.warnings) == ([], [])
+        assert r.merged["hooks"]["PostToolUse"] == [hook_entry("/other/peon.sh")]
+
+    def test_keyed_malformed_foreign_entry_kept(self, engine):
+        # An entry with no claim key ("") is never ours, even if base had one.
+        weird: dict = {"matcher": "Bash", "hooks": [{"type": "prompt", "prompt": "hi"}]}
+        base = {"hooks": {"PostToolUse": [hook_entry("/h/a.sh"), weird]}}
+        current = {"hooks": {"PostToolUse": [hook_entry("/h/a.sh"), weird]}}
+        r = merge(engine, current, fragment=self.KEYED, base=recorded(self.KEYED, base))
+        assert (r.conflicts, r.warnings) == ([], [])
+        assert r.merged["hooks"]["PostToolUse"] == [weird]
+
+    def test_whole_parent_object_retired_recurses_into_declared_lists(self, engine):
+        # `hooks` left the fragment entirely; the keyed declaration remains.
+        fragment = {"$merge": {"hooks.*": "keyed"}, "other": 1}
+        base = {"hooks": {"PostToolUse": [hook_entry("/h/a.sh")], "Stop": [hook_entry("/h/s.sh")]}}
+        current = {
+            "other": 1,
+            "hooks": {
+                "PostToolUse": [hook_entry("/h/a.sh"), hook_entry("/other/peon.sh")],
+                "Stop": [hook_entry("/h/s.sh")],
+            },
+        }
+        r = merge(engine, current, fragment=fragment, base=recorded(fragment, base))
+        assert (r.conflicts, r.warnings) == ([], [])
+        assert r.merged == {"other": 1, "hooks": {"PostToolUse": [hook_entry("/other/peon.sh")]}}
+
+    def test_non_list_current_retires_as_exact_with_warning(self, engine):
+        # A foreign non-list replaced our list: nothing of ours is addressable in
+        # it, so the exact rule applies — kept, with the retirement warning.
+        base = {"permissions": {"ask": ["A"], "deny": ["X"]}}
+        current = {"permissions": {"ask": ["A"], "deny": "user-string"}}
+        r = merge(engine, current, fragment=self.ENSURE, base=recorded(self.ENSURE, base))
+        assert r.conflicts == []
+        assert r.merged["permissions"]["deny"] == "user-string"
+        assert r.warnings == [
+            "retired `permissions.deny` was modified since last apply; left in place"
+        ]
+
+
+class TestRetirementUsesRecordedPolicy:
+    """A retired path's strategy comes from the base's recorded policy."""
+
+    def test_sole_declarer_deleted_ensure_list_keeps_only_foreign(self, engine):
+        # The feature's fragment (the only one declaring the list) is gone, so
+        # the current policy knows nothing about it; the base remembers.
+        base = {
+            "$merge": {"sandbox.filesystem.allowWrite": "ensure"},
+            "sandbox": {"filesystem": {"allowWrite": ["/a", "/b"]}},
+        }
+        current = {"sandbox": {"filesystem": {"allowWrite": ["/a", "/user", "/b"]}}}
+        r = merge(engine, current, fragment={}, base=base)
+        assert (r.conflicts, r.warnings) == ([], [])
+        assert r.merged == {"sandbox": {"filesystem": {"allowWrite": ["/user"]}}}
+
+    def test_sole_declarer_deleted_keyed_list_keeps_only_foreign(self, engine):
+        base = {"$merge": {"hooks.*": "keyed"}, "hooks": {"PostToolUse": [hook_entry("/h/a.sh")]}}
+        current = {"hooks": {"PostToolUse": [hook_entry("/h/a.sh"), hook_entry("/other/p.sh")]}}
+        r = merge(engine, current, fragment={}, base=base)
+        assert (r.conflicts, r.warnings) == ([], [])
+        assert r.merged == {"hooks": {"PostToolUse": [hook_entry("/other/p.sh")]}}
+
+    def test_sole_declarer_deleted_all_own_removes_key(self, engine):
+        # Reordered, so not == base: only per-element retirement removes it.
+        base = {"$merge": {"s.pool": "ensure"}, "s": {"pool": ["x", "y"]}, "keep": 1}
+        current = {"s": {"pool": ["y", "x"]}, "keep": 1}
+        r = merge(engine, current, fragment={"keep": 1}, base=base)
+        assert (r.conflicts, r.warnings) == ([], [])
+        assert r.merged == {"keep": 1}
+
+    def test_list_written_as_exact_retires_as_exact_despite_new_declaration(self, engine):
+        # x.b was an undeclared (exact) list when written; a fragment now
+        # declares x.* ensure. Retirement follows the recorded policy: the
+        # modified list is foreign and kept whole, with the warning.
+        base = {"$merge": {}, "x": {"a": [1], "b": ["p", "q"]}}
+        current = {"x": {"a": [1], "b": ["p", "q", "user"]}}
+        fragment = {"$merge": {"x.*": "ensure"}, "x": {"a": [1]}}
+        r = merge(engine, current, fragment=fragment, base=base)
+        assert r.conflicts == []
+        assert r.merged == {"x": {"a": [1], "b": ["p", "q", "user"]}}
+        assert r.warnings == ["retired `x.b` was modified since last apply; left in place"]
+
+    def test_legacy_base_without_policy_uses_current_policy(self, engine):
+        # A base written before policies were recorded: retirement falls back
+        # to the current composed policy, which still declares the list.
+        fragment = {"$merge": {"s.live": "ensure", "s.pool": "ensure"}, "s": {"live": [0]}}
+        base = {"s": {"live": [0], "pool": ["x"]}}
+        current = {"s": {"live": [0], "pool": ["x", "user"]}}
+        r = merge(engine, current, fragment=fragment, base=base)
+        assert (r.conflicts, r.warnings) == ([], [])
+        assert r.merged == {"s": {"live": [0], "pool": ["user"]}}
+
+    def test_legacy_base_without_policy_and_no_declaration_retires_as_exact(self, engine):
+        base = {"hooks": {"PostToolUse": [hook_entry("/h/a.sh")]}}
+        current = {"hooks": {"PostToolUse": [hook_entry("/h/a.sh"), hook_entry("/other/p.sh")]}}
+        r = merge(engine, current, fragment={}, base=base)
+        assert r.conflicts == []
+        assert r.merged == current
+        assert r.warnings == [
+            "retired `hooks.PostToolUse` was modified since last apply; left in place"
+        ]
+
+    def test_recorded_policy_does_not_govern_live_paths(self, engine):
+        # The recorded policy only governs retirement: a live path merges
+        # under the current one (here: undeclared, so exact, so it conflicts).
+        base = {"$merge": {"p.ask": "ensure"}, "p": {"ask": ["A"]}}
+        r = merge(engine, {"p": {"ask": ["A", "user"]}}, fragment={"p": {"ask": ["B"]}}, base=base)
+        assert [c.path for c in r.conflicts] == ["p.ask"]
+
+
+class TestBaseFormat:
+    def test_snapshot_round_trips_through_parse(self, engine):
+        composed = engine.compose([("f.json", FRAGMENT)])
+        snapshot = engine.base_snapshot(composed)
+        assert snapshot["$merge"] == {
+            "permissions.ask": "ensure",
+            "autoMode.soft_deny": "ensure",
+            "hooks.*": "keyed",
+        }
+        parsed = engine.parse_base(json.loads(json.dumps(snapshot)))
+        assert parsed == engine.Base(data=composed.data, policy=composed.policy)
+
+    def test_empty_policy_is_recorded_not_legacy(self, engine):
+        parsed = engine.parse_base(engine.base_snapshot(engine.compose([("f.json", {"a": 1})])))
+        assert parsed == engine.Base(data={"a": 1}, policy={})
+
+    def test_base_without_policy_parses_as_legacy(self, engine):
+        assert engine.parse_base({"a": 1}) == engine.Base(data={"a": 1}, policy=None)
+
+    def test_malformed_recorded_policy_raises(self, engine):
+        with pytest.raises(ExceptionGroup) as info:
+            engine.parse_base({"$merge": {"x": "bogus"}, "x": 1})
+        assert [str(e) for e in info.value.exceptions] == [
+            "base: unknown merge strategy 'bogus' for `x`"
+        ]
 
 
 class TestConflicts:
@@ -469,6 +722,28 @@ class TestFilterIO:
         assert result.returncode == 0
         assert result.stdout == '{"a": 2}'
         assert "retired `a`" in result.stderr
+
+    def test_malformed_base_policy_drops_only_the_policy(self, tmp_path):
+        # The data still retires (as exact: no policy to fall back on here).
+        result = run_filter(
+            '{"a": 1, "keep": true}', tmp_path, fragments={}, base={"$merge": "bogus", "a": 1}
+        )
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == {"keep": True}
+        assert "ignoring base policy" in result.stderr
+        assert "$merge must be an object" in result.stderr
+
+    def test_malformed_base_policy_falls_back_to_composed_policy(self, tmp_path):
+        # Not "no policy at all": the fragment still declares x.p ensure, so
+        # the retired x.p retires per element (foreign kept), without a warning.
+        fragment = {"$merge": {"x.q": "ensure", "x.p": "ensure"}, "x": {"q": ["Q"]}}
+        base = {"$merge": {"x.p": 7}, "x": {"q": ["Q"], "p": ["ours"]}}
+        stdin = json.dumps({"x": {"q": ["Q"], "p": ["ours", "user"]}})
+        result = run_filter(stdin, tmp_path, fragments={"core.json": fragment}, base=base)
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {"x": {"q": ["Q"], "p": ["user"]}}
+        assert "ignoring base policy" in result.stderr
+        assert "retired" not in result.stderr
 
     def test_corrupt_base_is_failsafe_not_fatal(self, tmp_path):
         (tmp_path / "base.json").write_text("not json at all")
