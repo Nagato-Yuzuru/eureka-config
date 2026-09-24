@@ -75,7 +75,7 @@ def main() -> int:
 
     base_path = engine.base_file()
     result = engine.merge_composed(current, composed, engine.load_base(base_path))
-    if result.conflicts or result.merged != current:
+    if result.conflicts or not engine._same(result.merged, current):
         print(
             "claude-managed: settings not converged; base snapshot left untouched",
             file=sys.stderr,

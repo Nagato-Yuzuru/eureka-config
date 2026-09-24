@@ -62,8 +62,32 @@ class TestSnapshot:
         assert result.returncode == 0
         base = json.loads((tmp_path / "base.json").read_text())
         assert base == COMPOSED
-        assert "$merge" not in base
-        assert "$legacyHooks" not in base
+
+    def test_bool_number_drift_is_not_converged(self, tmp_path):
+        """Python's `==` unifies bool with int (`True == 1`); convergence is
+        JSON equality. Base and live settings hold `true`, the fragment wants
+        `1`: the merge moves the leaf with no conflict, so live settings have
+        not caught up, and advancing the base would manufacture a false
+        conflict on the next apply."""
+        result = run_snapshot(
+            tmp_path,
+            settings={"x": True},
+            fragments={"x.json": {"x": 1}},
+            base={"x": True},
+        )
+        assert result.returncode == 0
+        assert "not converged" in result.stderr
+        assert json.loads((tmp_path / "base.json").read_text()) == {"x": True}
+
+    def test_full_retirement_with_converged_settings_advances_base_to_empty(self, tmp_path):
+        """An emptied fragment dir (existing, zero fragments) composes to
+        `{}`; once live settings reflect the retirement, the base must
+        advance to `{}` too, not get stuck on the last non-empty snapshot.
+        """
+        result = run_snapshot(tmp_path, settings={}, fragments={}, base={"a": 1})
+        assert result.returncode == 0
+        assert "advanced" in result.stdout
+        assert json.loads((tmp_path / "base.json").read_text()) == {}
 
     def test_unconverged_settings_leave_base_untouched(self, tmp_path):
         result = run_snapshot(tmp_path, {"a": 1})  # ask rules not merged yet
