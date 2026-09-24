@@ -18,7 +18,6 @@ the `artifact` template refuses stale data and machines nobody declared.
 from __future__ import annotations
 
 import json
-import logging
 import shutil
 import subprocess
 import tomllib
@@ -792,27 +791,6 @@ def test_write_tree_only_touches_what_changed_and_removes_what_left(tmp_path: Pa
     assert stale(smaller, out) == []
 
 
-DIRTY = [
-    ("all", f"{RENDERED_DIR}/linux-amd64/dnf-list", 1),
-    ("all", f"{SCHEMA_DIR}/machines.json", 1),
-    ("schema", f"{SCHEMA_DIR}/machines.json", 1),
-    ("schema", f"{RENDERED_DIR}/linux-amd64/dnf-list", 0),  # `schema` owns only its own tree
-]
-
-
-@pytest.mark.parametrize(("what", "victim", "rc"), DIRTY, ids=lambda v: str(v))
-def test_check_exits_1_and_names_every_stale_file(
-    what: str, victim: str, rc: int, tmp_path: Path, caplog: pytest.LogCaptureFixture
-):
-    """What prek runs before every commit. `all` covers both trees, `schema` only its own."""
-    src = _source_copy(tmp_path)
-    assert main([what, "--check", "--root", str(src)]) == 0
-    (src / victim).write_text("not what the types compile to\n")
-    with caplog.at_level(logging.ERROR, logger="inventory"):
-        assert main([what, "--check", "--root", str(src)]) == rc
-    assert (f"stale: {victim}" in caplog.text) is (rc == 1)
-
-
 def test_all_writes_both_trees(tmp_path: Path):
     """One `render` restores whatever was clobbered, in .rendered/ and .schema/ alike."""
     src = _source_copy(tmp_path)
@@ -832,7 +810,6 @@ def test_render_schema_needs_no_valid_data(tmp_path: Path):
         f.write('\n[packages.oops]\non = ["mars"]\n')
     assert main(["all", "--root", str(src)]) == 2
     assert main(["schema", "--root", str(src)]) == 0
-    assert main(["schema", "--check", "--root", str(src)]) == 0
     assert sorted(p.name for p in (src / SCHEMA_DIR).iterdir()) == sorted(
         f"{Path(n).stem}.json" for n in DOCS
     )

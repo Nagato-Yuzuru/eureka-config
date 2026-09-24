@@ -35,7 +35,6 @@ There is no separate build step.
 ```sh
 make                     # rebuild .rendered/ and .schema/ by hand
 uv run render schema     # only .schema/; works while a data file is broken
-uv run render --check    # what prek runs: fails on a stale tree
 uv run pytest            # everything, ~20 s
 prek install             # the git hooks in .pre-commit-config.yaml
 ```

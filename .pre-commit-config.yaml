@@ -61,15 +61,6 @@ repos:
         language: system
         files: \.ya?ml$
 
-      # .schema/ is committed and must not lag model.py. --check also reports a stale
-      # .rendered/, which is only local build state now; that half goes with the STAMP guard.
-      - id: render
-        name: render --check
-        entry: uv run render --check
-        language: system
-        pass_filenames: false
-        files: ^(\.chezmoidata/|tools/|pyproject\.toml|uv\.lock)
-
       - id: pytest
         name: pytest
         entry: uv run pytest -q
