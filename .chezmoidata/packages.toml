@@ -319,10 +319,6 @@ mise = { name = "go:golang.org/x/tools/gopls" }
 
 # -- dev tools, workstation only (mise) ---------------------------------------
 # terraform/opentofu: bash-protocol completion only (`complete -C`), wired in .zshrc.
-[packages.terraform]
-on = ["darwin"]
-via = "mise"
-
 [packages.opentofu]
 on = ["darwin"]
 via = "mise"
