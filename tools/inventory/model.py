@@ -296,17 +296,6 @@ DOCS: dict[str, type[Strict]] = {
 # --- resolved: what a renderer sees ------------------------------------------------------------
 
 
-# Which backend a spec belongs to. The brew and dnf halves come from their unions, so a new
-# variant of either lands here by being added there.
-_BACKEND_OF: dict[type, Backend] = {
-    **dict.fromkeys(get_args(Brew), "brew"),
-    **dict.fromkeys(get_args(Dnf), "dnf"),
-    Mise: "mise",
-    Uv: "uv",
-    Upstream: "upstream",
-}
-
-
 class Resolved(Strict):
     """One package as it installs on one machine. The only input the renderers take."""
 
@@ -314,9 +303,3 @@ class Resolved(Strict):
     name: NonEmpty  # name on that backend (the cask's, for a cask)
     spec: Spec
     completions: dict[NonEmpty, NonEmpty]
-
-    @property
-    def backend(self) -> Backend:
-        """Read off the spec, not stored beside it: the two cannot disagree, so a `uv` label
-        over a Mise spec cannot validate and then vanish from every artifact unremarked."""
-        return _BACKEND_OF[type(self.spec)]

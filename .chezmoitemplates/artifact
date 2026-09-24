@@ -1,9 +1,8 @@
-{{- /* This machine's copy of one compiled artifact — brewfile, dnf-list, dnf-repos,
-       mise-tools, uv-tools or completions — from .rendered/<os>-<arch>/, the tree
-       `uv run render` (tools/inventory) compiles from .chezmoidata/{platforms,
-       machines,packages}.toml. Args: name, plus the root data (`merge (dict "name" …) .`).
-       Refuses a tree compiled from other data than what is here now, and a machine
-       machines.toml does not declare. */ -}}
+{{- /* This machine's copy of one compiled artifact — `name` is a key of ARTIFACTS in
+       tools/inventory/render.py — from .rendered/<os>-<arch>/, the tree `uv run render`
+       compiles from .chezmoidata/{platforms,machines,packages}.toml. Args: name, plus the
+       root data (`merge (dict "name" …) .`). Refuses a tree compiled from other data than
+       what is here now, and a machine machines.toml does not declare. */ -}}
 {{- $machine := printf "%s-%s" .chezmoi.os .chezmoi.arch -}}
 {{- if not (hasKey .machines $machine) -}}
   {{- fail (printf "machines.toml: %s is not declared, nothing is rendered for it" $machine) -}}

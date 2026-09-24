@@ -40,6 +40,7 @@ from inventory.render import (
     ARTIFACTS,
     RENDERED_DIR,
     SCHEMA_DIR,
+    STAMP,
     render,
     render_tree,
     schemas,
@@ -50,7 +51,6 @@ from inventory.render import (
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA = REPO_ROOT / ".chezmoidata"  # the real data: invariants only
 SCHEMA = REPO_ROOT / SCHEMA_DIR
-REAL = Inventory.load(DATA)
 
 # The synthetic inventory every other test runs on (see its packages.toml for the design).
 FIXTURE_DATA = Path(__file__).resolve().parent / "fixtures" / "inventory" / ".chezmoidata"
@@ -100,13 +100,32 @@ def _source_copy(source: Path, tmp_path: Path) -> Path:
     return Path(shutil.copytree(source, tmp_path / "source"))
 
 
-def inventory(packages: Mapping[str, Any]) -> Inventory:
-    """The synthetic platforms and machines, the packages given."""
+def inventory(packages: Mapping[str, Any], machines: Mapping[str, Any] | None = None) -> Inventory:
+    """The synthetic platforms and machines (or the machines given), the packages given."""
     return Inventory(
         load_data(FIXTURE_DATA / "platforms.toml")["platforms"],
-        load_data(FIXTURE_DATA / "machines.toml")["machines"],
+        load_data(FIXTURE_DATA / "machines.toml")["machines"] if machines is None else machines,
         packages,
     )
+
+
+def _toml(v: Any) -> str:
+    """`v` as an inline TOML value: as much TOML as a REJECTS row needs to become a data file."""
+    match v:
+        case Mapping():
+            return "{ " + ", ".join(f"{json.dumps(k)} = {_toml(x)}" for k, x in v.items()) + " }"
+        case list():
+            return "[" + ", ".join(_toml(x) for x in v) + "]"
+        case str():
+            return json.dumps(v)  # a JSON string is a TOML basic string
+        case int():
+            return str(v)
+    raise TypeError(f"no TOML spelling for {v!r}")
+
+
+def write_table(path: Path, table: str, entries: Mapping[str, Any]) -> None:
+    body = "".join(f"{json.dumps(k)} = {_toml(v)}\n" for k, v in entries.items())
+    path.write_text(f"[{table}]\n{body}")
 
 
 def lines(inv: Inventory, artifact: str, machine: str) -> list[str]:
@@ -491,13 +510,51 @@ RENDER_CASES = [
         },
     ),
     RenderCase(
-        "mise-completions-skip-other-backends",  # their installs never fire mise's hook
+        # their installs never fire mise's hook; the full refresh still generates theirs
+        "mise-completions-skip-other-backends-that-completions-keeps",
         {
             "mise": {"on": ["darwin"], "completions": {"mise": "mise completion zsh"}},
             "ruff": {"on": ["darwin"], "via": "uv", "completions": {"ruff": "x"}},
             "plain": {"on": ["darwin"], "via": "mise"},
         },
-        {("mise-completions", "darwin-arm64"): []},
+        {
+            ("mise-completions", "darwin-arm64"): [],
+            ("completions", "darwin-arm64"): ["mise mise completion zsh", "ruff x"],
+        },
+    ),
+    RenderCase(
+        "uv-without-name-or-version-renders-the-key",
+        {"foo": {"on": ["darwin"], "via": "uv"}},
+        {("uv-tools", "darwin-arm64"): ["foo"]},
+    ),
+    RenderCase(
+        "a-formula-and-a-cask-may-share-a-name",  # two namespaces in a Brewfile
+        {"app": {"on": ["darwin"], "brew": {"cask": "x"}}, "x": {"on": ["darwin"]}},
+        {("brewfile", "darwin-arm64"): ['cask "x"', 'brew "x"']},
+    ),
+    RenderCase(
+        "a-name-may-repeat-on-other-machines-and-other-backends",
+        {
+            "a": {"on": ["darwin/arm64"], "via": "mise", "mise": {"name": "t"}},
+            "b": {"on": ["darwin/amd64"], "via": "mise", "mise": {"name": "t"}},
+            "t": {"on": ["darwin"], "via": "uv"},
+        },
+        {
+            ("mise-tools", "darwin-arm64"): ['"t" = "latest"'],
+            ("mise-tools", "darwin-amd64"): ['"t" = "latest"'],
+            ("uv-tools", "darwin-arm64"): ["t"],
+        },
+    ),
+    RenderCase(
+        "a-command-may-have-a-different-recipe-on-each-machine",
+        {
+            "a": {"on": ["darwin/arm64"], "completions": {"c": "a-recipe"}},
+            "b": {"on": ["darwin/amd64"], "via": "mise", "completions": {"c": "b-recipe"}},
+        },
+        {
+            ("completions", "darwin-arm64"): ["c a-recipe"],
+            ("completions", "darwin-amd64"): ["c b-recipe"],
+        },
     ),
     RenderCase(
         "upstream-renders-its-command-and-reaches-no-package-manager",
@@ -537,10 +594,87 @@ def test_render(packages: Mapping[str, Any], artifact: str, machine: str, want: 
 class Reject:
     id: str
     packages: Mapping[str, Any]
-    message: str  # what the InventoryError must contain
+    message: str  # the whole InventoryError text
+    machines: Mapping[str, Any] | None = None  # in place of the synthetic machines
+    resolve: str | None = None  # a machine to resolve once the inventory is built
 
 
 REJECTS = [
+    Reject("package-not-a-map", {"foo": "brew"}, "packages.foo: must be a map"),
+    Reject(
+        "on-tag-not-a-string",
+        {"foo": {"on": [1]}},
+        "packages.foo.on.0: tags are strings: darwin, linux, or os/arch",
+    ),
+    Reject(
+        "machine-arch-invalid",
+        {},
+        "machines.x.arch: Input should be 'arm64' or 'amd64'",
+        machines={"x": {"platform": "brewhost", "arch": "x86"}},
+    ),
+    Reject("resolved-on-an-undeclared-machine", {}, "machines.nope: not declared", resolve="nope"),
+    # --- one thing installed once, one completion generated once, per machine
+    Reject(
+        "two-packages-install-one-formula",
+        {"a": {"on": ["darwin"], "brew": {"name": "x"}}, "x": {"on": ["darwin"]}},
+        "packages.x: brew formula 'x' on darwin-arm64 is already installed by packages.a",
+    ),
+    Reject(  # a clash is per machine: on darwin/arm64 only b installs it
+        "two-packages-install-one-cask-on-the-machine-both-reach",
+        {
+            "a": {"on": ["darwin/amd64"], "brew": {"cask": "y"}},
+            "b": {"on": ["darwin"], "brew": {"cask": "y"}},
+        },
+        "packages.b: brew cask 'y' on darwin-amd64 is already installed by packages.a",
+    ),
+    Reject(  # the source is where dnf gets it, not what it installs
+        "one-rpm-from-two-sources",
+        {"a": {"on": ["linux"], "dnf": {"name": "x", "copr": "o/p"}}, "x": {"on": ["linux"]}},
+        "packages.x: dnf package 'x' on linux-arm64 is already installed by packages.a",
+    ),
+    Reject(  # two keys of one [tools] table
+        "one-mise-tool-twice",
+        {
+            "a": {"on": ["linux"], "via": "mise", "mise": {"name": "npm:t"}},
+            "b": {"on": ["linux"], "via": "mise", "mise": {"name": "npm:t", "version": "2"}},
+        },
+        "packages.b: mise tool 'npm:t' on linux-arm64 is already installed by packages.a",
+    ),
+    Reject(  # two different lines, one tool
+        "one-uv-tool-at-two-versions",
+        {
+            "a": {"on": ["darwin"], "via": "uv", "uv": {"name": "t", "version": "1"}},
+            "b": {"on": ["darwin"], "via": "uv", "uv": {"name": "t", "version": "2"}},
+        },
+        "packages.b: uv tool 't' on darwin-arm64 is already installed by packages.a",
+    ),
+    Reject(
+        "one-upstream-command-twice",
+        {
+            "a": {"on": ["darwin"], "via": "upstream", "upstream": {"command": "curl x | sh"}},
+            "b": {"on": ["darwin"], "via": "upstream", "upstream": {"command": "curl x | sh"}},
+        },
+        "packages.b: upstream command 'curl x | sh' on darwin-arm64 is already installed by"
+        " packages.a",
+    ),
+    Reject(  # checked on the resolved package, so an override's rename counts
+        "a-clash-an-override-makes",
+        {
+            "a": {"on": ["darwin"]},
+            "b": {"on": ["darwin"], "overrides": [{"when": "darwin/amd64", "brew": {"name": "a"}}]},
+        },
+        "packages.b: brew formula 'a' on darwin-amd64 is already installed by packages.a",
+    ),
+    Reject(  # both would write the one _c file
+        "two-packages-generate-one-commands-completion",
+        {
+            "a": {"on": ["darwin"], "completions": {"c": "x"}},
+            "b": {"on": ["darwin"], "via": "mise", "completions": {"c": "y"}},
+        },
+        "packages.b.completions.c: the completion for 'c' on darwin-arm64 is already generated"
+        " by packages.a",
+    ),
+    # --- the shape of one package
     Reject(
         "unknown-key",
         {"foo": {"on": ["darwin"], "nope": "1"}},
@@ -552,7 +686,9 @@ REJECTS = [
         {"foo": {"on": []}},
         "packages.foo.on: List should have at least 1 item after validation, not 0",
     ),
-    Reject("on-unknown-tag", {"foo": {"on": ["mars"]}}, "packages.foo.on.0: unknown tag 'mars'"),
+    Reject(  # through `load`, the per-entry message, not the whole document's
+        "on-unknown-tag", {"oops": {"on": ["mars"]}}, "packages.oops.on.0: unknown tag 'mars'"
+    ),
     Reject(  # a real OS with an arch we do not render for: the tag is what is wrong, not a field
         "on-known-os-unknown-arch",
         {"foo": {"on": ["darwin/x86_64"]}},
@@ -657,15 +793,30 @@ REJECTS = [
 ]
 
 
-@pytest.mark.parametrize(
-    ("packages", "message"), [pytest.param(r.packages, r.message, id=r.id) for r in REJECTS]
-)
-def test_validation_rejects(packages: Mapping[str, Any], message: str):
+def _from_files(r: Reject, tmp_path: Path) -> Inventory:
+    """`Inventory.load` on the synthetic data files with the row's tables written in. Load
+    checks each document whole first; that check must not preempt the row's message."""
+    data = Path(shutil.copytree(FIXTURE_DATA, tmp_path / ".chezmoidata"))
+    write_table(data / "packages.toml", "packages", r.packages)
+    if r.machines is not None:
+        write_table(data / "machines.toml", "machines", r.machines)
+    return Inventory.load(data)
+
+
+@pytest.mark.parametrize("entry", ["constructor", "load"])
+@pytest.mark.parametrize("r", [pytest.param(r, id=r.id) for r in REJECTS])
+def test_validation_rejects(r: Reject, entry: str, tmp_path: Path):
     with pytest.raises(InventoryError) as e:
-        inventory(packages)
+        inv = (
+            inventory(r.packages, r.machines)
+            if entry == "constructor"
+            else _from_files(r, tmp_path)
+        )
+        if r.resolve is not None:
+            inv.resolved(r.resolve)
     # Equality, not `in`: a substring cannot see the lines _explain exists to suppress, so a
     # dropped dedupe or noise filter passes under it.
-    assert str(e.value) == message
+    assert str(e.value) == r.message
 
 
 def test_machine_must_name_a_declared_platform():
@@ -696,20 +847,11 @@ def test_platform_system_manager_is_one_we_render_for():
 # --- real data ----------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("machine", REAL.machines)
-@pytest.mark.parametrize(
-    "artifact", [a for a in ARTIFACTS if a != "dnf-repos"]
-)  # shared repos repeat
-def test_real_data_has_no_duplicate_lines(artifact: str, machine: str):
-    got = lines(REAL, artifact, machine)
-    assert len(got) == len(set(got)), sorted(ln for ln in got if got.count(ln) > 1)
-
-
-@pytest.mark.parametrize("machine", REAL.machines)
-def test_completions_commands_are_unique_per_machine(machine: str):
-    """Two packages claiming the same command would race for one _<cmd> file."""
-    cmds = [ln.split(" ", 1)[0] for ln in lines(REAL, "completions", machine)]
-    assert len(cmds) == len(set(cmds)), sorted(c for c in cmds if cmds.count(c) > 1)
+def test_real_data_compiles_every_artifact_for_every_declared_machine():
+    """All the real data is held to: it passes every check the compiler makes."""
+    real = Inventory.load(DATA)
+    want = {f"{m}/{a}" for m in real.machines for a in ARTIFACTS} | {STAMP}
+    assert set(render_tree(real, DATA)) == want
 
 
 # --- the synthetic source: what the consumer tests can rely on ----------------------------------
@@ -814,6 +956,11 @@ SCHEMA_REJECTS = [
 ]
 
 
+@pytest.mark.parametrize("packages", [pytest.param(c.packages, id=c.id) for c in RENDER_CASES])
+def test_packages_schema_accepts_what_the_types_accept(packages: Mapping[str, Any]):
+    schema_for("packages.toml").validate({"packages": packages})
+
+
 @pytest.mark.parametrize("package", [pytest.param(p, id=i) for i, p in SCHEMA_REJECTS])
 def test_packages_schema_rejects_what_the_types_reject(package: Mapping[str, Any]):
     with pytest.raises(InventoryError):
@@ -841,6 +988,29 @@ def test_all_writes_both_trees(source: Path, tmp_path: Path):
     assert main(["all", "--root", str(src)]) == 0
     for rel in dirty:
         assert (src / rel).read_text() == (source / rel).read_text()
+
+
+def _trees(src: Path) -> dict[str, str]:
+    return {
+        str(p.relative_to(src)): p.read_text()
+        for tree in (RENDERED_DIR, SCHEMA_DIR)
+        for p in (src / tree).rglob("*")
+        if p.is_file()
+    }
+
+
+def test_all_on_broken_data_writes_neither_tree(source: Path, tmp_path: Path):
+    """The schema tree needs no data and could be written; `all` still writes nothing when
+    the data does not parse, so a failed run leaves no half-updated state behind."""
+    src = _source_copy(source, tmp_path)
+    for rel in (f"{RENDERED_DIR}/{MACHINES[-1]}/uv-tools", f"{SCHEMA_DIR}/machines.json"):
+        (src / rel).write_text("clobbered\n")
+    (src / SCHEMA_DIR / "zsh.json").unlink()
+    with (src / ".chezmoidata" / "packages.toml").open("a") as f:
+        f.write('\n[packages.oops]\non = ["mars"]\n')
+    before = _trees(src)
+    assert main(["all", "--root", str(src)]) == 2
+    assert _trees(src) == before
 
 
 def test_render_schema_needs_no_valid_data(source: Path, tmp_path: Path):
