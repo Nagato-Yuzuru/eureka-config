@@ -29,6 +29,11 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GATE = REPO_ROOT / "dot_claude" / "hooks" / "executable_path-gate.sh"
 
+# The gate must run on macOS's stock /bin/bash (3.2), not just whatever `env bash`
+# finds first — on a Homebrew machine that is 5.x and would hide 3.2-only
+# breakage. Where /bin/bash exists it is the interpreter; elsewhere, the shebang.
+GATE_CMD = ["/bin/bash", str(GATE)] if Path("/bin/bash").exists() else [str(GATE)]
+
 SID = "11111111-2222-3333-4444-555555555555"
 
 # The gate's only fixed allowlist root. realpath, never a literal: the kernel
@@ -80,7 +85,7 @@ def env_for(home: Path) -> dict[str, str]:
 
 
 def check(home, path, mode, project, session=None) -> int:
-    args = [str(GATE), "check", str(path), mode, "--project", str(project)]
+    args = [*GATE_CMD, "check", str(path), mode, "--project", str(project)]
     if session:
         args += ["--session", session]
     return subprocess.run(args, env=env_for(home), capture_output=True).returncode
@@ -88,7 +93,7 @@ def check(home, path, mode, project, session=None) -> int:
 
 def cli(home, *args) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [str(GATE), *[str(a) for a in args]],
+        [*GATE_CMD, *[str(a) for a in args]],
         env=env_for(home),
         capture_output=True,
         text=True,
@@ -258,6 +263,229 @@ class TestStores:
         assert check(home, grants, "r", home) == ASK
 
 
+# A case-insensitive volume (APFS/HFS+ default) lands a write spelled in any case
+# on the real store, and realpath can only canonicalize names that already exist,
+# so the store's absence (every fresh machine) is the state that matters. The
+# gate must deny on the spelling alone, which also keeps these tests independent
+# of the host filesystem. project == home puts the stores inside the workspace:
+# a variant that slipped the carve-out would read as ALLOW, not merely ASK.
+STORE_NAMES = {"grants": "path-gate-grants.json", "sessions": "path-gate-sessions"}
+CASE_VARIANTS = {
+    "canonical": lambda n: n,
+    "upper": str.upper,
+    "mixed": lambda n: "".join(c.upper() if i % 2 else c for i, c in enumerate(n)),
+}
+
+
+def store_target(home: Path, store: str, spelling: str) -> Path:
+    name = CASE_VARIANTS[spelling](STORE_NAMES[store])
+    target = home / ".claude" / "hooks" / name
+    return target / f"{SID}.json" if store == "sessions" else target
+
+
+def materialize(home: Path, store: str) -> None:
+    hooks = home / ".claude" / "hooks"
+    if store == "sessions":
+        (hooks / STORE_NAMES[store]).mkdir()
+    else:
+        (hooks / STORE_NAMES[store]).write_text('{"version":1,"grants":[]}')
+
+
+class TestStoreSpellings:
+    @pytest.mark.parametrize("spelling", CASE_VARIANTS)
+    @pytest.mark.parametrize("present", [False, True], ids=["absent", "present"])
+    @pytest.mark.parametrize("store", STORE_NAMES)
+    def test_case_variant_write_denied(self, home, store, present, spelling):
+        if present:
+            materialize(home, store)
+        assert check(home, store_target(home, store, spelling), "w", home) == DENY
+
+    @pytest.mark.parametrize("spelling", ["upper", "mixed"])
+    @pytest.mark.parametrize("store", STORE_NAMES)
+    def test_case_variant_read_asks(self, home, store, spelling):
+        assert check(home, store_target(home, store, spelling), "r", home) == ASK
+
+    def test_case_variant_of_parent_dirs_denied(self, home):
+        """Nothing under ~/.claude exists yet: every component keeps the
+        caller's spelling, not just the store's own name."""
+        shutil.rmtree(home / ".claude")
+        target = home / ".CLAUDE" / "Hooks" / "PATH-GATE-GRANTS.JSON"
+        assert check(home, target, "w", home) == DENY
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "path-gate-seßions",  # ß folds to ss (full case folding)
+            "path-gate-ſessions",  # ſ (long s) folds to s
+            "path-gate-grantſ.json",
+        ],
+    )
+    def test_unicode_fold_variant_write_denied(self, home, name):
+        """APFS folds case with full Unicode rules, so non-ASCII spellings alias
+        the ASCII store names too."""
+        assert check(home, home / ".claude" / "hooks" / name, "w", home) == DENY
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "path-gate-grants.json.bak",  # sibling, not inside the store
+            "path-gate-grants",
+            "path-gate-sessions.json",
+            "café.txt",  # non-ASCII that cannot spell a store name
+            "path.gate.grants.jsoné",  # '.' is literal, not any character
+            "工作",  # non-ASCII alone cannot spell a store name's '-' or '.'
+        ],
+    )
+    def test_non_store_neighbors_still_allowed(self, home, name):
+        assert check(home, home / ".claude" / "hooks" / name, "w", home) == ALLOW
+
+    def test_non_ascii_workspace_file_allowed(self, home, project):
+        assert check(home, project / "résumé.md", "w", project) == ALLOW
+
+    # The store match must stay confined to the store's own depth: a non-ASCII
+    # name anywhere above or beside the stores is an ordinary path.
+    @pytest.mark.parametrize("name", ["工作", "日記.json", "é"])
+    @pytest.mark.parametrize("parent", ["/", "~", "~/.claude", "~/.claude/hooks"])
+    def test_non_ascii_dir_is_an_ordinary_workspace(self, home, parent, name):
+        base = Path("/") if parent == "/" else home / parent.removeprefix("~").lstrip("/")
+        ws = base / name
+        assert check(home, ws / "README.md", "w", ws) == ALLOW
+        assert check(home, ws / "README.md", "r", ws) == ALLOW
+
+    @pytest.mark.parametrize("name", ["工作", "日記.json", "é"])
+    def test_non_ascii_dir_outside_workspace_asks(self, home, project, name):
+        assert check(home, home / name / "x.txt", "w", project) == ASK
+
+    def test_non_ascii_workspace_allows_in_hook_mode(self, home):
+        ws = home / "工作" / "proj"
+        ws.mkdir(parents=True)
+        out = run_hook(home, tool="Write", path=ws / "README.md", cwd=ws)
+        assert out["decision"] == "allow"
+
+    # HOME itself may carry glob metacharacters. A non-ASCII byte in the same
+    # component sends it through the glob comparison, where each metacharacter
+    # must stay literal: the store is denied under its own spelling, and a
+    # sibling that the unescaped pattern would match is not a store.
+    @pytest.mark.parametrize(
+        ("home_dir", "sibling"),
+        [("a[1]é", "a1é"), ("*é", "zé"), ("?é", "zé")],
+    )
+    def test_glob_metacharacters_in_home_stay_literal(self, sandbox, home_dir, sibling):
+        h = sandbox / home_dir / "home"
+        (h / ".claude" / "hooks").mkdir(parents=True)
+        rel = Path(".claude") / "hooks" / "path-gate-grants.json"
+        assert check(h, h / rel, "w", sandbox) == DENY
+        assert check(h, sandbox / sibling / "home" / rel, "w", sandbox) == ALLOW
+
+    def test_non_ascii_home_stores_denied(self, sandbox):
+        h = sandbox / "ホーム" / "home"
+        (h / ".claude" / "hooks").mkdir(parents=True)
+        for spelling in CASE_VARIANTS:
+            assert check(h, store_target(h, "grants", spelling), "w", h) == DENY
+        assert check(h, h / "ノート" / "a.txt", "w", h) == ALLOW
+
+
+class TestDecisionCost:
+    """The hook runs under a timeout; a kill skips the ask backstop, which is
+    fail-open. Cost must stay linear in the path, however long or deep."""
+
+    BOUND_S = 3.0  # generous: a warm decision takes ~0.1 s
+
+    def timed_check(self, home, path, project) -> tuple[int, float]:
+        t0 = time.monotonic()
+        rc = check(home, path, "w", project)
+        return rc, time.monotonic() - t0
+
+    def test_long_deep_path_decides_fast(self, home, project):
+        path = project.joinpath(*["d" * 200] * 20, "f.txt")
+        assert len(str(path)) > 4000
+        rc, dt = self.timed_check(home, path, project)
+        assert rc == ALLOW
+        assert dt < self.BOUND_S, f"{dt:.2f}s"
+
+    def test_longest_real_name_at_store_depth_decides_fast(self, home):
+        """255 characters is every volume's NAME_MAX; non-ASCII takes the
+        per-byte fold, the slow path."""
+        path = home / ".claude" / "hooks" / ("é" * 255)
+        rc, dt = self.timed_check(home, path, home)
+        assert rc == ALLOW
+        assert dt < self.BOUND_S, f"{dt:.2f}s"
+
+    def test_impossible_name_at_store_depth_denied_fast(self, home):
+        """Past any NAME_MAX no volume creates the name, so the fold is skipped
+        and the name counts as a possible store alias: fail closed, for free."""
+        path = home / ".claude" / "hooks" / ("é" * 2000)
+        rc, dt = self.timed_check(home, path, home)
+        assert rc == DENY
+        assert dt < self.BOUND_S, f"{dt:.2f}s"
+
+
+def link_chain(where: Path, length: int, target: Path) -> Path:
+    """where/l0 -> l1 -> ... -> l{length-1} -> target; returns the head."""
+    for i in range(length - 1):
+        (where / f"l{i}").symlink_to(f"l{i + 1}")
+    (where / f"l{length - 1}").symlink_to(target)
+    return where / "l0"
+
+
+class TestSymlinkChains:
+    # Past this many links every kernel gives up (Linux 40, macOS 32), and so
+    # must the gate: a decision on some intermediate hop judges a path the
+    # write never lands on.
+    BEYOND_ANY_KERNEL = 64
+
+    def test_long_chain_to_absent_store_is_store(self, home, project):
+        grants = home / ".claude" / "hooks" / "path-gate-grants.json"
+        head = link_chain(project, 12, grants)
+        assert check(home, head, "w", project) == DENY
+
+    def test_long_chain_to_workspace_file_still_resolves(self, home, project):
+        head = link_chain(project, 12, project / "real.txt")
+        assert check(home, head, "w", project) == ALLOW
+
+    def test_chain_beyond_kernel_limit_fails_closed(self, home, project):
+        head = link_chain(project, self.BEYOND_ANY_KERNEL, project / "real.txt")
+        assert check(home, head, "w", project) == DENY
+        assert check(home, head, "r", project) == ASK
+
+    def test_symlink_loop_fails_closed(self, home, project):
+        (project / "a").symlink_to("b")
+        (project / "b").symlink_to("a")
+        assert check(home, project / "a", "w", project) == DENY
+        assert check(home, project / "a", "r", project) == ASK
+        assert check(home, project / "a" / "x.txt", "w", project) == DENY
+
+    def test_dangling_parent_link_is_followed(self, home, project):
+        sessions = home / ".claude" / "hooks" / "path-gate-sessions"
+        (project / "d").symlink_to(sessions)
+        assert check(home, project / "d" / f"{SID}.json", "w", project) == DENY
+
+    def test_unresolvable_deny_says_why(self, home, project):
+        (project / "a").symlink_to("a")
+        r = cli(home, "check", project / "a", "w", "--project", project)
+        assert r.returncode == DENY
+        assert "cannot be resolved" in r.stdout
+
+    def test_unresolvable_write_denied_in_hook_mode(self, home, project):
+        (project / "a").symlink_to("a")
+        out = run_hook(home, tool="Write", path=project / "a", cwd=project)
+        assert out["decision"] == "deny"
+        assert "cannot be resolved" in out["reason"]
+
+    def test_unresolvable_read_asks_without_pending(self, home, project):
+        (project / "a").symlink_to("a")
+        out = run_hook(home, tool="Read", path=project / "a", cwd=project)
+        assert out["decision"] == "ask"
+        assert not session_file(home).exists()
+
+    def test_grant_refuses_unresolvable_path(self, home, project):
+        (project / "a").symlink_to("a")
+        r = cli(home, "grant", project / "a", "w", "--global")
+        assert r.returncode == 3
+        assert "cannot resolve" in r.stderr
+        assert not (home / ".claude" / "hooks" / "path-gate-grants.json").exists()
+
+
 class TestMemoryAndWhitelist:
     def test_current_project_memory_rw(self, home, project):
         mem = home / ".claude" / "projects" / slug_of(project) / "memory" / "m.md"
@@ -367,9 +595,7 @@ def run_hook(home, *, tool, path, cwd, session=SID, mode="default", extra_env=No
     e = env_for(home)
     if extra_env:
         e.update(extra_env)
-    r = subprocess.run(
-        [str(GATE)], input=json.dumps(payload), text=True, capture_output=True, env=e
-    )
+    r = subprocess.run(GATE_CMD, input=json.dumps(payload), text=True, capture_output=True, env=e)
     assert r.returncode == 0, r.stderr
     if not r.stdout.strip():
         return {"decision": "allow"}
@@ -426,7 +652,7 @@ class TestHookMode:
             "permission_mode": "default",
         }
         r = subprocess.run(
-            [str(GATE)],
+            GATE_CMD,
             input=json.dumps(payload),
             text=True,
             capture_output=True,
@@ -482,7 +708,7 @@ def run_record(home, *, tool="Read", path, cwd, session=SID, mode="default"):
         "permission_mode": mode,
     }
     r = subprocess.run(
-        [str(GATE), "record"],
+        [*GATE_CMD, "record"],
         input=json.dumps(payload),
         text=True,
         capture_output=True,

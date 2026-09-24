@@ -4,8 +4,9 @@
 #
 # Modes:
 #   (no args)  PreToolUse gate. Read/Grep/Glob need r; Edit/Write/NotebookEdit
-#              need w. Decision chain (first match): store carve-out (w->deny,
-#              r->grants only) -> /dev/null -> workspace (project +
+#              need w. Decision chain (first match): unresolvable target
+#              (w->deny, r->ask) -> store carve-out (w->deny, r->grants only;
+#              any case spelling) -> /dev/null -> workspace (project +
 #              permissions.additionalDirectories) -> /private/tmp -> current
 #              project auto-memory -> structural whitelist (r-only) -> session
 #              grants -> durable grants -> ask (+ pending marker). Allow steps
@@ -86,51 +87,181 @@ under() {
     esac
 }
 
-# resolve RAWPATH -> real path (R). Input comes from normalize_raw(): '..'
-# segments are intact so realpath/the kernel follows a symlink component
-# BEFORE applying '..' — collapsing first would let 'link/../x' escape
-# unresolved. Existing targets: realpath. Dangling symlink chains: bounded
-# manual readlink walk (a Write through a link creates the target).
-# Non-existent: realpath of the nearest existing ancestor plus the remaining
-# suffix ('..' collapsed lexically only there — no symlink left to follow),
-# so a symlinked parent cannot smuggle a create elsewhere.
-resolve() {
-    local p="$1" hops=0 t
-    while [[ -L "$p" && ! -e "$p" && $hops -lt 8 ]]; do
-        t=$(/usr/bin/readlink "$p") || break # macOS: readlink is /usr/bin, realpath /bin
-        [[ "$t" != /* ]] && t="${p%/*}/$t"
-        p=$(normalize_raw "$t")
-        hops=$((hops + 1))
-    done
-    if [[ -e "$p" ]]; then
-        if t=$(/bin/realpath "$p" 2> /dev/null); then
-            echo "$t"
-            return
-        fi
-    fi
-    local cur="$p" suffix=""
-    while [[ "$cur" != "/" && ! -e "$cur" ]]; do
-        suffix="/${cur##*/}$suffix"
-        cur="${cur%/*}"
-        [[ -z "$cur" ]] && cur=/
-    done
-    if [[ "$cur" == "/" ]]; then
-        normalize "$p"
-        return
-    fi
-    t=$(/bin/realpath "$cur" 2> /dev/null || echo "$cur")
-    [[ "$t" == "/" ]] && t=""
-    normalize "$t$suffix"
+# may_alias PATH STORE — true if PATH could name STORE or something inside it
+# on a case-insensitive volume. The store check needs this and under() is not
+# enough: realpath canonicalizes only names that exist, and a store is absent
+# until the first grant, so a case variant keeps the caller's spelling and then
+# lands on the real store. Pre-creating the stores would close that only while
+# they exist; comparing spellings holds in every state.
+# Such volumes fold with full Unicode rules (APFS: ß=ss, ſ=s, ﬅ=st, K=k) plus
+# normalization, which no ASCII table reproduces, so the match over-approximates
+# — deny/ask is the safe side — within tight bounds:
+# - Component by component (no fold yields '/'): PATH needs at least STORE's
+#   component count, and each of the first N must be able to alias STORE's.
+#   Cost is linear in STORE's depth, not PATH's length.
+# - Both ASCII-only: case-insensitive equality.
+# - Only PATH's has non-ASCII: a non-ASCII character folds (full case folding
+#   then NFD) to at most 3 ASCII characters, all letters or ';' '`', or to
+#   nothing (HFS+ ignores some code points). So each run of k non-ASCII bytes
+#   stands for 0..3k of those and nothing else: a non-ASCII name can never
+#   spell a store name's '-' or '.'.
+# - STORE's has non-ASCII (only $HOME's own components can): each non-ASCII
+#   run is an unbounded wildcard, tried in both directions.
+# Applied on every volume: detecting the volume's rules per path costs more.
+may_alias() {
+    [[ -n "$2" ]] || return 1
+    local rc=0
+    shopt -s nocasematch # ASCII-only under the LC_ALL=C set below
+    _may_alias "$1" "$2" || rc=$?
+    shopt -u nocasematch
+    return "$rc"
 }
 
-# The space every allow/deny comparison happens in.
+_may_alias() {
+    local LC_ALL=C # byte-wise ${#}, ${:i:1}, [[ ]] ranges; ASCII-only case folding
+    local p="${1#/}" s="${2#/}" pc sc
+    while [[ -n "$s" ]]; do
+        [[ -n "$p" ]] || return 1 # PATH is shallower than STORE
+        sc="${s%%/*}"
+        if [[ "$s" == */* ]]; then s="${s#*/}"; else s=""; fi
+        pc="${p%%/*}"
+        if [[ "$p" == */* ]]; then p="${p#*/}"; else p=""; fi
+        component_may_alias "$pc" "$sc" || return 1
+    done
+}
+
+_PG_HIGH=$'\x80'-$'\xff' # non-ASCII byte range, for [[ ]] under LC_ALL=C
+
+component_may_alias() { # P S — caller holds LC_ALL=C and nocasematch
+    local rc=0 g1
+    if [[ "$1$2" != *[$_PG_HIGH]* ]]; then
+        [[ "$1" == "$2" ]]
+        return
+    fi
+    # Over any NAME_MAX (255 chars x 4 UTF-8 bytes) no volume creates the name,
+    # so "may alias" costs nothing and spares the per-byte fold below.
+    ((${#1} <= 1024 && ${#2} <= 1024)) || return 0
+    if [[ "$2" != *[$_PG_HIGH]* ]]; then
+        fold_regex "$1"
+        # shellcheck disable=SC2319 # the [[ ]] status is the point: 1 vs 2
+        [[ "$2" =~ $_PG_FOLD ]] || rc=$?
+        ((rc != 1)) # 2 = regex error: fail closed, count it as a match
+        return
+    fi
+    fold_glob "$1"
+    g1="$_PG_FOLD"
+    fold_glob "$2"
+    # shellcheck disable=SC2053 # the right side is a glob on purpose
+    [[ "$2" == $g1 || "$1" == $_PG_FOLD ]]
+}
+
+# fold_regex NAME -> _PG_FOLD: an anchored ERE for the ASCII names NAME may
+# alias — ASCII bytes literal, each run of k non-ASCII bytes [a-z;`]{0,3k}
+# (a byte count bounds the character count from above). Past RE_DUP_MAX (255)
+# the bound is dropped. Results go through a variable, not stdout: $() would
+# strip a trailing newline from the name.
+_PG_FOLD=""
+fold_regex() {
+    local LC_ALL=C name="$1" re="^" c i run=0
+    for ((i = 0; i <= ${#name}; i++)); do
+        c="${name:i:1}" # "" past the end: flushes a trailing run
+        if [[ -n "$c" && "$c" == [$_PG_HIGH] ]]; then
+            run=$((run + 1))
+            continue
+        fi
+        if ((run > 0)); then
+            if ((run * 3 > 255)); then re+='[a-z;`]*'; else re+="[a-z;\`]{0,$((run * 3))}"; fi
+            run=0
+        fi
+        case "$c" in
+            '') ;;
+            '^' | "\\") re+="\\$c" ;;
+            *) re+="[$c]" ;;
+        esac
+    done
+    _PG_FOLD="$re\$"
+}
+
+# fold_glob NAME -> _PG_FOLD: a glob matching NAME with every ASCII byte
+# literal and every run of non-ASCII bytes standing for anything.
+fold_glob() {
+    local LC_ALL=C name="$1" pat="" c i wild=0
+    for ((i = 0; i < ${#name}; i++)); do
+        c="${name:i:1}"
+        if [[ "$c" != [$_PG_HIGH] ]]; then
+            pat+="\\$c"
+            wild=0
+        elif ((wild == 0)); then
+            pat+='*'
+            wild=1
+        fi
+    done
+    _PG_FOLD="$pat"
+}
+
+# resolve RAWPATH -> real path (R), or status 1 when it cannot be resolved.
+# Input comes from normalize_raw(): '..' segments are intact so realpath
+# follows a symlink component BEFORE applying '..' — collapsing first would
+# let 'link/../x' escape unresolved.
+# - Existing path: realpath.
+# - Otherwise find the nearest ancestor that exists or is a symlink. A dangling
+#   symlink there is followed by hand (readlink, then start over with its
+#   target + the rest): the kernel follows it too, so a create through it —
+#   O_CREAT on a final-component link, or a parent made along the way — lands
+#   at the target, which is what must be judged.
+# - Otherwise realpath of that ancestor plus the absent suffix ('..' collapsed
+#   lexically — nothing left there to follow), so a symlinked parent cannot
+#   smuggle a create elsewhere.
+# Following more than PG_MAX_HOPS links (a loop, or a chain longer than any
+# kernel follows: Linux MAXSYMLINKS 40, macOS 32) is unresolvable: status 1,
+# with a best-effort lexical spelling on stdout for messages only. Deciding
+# on the last hop reached instead would judge a path the write never lands on.
+PG_MAX_HOPS=40
+resolve() {
+    local p="$1" hops=0 t cur suffix
+    while :; do
+        if [[ -e "$p" ]]; then
+            t=$(/bin/realpath "$p" 2> /dev/null) || break
+            echo "$t"
+            return 0
+        fi
+        cur="$p" suffix=""
+        while [[ "$cur" != / && ! -e "$cur" && ! -L "$cur" ]]; do
+            suffix="/${cur##*/}$suffix"
+            cur="${cur%/*}"
+            [[ -z "$cur" ]] && cur=/
+        done
+        if [[ -L "$cur" && ! -e "$cur" ]]; then
+            ((hops < PG_MAX_HOPS)) || break
+            t=$(/usr/bin/readlink "$cur") || break # macOS: readlink is /usr/bin, realpath /bin
+            [[ "$t" != /* ]] && t="${cur%/*}/$t"
+            p=$(normalize_raw "$t$suffix")
+            hops=$((hops + 1))
+            continue
+        fi
+        if [[ "$cur" == / ]]; then
+            normalize "$p"
+            return 0
+        fi
+        t=$(/bin/realpath "$cur" 2> /dev/null) || break
+        [[ "$t" == / ]] && t=""
+        normalize "$t$suffix"
+        return 0
+    done
+    normalize "$p"
+    return 1
+}
+
+# The space every allow/deny comparison happens in. Status 1 = unresolvable.
 real() { resolve "$(normalize_raw "$1")"; }
 
 # Roots, resolved. $HOME itself can sit behind a symlink (on macOS /tmp and /var
 # are symlinks into /private), so ask the filesystem instead of hardcoding which
 # platform redirects what. On a system that redirects nothing this is identity.
-HOME_R=$(real "$HOME")
-TMP_R=$(real /tmp)
+# An unresolvable root (a symlink loop) keeps its lexical spelling rather than
+# aborting before any decision; the store check matches that spelling anyway.
+HOME_R=$(real "$HOME") || true
+TMP_R=$(real /tmp) || true
 GRANTS="$HOME_R/.claude/hooks/path-gate-grants.json"
 SESSIONS_DIR="$HOME_R/.claude/hooks/path-gate-sessions"
 GRANTS_L=$(lex "$HOME/.claude/hooks/path-gate-grants.json")
@@ -198,11 +329,19 @@ session_covers() { # TARGET NEEDED SID
 }
 
 # allowed L R NEEDED PROJECT SID -> 0 allow | 1 ask | 2 deny
+# R="" means the target is unresolvable (see resolve); PROJECT="" matches
+# nothing.
 allowed() {
-    local L="$1" R="$2" needed="$3" project="$4" sid="$5" store d
-    # step 0: tool-owned stores, checked against BOTH spellings
+    local L="$1" R="$2" needed="$3" project="$4" sid="$5" store d dr
+    # Unresolvable: where a write lands is unknown, so it may be a store ->
+    # deny. A read cannot forge anything -> ask, never allow.
+    if [[ -z "$R" ]]; then
+        [[ "$needed" == w ]] && return 2
+        return 1
+    fi
+    # step 0: tool-owned stores, checked against BOTH spellings, in any case
     for store in "$GRANTS" "$SESSIONS_DIR" "$GRANTS_L" "$SESSIONS_DIR_L"; do
-        if under "$L" "$store" || under "$R" "$store"; then
+        if may_alias "$L" "$store" || may_alias "$R" "$store"; then
             [[ "$needed" == w ]] && return 2
             grant_covers "$R" "$needed" "$project" && return 0
             return 1
@@ -212,7 +351,8 @@ allowed() {
     under "$R" "$project" && return 0
     while IFS= read -r d; do
         [[ -n "$d" ]] || continue
-        under "$R" "$(real "$d")" && return 0
+        dr=$(real "$d") || continue
+        under "$R" "$dr" && return 0
     done < <(addl_dirs "$project")
     under "$R" "$TMP_R" && return 0
     local slug
@@ -253,12 +393,21 @@ emit_ask() { # TOOL NEEDED R
     }'
 }
 
-emit_deny() { # TOOL R
-    jq -n --arg tool "$1" --arg path "$2" '{
+# deny_reason R L — why allowed() returned 2; R="" is the unresolvable case.
+deny_reason() {
+    if [[ -z "$1" ]]; then
+        printf '%s\n' "$2 cannot be resolved (symlink loop, or a chain longer than $PG_MAX_HOPS links), so the write could land on a tool-owned path-gate store."
+    else
+        printf '%s\n' "$1 is a tool-owned path-gate store. File tools may never write it; grants are issued only via ~/.claude/hooks/path-gate.sh grant."
+    fi
+}
+
+emit_deny() { # REASON
+    jq -n --arg why "$1" '{
         hookSpecificOutput: {
             hookEventName: "PreToolUse",
             permissionDecision: "deny",
-            permissionDecisionReason: "\($path) is a tool-owned path-gate store. File tools may never write it; grants are issued only via ~/.claude/hooks/path-gate.sh grant."
+            permissionDecisionReason: $why
         }
     }'
 }
@@ -296,9 +445,9 @@ hook_mode() {
     fi
     CWD="$cwd"
     local project L R rc=0
-    project=$(real "${CLAUDE_PROJECT_DIR:-${cwd:-/nonexistent}}")
+    project=$(real "${CLAUDE_PROJECT_DIR:-${cwd:-/nonexistent}}") || project=""
     L=$(lex "$fpath")
-    R=$(real "$fpath")
+    R=$(real "$fpath") || R=""
     allowed "$L" "$R" "$needed" "$project" "$sid" || rc=$?
     case "$rc" in
         0)
@@ -306,13 +455,14 @@ hook_mode() {
             exit 0
             ;;
         2)
-            emit_deny "$tool" "$R"
+            emit_deny "$(deny_reason "$R" "$L")"
             HOOK_DECIDED=1
             exit 0
             ;;
     esac
-    [[ "$pmode" != "bypassPermissions" ]] && pending_add "$sid" "$R" "$needed"
-    emit_ask "$tool" "$needed" "$R"
+    # no pending for an unresolvable target: nothing it could be promoted to
+    [[ "$pmode" != "bypassPermissions" && -n "$R" ]] && pending_add "$sid" "$R" "$needed"
+    emit_ask "$tool" "$needed" "${R:-$L}"
     HOOK_DECIDED=1
     exit 0
 }
@@ -369,9 +519,9 @@ cmd_record() {
 
     CWD="$cwd"
     local project L R rc=0
-    project=$(real "${CLAUDE_PROJECT_DIR:-${cwd:-/nonexistent}}")
+    project=$(real "${CLAUDE_PROJECT_DIR:-${cwd:-/nonexistent}}") || project=""
     L=$(lex "$fpath")
-    R=$(real "$fpath")
+    R=$(real "$fpath") || exit 0 # unresolvable: never pending, nothing to promote
 
     jq -e --arg p "$R" --arg m "$needed" \
         '.pending[]? | select(.path == $p and .mode == $m)' "$f" > /dev/null 2>&1 || exit 0
@@ -441,8 +591,8 @@ cmd_grant() {
     [[ -n "$path" && -n "$mode" ]] || die "usage: grant <path> <r|w|rw> [--global | --project DIR] [--ttl 2h] [--note TEXT]"
     [[ "$mode" =~ ^(r|w|rw)$ ]] || die "mode must be r, w, or rw"
 
-    path=$(real "$path")
-    [[ "$scope" != "*" ]] && scope=$(real "$scope")
+    path=$(real "$path") || die "cannot resolve $path (symlink loop or chain over $PG_MAX_HOPS links)"
+    if [[ "$scope" != "*" ]]; then scope=$(real "$scope") || die "cannot resolve scope $scope"; fi
 
     local expires=null
     [[ -n "$ttl" ]] && expires=$(jq -n --argjson ttl "$(ttl_to_seconds "$ttl")" '(now + $ttl)')
@@ -481,8 +631,8 @@ cmd_revoke() {
         shift
     done
     [[ -n "$path" ]] || die "usage: revoke <path> [--global | --project DIR]"
-    path=$(real "$path")
-    [[ "$scope" != "*" ]] && scope=$(real "$scope")
+    path=$(real "$path") || die "cannot resolve $path (symlink loop or chain over $PG_MAX_HOPS links)"
+    if [[ "$scope" != "*" ]]; then scope=$(real "$scope") || die "cannot resolve scope $scope"; fi
 
     [[ -f "$GRANTS" ]] || die "no grants file"
     local tmp before after
@@ -532,18 +682,18 @@ cmd_check() {
     done
     [[ -n "$path" && "$needed" =~ ^(r|w)$ ]] || die "usage: check <path> <r|w> [--project DIR] [--session SID]"
     local L R rc=0
-    project=$(real "$project")
+    project=$(real "$project") || project=""
     L=$(lex "$path")
-    R=$(real "$path")
+    R=$(real "$path") || R=""
     allowed "$L" "$R" "$needed" "$project" "$sid" || rc=$?
     case "$rc" in
         0) echo "allow: $needed on $R (project $project)" ;;
         2)
-            echo "deny: $needed on $R — tool-owned path-gate store"
+            echo "deny: $needed — $(deny_reason "$R" "$L")"
             exit 2
             ;;
         *)
-            echo "ask: $needed on $R (project $project) — no covering grant"
+            echo "ask: $needed on ${R:-$L} (project $project) — no covering grant"
             exit 1
             ;;
     esac
