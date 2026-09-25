@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # path-gate v2 — whitelist file-access gate for Claude Code.
-# Spec: docs/superpowers/specs/2026-07-15-path-gate-v2-design.md (repo-only).
 #
 # Modes:
 #   (no args)  PreToolUse gate. Read/Grep/Glob need r; Edit/Write/NotebookEdit
@@ -607,7 +606,11 @@ cmd_grant() {
     fi
 
     local expires=null
-    [[ -n "$ttl" ]] && expires=$(jq -n --argjson ttl "$(ttl_to_seconds "$ttl")" '(now + $ttl)')
+    if [[ -n "$ttl" ]]; then
+        local secs
+        secs=$(ttl_to_seconds "$ttl") || exit $? # die in a subshell exits only the subshell
+        expires=$(jq -n --argjson ttl "$secs" '(now + $ttl)')
+    fi
 
     ensure_stores
     [[ "$STORES_OK" == 1 ]] || die "cannot create the stores ($GRANTS must be a file, $SESSIONS_DIR a directory)"

@@ -197,7 +197,7 @@ class TestTmp:
 
 
 class TestSymlinks:
-    """Blocker gate (§3): the chain judges resolved paths."""
+    """The decision chain judges resolved paths, followed through symlinks."""
 
     def test_link_in_workspace_to_outside_secret_asks(self, home, project):
         secret = home / ".ssh-secret"
@@ -1074,11 +1074,43 @@ class TestMemoryAndWhitelist:
         assert check(home, shared / "x.md", "r", project) == ALLOW  # same file
         assert check(home, sandbox / "other.md", "r", project) == ASK
 
-    def test_slug_matches_real_layout(self):
-        """Every non-alnum -> '-'. The rule is undocumented upstream, so this is a
-        transcription of observed behaviour: re-check by eye against
-        `ls ~/.claude/projects` when a Claude Code release moves it."""
-        assert slug_of(Path("/home/u/.local/share/chezmoi")) == "-home-u--local-share-chezmoi"
+    @pytest.mark.parametrize(
+        ("project_path", "slug"),
+        [
+            (
+                "/nonexistent-path-gate-fixture/proj.name",
+                "-nonexistent-path-gate-fixture-proj-name",
+            ),
+            (
+                "/nonexistent-path-gate-fixture/proj_name",
+                "-nonexistent-path-gate-fixture-proj-name",
+            ),
+            (
+                "/nonexistent-path-gate-fixture/proj name",
+                "-nonexistent-path-gate-fixture-proj-name",
+            ),
+            ("/nonexistent-path-gate-fixture/café", "-nonexistent-path-gate-fixture-caf--"),
+        ],
+        ids=["period", "underscore", "space", "non-ascii"],
+    )
+    def test_memory_dir_uses_claude_codes_slug(self, home, project_path, slug):
+        """The project-dir slug is undocumented upstream, so these are hardcoded
+        expected values (re-check by eye against `ls ~/.claude/projects` when a
+        Claude Code release moves it) — exercised through the real `check` verb,
+        not a reimplementation of the rule. The project path need not exist:
+        `resolve()` handles a missing project the same as a missing target."""
+        mem = home / ".claude" / "projects" / slug / "memory" / "m.md"
+        assert check(home, mem, "r", project_path) == ALLOW
+        assert check(home, mem, "w", project_path) == ALLOW
+
+    def test_non_ascii_slug_is_byte_wise_not_codepoint_wise(self, home):
+        """LC_ALL=C folds each UTF-8 byte of a non-ASCII character individually:
+        é (2 bytes) becomes two dashes. A codepoint-aware guess (one dash per
+        character) names a different, uncovered directory."""
+        project_path = "/nonexistent-path-gate-fixture/café"
+        one_dash_per_char = "-nonexistent-path-gate-fixture-caf-"
+        mem = home / ".claude" / "projects" / one_dash_per_char / "memory" / "m.md"
+        assert check(home, mem, "r", project_path) == ASK
 
 
 class TestGrantsCli:
@@ -1091,26 +1123,107 @@ class TestGrantsCli:
     def test_grant_scope_other_project_does_not_match(self, home, project, sandbox):
         other = sandbox / "other"
         other.mkdir()
-        cli(home, "grant", str(home / "shared"), "r", "--project", str(other))
+        r = cli(home, "grant", str(home / "shared"), "r", "--project", str(other))
+        assert r.returncode == 0, r.stderr
         assert check(home, home / "shared" / "x", "r", project) == ASK
+        # the scope it WAS granted for still matches, at the grant path and below
+        assert check(home, home / "shared" / "x", "r", other) == ALLOW
+        assert check(home, home / "shared" / "x" / "y", "r", other) == ALLOW
 
     def test_global_grant_matches_everywhere(self, home, project):
-        cli(home, "grant", str(home / "g"), "rw", "--global")
+        r = cli(home, "grant", str(home / "g"), "rw", "--global")
+        assert r.returncode == 0, r.stderr
         assert check(home, home / "g" / "x", "w", project) == ALLOW
 
     def test_expired_ttl_is_inert(self, home, project):
-        cli(home, "grant", str(home / "t"), "r", "--global", "--ttl", "1s")
+        r = cli(home, "grant", str(home / "t"), "r", "--global", "--ttl", "1s")
+        assert r.returncode == 0, r.stderr
+        assert check(home, home / "t" / "x", "r", project) == ALLOW
         time.sleep(1.1)
         assert check(home, home / "t" / "x", "r", project) == ASK
 
+    def test_ttl_grant_allows_before_expiry(self, home, project):
+        r = cli(home, "grant", str(home / "u"), "r", "--global", "--ttl", "1h")
+        assert r.returncode == 0, r.stderr
+        assert check(home, home / "u" / "x", "r", project) == ALLOW
+
     def test_revoke(self, home, project):
-        cli(home, "grant", str(home / "g2"), "r", "--global")
-        cli(home, "revoke", str(home / "g2"), "--global")
+        r = cli(home, "grant", str(home / "g2"), "r", "--global")
+        assert r.returncode == 0, r.stderr
+        assert check(home, home / "g2" / "x", "r", project) == ALLOW
+        r = cli(home, "revoke", str(home / "g2"), "--global")
+        assert r.returncode == 0, r.stderr
         assert check(home, home / "g2" / "x", "r", project) == ASK
+
+    def test_revoke_global_does_not_remove_project_scoped_grant(self, home, project):
+        r = cli(home, "grant", str(home / "g3"), "r", "--project", str(project))
+        assert r.returncode == 0, r.stderr
+        r = cli(home, "revoke", str(home / "g3"), "--global")
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.startswith("revoked 0 grant(s)")
+        assert check(home, home / "g3" / "x", "r", project) == ALLOW
+
+    def test_grant_prefix_does_not_match_sibling_with_shared_prefix(self, home, project):
+        r = cli(home, "grant", str(home / "g"), "r", "--global")
+        assert r.returncode == 0, r.stderr
+        assert check(home, home / "g" / "x", "r", project) == ALLOW
+        # "g2" merely starts with the same characters as "g"; not a subpath of it
+        assert check(home, home / "g2" / "x", "r", project) == ASK
+
+    def test_grant_bad_mode_is_refused(self, home, project):
+        grants = home / ".claude" / "hooks" / "path-gate-grants.json"
+        r = cli(home, "grant", str(home / "g"), "bogus", "--global")
+        assert r.returncode == 3
+        assert "mode must be r, w, or rw" in r.stderr
+        assert not grants.exists()
+
+    def test_grant_bad_ttl_is_refused(self, home, project):
+        grants = home / ".claude" / "hooks" / "path-gate-grants.json"
+        r = cli(home, "grant", str(home / "g"), "r", "--global", "--ttl", "bogus")
+        assert r.returncode == 3
+        assert "bad --ttl 'bogus'" in r.stderr
+        assert not grants.exists()
 
     def test_corrupt_grants_fail_closed(self, home, project):
         (home / ".claude" / "hooks" / "path-gate-grants.json").write_text("{corrupt")
         assert check(home, home / "anything", "r", project) == ASK
+
+    @staticmethod
+    def _malformed_entry(kind: str, home: Path) -> dict:
+        entry = {"scope": "*", "path": str(home / "bad"), "mode": "r"}
+        if kind == "empty-path":
+            entry["path"] = ""
+        elif kind == "missing-scope":
+            del entry["scope"]
+        elif kind == "bad-expires":
+            entry["expires"] = "x"
+        elif kind == "bad-mode":
+            # not "x": a mode that textually CONTAINS "r" and "w" without being
+            # one of r/w/rw catches a `contains($m)` check run without the
+            # preceding IN("r","w","rw") guard (issue #9 asked for mode:"x",
+            # but that value can never satisfy contains() either way — it
+            # cannot fail if the guard it is meant to pin is removed).
+            entry["mode"] = "wr"
+        return entry
+
+    @pytest.mark.parametrize("kind", ["empty-path", "missing-scope", "bad-expires", "bad-mode"])
+    def test_malformed_grant_entry_grants_nothing(self, home, project, kind):
+        """A store with one valid grant and one malformed sibling: the valid
+        grant still works (the sibling did not corrupt the read), and the
+        malformed entry itself covers nothing — it must not accidentally match
+        via an empty/absent field (e.g. an empty path prefixing everything)."""
+        grants = home / ".claude" / "hooks" / "path-gate-grants.json"
+        good = home / "good"
+        store = {
+            "version": 1,
+            "grants": [
+                {"scope": "*", "path": str(good), "mode": "r"},
+                self._malformed_entry(kind, home),
+            ],
+        }
+        grants.write_text(json.dumps(store))
+        assert check(home, good / "x", "r", project) == ALLOW
+        assert check(home, home / "bad" / "x", "r", project) == ASK
 
     @pytest.mark.parametrize(
         "content",
@@ -1209,32 +1322,47 @@ class TestHookMode:
         assert run_hook(home, tool="Read", path=f, cwd=project)["decision"] == "allow"
         assert not session_file(home).exists()
 
-    def test_foreign_read_asks_and_records_pending(self, home, project):
-        target = home / "foreign.txt"
-        out = run_hook(home, tool="Read", path=target, cwd=project)
+    @pytest.mark.parametrize(
+        ("tool", "key", "mode", "expect_pending"),
+        [
+            ("Read", "file_path", "default", True),
+            ("Grep", "path", "default", True),
+            ("Read", "file_path", "bypassPermissions", False),
+        ],
+        ids=["read", "grep-path-param", "bypass-mode"],
+    )
+    def test_foreign_access_asks(self, home, project, tool, key, mode, expect_pending):
+        """A foreign target always asks, regardless of which tool or which of its
+        input keys names the path; only bypassPermissions suppresses the pending
+        record (no prompt is shown there to approve)."""
+        target = home / "foreign"
+        out = run_hook(home, tool=tool, path=target, cwd=project, mode=mode)
         assert out["decision"] == "ask"
-        assert "auto-recorded" in out["reason"]
-        data = json.loads(session_file(home).read_text())
-        assert {"path": str(target), "mode": "r"} in data["pending"]
-        assert data["granted"] == []
-
-    def test_bypass_mode_writes_no_pending(self, home, project):
-        out = run_hook(
-            home, tool="Read", path=home / "f.txt", cwd=project, mode="bypassPermissions"
-        )
-        assert out["decision"] == "ask"
-        assert not session_file(home).exists()
+        if expect_pending:
+            assert "auto-recorded" in out["reason"]
+            data = json.loads(session_file(home).read_text())
+            assert {"path": str(target), "mode": "r"} in data["pending"]
+            assert data["granted"] == []
+        else:
+            assert not session_file(home).exists()
 
     def test_store_write_denies(self, home, project):
         grants = home / ".claude" / "hooks" / "path-gate-grants.json"
         out = run_hook(home, tool="Write", path=grants, cwd=project)
         assert out["decision"] == "deny"
 
-    def test_grep_root_gated_by_path_param(self, home, project):
-        out = run_hook(home, tool="Grep", path=home / "somewhere", cwd=project)
+    @pytest.mark.parametrize("tool", ["Edit", "NotebookEdit"])
+    def test_edit_and_notebookedit_need_write(self, home, project, tool):
+        grants = home / ".claude" / "hooks" / "path-gate-grants.json"
+        # w semantics: a store write is denied outright, not merely asked (a
+        # read of the same store only ever asks — see test_store_read_asks_not_allows)
+        out = run_hook(home, tool=tool, path=grants, cwd=project)
+        assert out["decision"] == "deny"
+        target = home / "foreign"
+        out = run_hook(home, tool=tool, path=target, cwd=project)
         assert out["decision"] == "ask"
         data = json.loads(session_file(home).read_text())
-        assert {"path": str(home / "somewhere"), "mode": "r"} in data["pending"]
+        assert {"path": str(target), "mode": "w"} in data["pending"]
 
     def test_glob_without_path_is_untouched(self, home, project):
         payload = {
@@ -1252,6 +1380,39 @@ class TestHookMode:
             env=env_for(home),
         )
         assert r.returncode == 0 and not r.stdout.strip()
+
+    def test_unrecognized_tool_produces_no_output(self, home, project):
+        """A tool outside {Read,Grep,Glob,Edit,Write,NotebookEdit} is not gated,
+        even if its input happens to carry a file_path-shaped field."""
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls", "file_path": str(home / "foreign")},
+            "cwd": str(project),
+            "session_id": SID,
+            "permission_mode": "default",
+        }
+        r = subprocess.run(
+            GATE_CMD, input=json.dumps(payload), text=True, capture_output=True, env=env_for(home)
+        )
+        assert r.returncode == 0
+        assert r.stdout == ""
+
+    def test_non_json_stdin_fails_closed_to_ask(self, home, project):
+        r = subprocess.run(
+            GATE_CMD, input="not json at all", text=True, capture_output=True, env=env_for(home)
+        )
+        assert r.returncode == 0
+        out = json.loads(r.stdout)["hookSpecificOutput"]
+        assert out["permissionDecision"] == "ask"
+        assert "crashed before reaching a decision" in out["permissionDecisionReason"]
+
+    def test_relative_file_path_resolved_against_payload_cwd(self, home, project):
+        out = run_hook(home, tool="Write", path="a.txt", cwd=project)
+        assert out["decision"] == "allow"
+
+    def test_relative_file_path_traversal_against_payload_cwd_asks(self, home, project):
+        out = run_hook(home, tool="Write", path="../x.txt", cwd=project)
+        assert out["decision"] == "ask"
 
     def test_claude_project_dir_env_wins_over_cwd(self, home, project, sandbox):
         elsewhere = sandbox / "elsewhere"
@@ -1358,13 +1519,6 @@ class TestRecord:
         cli(home, "revoke", str(home / "covered"), "--global")
         assert check(home, target, "r", project, session=SID) == ASK
 
-    def test_denied_prompt_stays_pending_forever(self, home, project):
-        run_hook(home, tool="Read", path=home / "no.txt", cwd=project)
-        # no record call (tool never executed) — pending remains, granted empty
-        data = json.loads(session_file(home).read_text())
-        assert data["granted"] == []
-        assert len(data["pending"]) == 1
-
     def test_mode_mismatch_does_not_promote(self, home, project):
         target = home / "f"
         seed_session(home, pending=[{"path": str(target), "mode": "r"}])
@@ -1383,6 +1537,18 @@ class TestRecord:
         run_record(home, tool="Read", path=target, cwd=project)
         assert not stale.exists()
 
+    def test_sweep_keeps_session_file_younger_than_a_week(self, home, project):
+        sdir = home / ".claude" / "hooks" / "path-gate-sessions"
+        sdir.mkdir(parents=True, exist_ok=True)
+        recent = sdir / "recent-session.json"
+        recent.write_text('{"pending":[],"granted":[]}')
+        young = time.time() - 6 * 86400
+        os.utime(recent, (young, young))
+        target = home / "x"
+        seed_session(home, pending=[{"path": str(target), "mode": "r"}])
+        run_record(home, tool="Read", path=target, cwd=project)
+        assert recent.exists()
+
     def test_corrupt_session_file_is_inert(self, home, project):
         f = seed_session(home)
         f.write_text("{corrupt")
@@ -1391,12 +1557,23 @@ class TestRecord:
 
 
 class TestConcurrency:
-    def test_parallel_pendings_never_mint_grants(self, home, project):
+    def test_concurrent_pending_writes_keep_store_valid_json(self, home, project):
+        """Racing read-modify-mv session writes may drop an entry (last mv wins),
+        so the count is not pinned; what must always hold is that the file stays
+        parseable JSON of the {pending: [...], granted: [...]} shape, with no
+        grant ever minted and every surviving entry well-formed."""
         import concurrent.futures as cf
 
         paths = [home / f"c{i}.txt" for i in range(8)]
         with cf.ThreadPoolExecutor(8) as ex:
             list(ex.map(lambda p: run_hook(home, tool="Read", path=p, cwd=project), paths))
         data = json.loads(session_file(home).read_text())
-        assert data["granted"] == []  # racing pendings may drop; grants never appear
-        assert len(data["pending"]) >= 1
+        assert set(data) == {"pending", "granted"}
+        assert data["granted"] == []  # no record call: races cannot mint a grant
+        assert isinstance(data["pending"], list)
+        assert len(data["pending"]) >= 1  # at least the last writer's entry survives
+        wanted = {str(p) for p in paths}
+        for entry in data["pending"]:
+            assert set(entry) == {"path", "mode"}
+            assert entry["mode"] == "r"
+            assert entry["path"] in wanted
