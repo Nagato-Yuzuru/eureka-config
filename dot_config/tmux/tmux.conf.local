@@ -135,6 +135,16 @@ set -g allow-passthrough on
 set -ga update-environment TERM
 set -ga update-environment TERM_PROGRAM
 
+# mise 的会话状态属于启动 server 的那个 shell，不能被新 pane 继承：继承下来的
+# __MISE_DIFF 会让 mise 撤掉"它以前加过"的 PATH 项（工具移出 mise 配置后，例如
+# ~/.cargo/bin 就此消失）。清掉后每个 pane 的 mise 都从头 activate。
+set-environment -gu __MISE_DIFF
+set-environment -gu __MISE_SESSION
+set-environment -gu __MISE_ORIG_PATH
+set-environment -gu __MISE_ENV_CACHE_KEY
+set-environment -gu __MISE_ZSH_CHPWD_RAN
+set-environment -gu __MISE_ZSH_PRECMD_RUN
+
 # 2. 定义调色板 (Tokyo Night Palette)
 tmux_conf_theme_colour_1="#1a1b26"    # Black (Night BG)
 tmux_conf_theme_colour_2="#24283b"    # Dark Grey (Storm BG) - 状态栏底色
