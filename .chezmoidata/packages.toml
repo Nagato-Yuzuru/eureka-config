@@ -110,6 +110,18 @@ overrides = [
 ]
 completions = { uv = "uv generate-shell-completion zsh" }
 
+[packages.rustup]
+on = ["darwin", "linux"]
+via = "upstream"
+upstream = { command = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path -c rust-analyzer -c rust-src", creates = "${CARGO_HOME:-$HOME/.cargo}/bin/rustup" }
+
+[packages.rustup.completions]
+rustup = "rustup completions zsh rustup"
+# nightly's engine (rust-lang/cargo#14520) is dynamic — completes -p/--bin/
+# --features from the workspace — and its script must be sourced, hence the
+# stub; without a nightly toolchain, the toolchain's static _cargo.
+cargo = "rustup toolchain list | grep -q '^nightly' && clap_stub cargo 'CARGO_COMPLETE=zsh cargo +nightly' || rustup completions zsh cargo"
+
 [packages.make]
 on = ["darwin", "linux"]
 
@@ -258,20 +270,6 @@ completions = { tailscale = "tailscale completion zsh" }
 [packages.go]
 on = ["darwin", "linux"]
 via = "mise"
-
-# components: rustup's default profile ships neither, and both are what the
-# editor needs (rust-src for std completion).
-[packages.rust]
-on = ["darwin", "linux"]
-via = "mise"
-mise = { version = "stable", components = ["rust-analyzer", "rust-src"] }
-
-[packages.rust.completions]
-rustup = "rustup completions zsh rustup"
-# nightly's engine (rust-lang/cargo#14520) is dynamic — completes -p/--bin/
-# --features from the workspace — and its script must be sourced, hence the
-# stub; without a nightly toolchain, the toolchain's static _cargo.
-cargo = "rustup toolchain list | grep -q '^nightly' && clap_stub cargo 'CARGO_COMPLETE=zsh cargo +nightly' || rustup completions zsh cargo"
 
 [packages.deno]
 on = ["darwin", "linux"]

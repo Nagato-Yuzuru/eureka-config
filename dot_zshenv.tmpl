@@ -1,5 +1,11 @@
 export PATH="${HOME}/.local/bin:$PATH"
 
+# rustup's proxies (cargo, rustc, rust-analyzer) and `cargo install` binaries.
+case ":$PATH:" in
+*":${HOME}/.cargo/bin:"*) ;;
+*) export PATH="${HOME}/.cargo/bin:$PATH" ;;
+esac
+
 export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_DATA_HOME="$HOME/{{ .xdg.dataHome }}"
 export XDG_STATE_HOME="$HOME/{{ .xdg.stateHome }}"
