@@ -51,8 +51,8 @@ EOF
 # Bootstrap tools installed by the project's own installer: mise and uv are backends this
 # script uses, and nothing else here can supply them where no package manager builds for
 # this machine. After the system packages, which is where the ones they need come from on a
-# Linux box; before anything that needs mise or uv. Each command is declared to converge, so
-# re-running this script re-runs them harmlessly.
+# Linux box; before anything that needs mise or uv. Each line skips its installer when the
+# executable it creates is already there, so re-running this script re-runs them harmlessly.
 while IFS= read -r cmd; do
     [ -n "$cmd" ] || continue
     sh -c "$cmd"

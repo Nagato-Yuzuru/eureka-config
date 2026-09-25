@@ -557,17 +557,21 @@ RENDER_CASES = [
         },
     ),
     RenderCase(
-        "upstream-renders-its-command-and-reaches-no-package-manager",
+        "upstream-renders-its-command-guarded-by-what-it-creates",
         {
             "boot": {
                 "on": ["darwin", "linux"],
                 "via": "upstream",
-                "upstream": {"command": "curl https://x/install.sh | sh"},
+                "upstream": {"command": "curl https://x/install.sh | sh", "creates": "$HOME/b"},
             }
         },
         {
-            ("upstream-installs", "darwin-arm64"): ["curl https://x/install.sh | sh"],
-            ("upstream-installs", "linux-arm64"): ["curl https://x/install.sh | sh"],
+            ("upstream-installs", "darwin-arm64"): [
+                '[ -x "$HOME/b" ] || curl https://x/install.sh | sh'
+            ],
+            ("upstream-installs", "linux-arm64"): [
+                '[ -x "$HOME/b" ] || curl https://x/install.sh | sh'
+            ],
             ("brewfile", "darwin-arm64"): [],
             ("dnf-list", "linux-arm64"): [],
         },
@@ -648,14 +652,21 @@ REJECTS = [
         },
         "packages.b: uv tool 't' on darwin-arm64 is already installed by packages.a",
     ),
-    Reject(
-        "one-upstream-command-twice",
+    Reject(  # two installers, one executable
+        "one-upstream-executable-twice",
         {
-            "a": {"on": ["darwin"], "via": "upstream", "upstream": {"command": "curl x | sh"}},
-            "b": {"on": ["darwin"], "via": "upstream", "upstream": {"command": "curl x | sh"}},
+            "a": {
+                "on": ["darwin"],
+                "via": "upstream",
+                "upstream": {"command": "a", "creates": "x"},
+            },
+            "b": {
+                "on": ["darwin"],
+                "via": "upstream",
+                "upstream": {"command": "b", "creates": "x"},
+            },
         },
-        "packages.b: upstream command 'curl x | sh' on darwin-arm64 is already installed by"
-        " packages.a",
+        "packages.b: upstream executable 'x' on darwin-arm64 is already installed by packages.a",
     ),
     Reject(  # checked on the resolved package, so an override's rename counts
         "a-clash-an-override-makes",
@@ -723,6 +734,22 @@ REJECTS = [
         "upstream-without-a-command",
         {"foo": {"on": ["darwin"], "via": "upstream"}},
         "packages.foo.upstream: Field required",
+    ),
+    Reject(  # without it, a re-run would re-install over the tool's own self-update
+        "upstream-without-what-it-creates",
+        {"foo": {"on": ["darwin"], "via": "upstream", "upstream": {"command": "x"}}},
+        "packages.foo.upstream.creates: Field required",
+    ),
+    Reject(  # rendered inside sh double quotes
+        "upstream-creates-that-escapes-its-quotes",
+        {
+            "foo": {
+                "on": ["darwin"],
+                "via": "upstream",
+                "upstream": {"command": "x", "creates": 'a" b'},
+            }
+        },
+        'packages.foo.upstream.creates: rendered inside sh double quotes, so no ", ` or \\',
     ),
     Reject(
         "brew-is-a-formula-or-a-cask-not-both",

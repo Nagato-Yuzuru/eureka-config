@@ -338,16 +338,22 @@
     },
     "Upstream": {
       "additionalProperties": false,
-      "description": "Installed by the project's own installer, because no package manager here can.\n\n`command` runs again whenever this machine's rendered set changes, so it must\nconverge rather than assume a clean machine: keep the installer's own skip or\noverwrite behaviour (`MISE_INSTALL_SKIP_IF_EXISTS`), never add uninstall steps.",
+      "description": "Installed by the project's own installer, because no package manager here can.\n\nThe install script re-runs whenever this machine's rendered set changes; `command`\nruns only while `creates` is not an executable, so an installed tool is left to its\nown self-update. The command never uninstalls.",
       "properties": {
         "command": {
           "minLength": 1,
           "title": "Command",
           "type": "string"
+        },
+        "creates": {
+          "pattern": "^[^\"`\\\\]+$",
+          "title": "Creates",
+          "type": "string"
         }
       },
       "required": [
-        "command"
+        "command",
+        "creates"
       ],
       "title": "Upstream",
       "type": "object"

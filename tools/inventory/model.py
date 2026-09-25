@@ -19,6 +19,7 @@ from collections.abc import Mapping
 from typing import Annotated, Any, Literal, get_args
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -169,15 +170,30 @@ class Uv(Strict):
     version: NonEmpty | None = None  # spelled `name@version` for `uv tool install`
 
 
+def _sh_quotable(v: str) -> str:
+    if any(c in v for c in '"`\\'):
+        raise ValueError('rendered inside sh double quotes, so no ", ` or \\')
+    return v
+
+
+ShPath = Annotated[
+    NonEmpty,
+    AfterValidator(_sh_quotable),
+    WithJsonSchema({"type": "string", "pattern": r'^[^"`\\]+$'}),
+]
+
+
 class Upstream(Strict):
     """Installed by the project's own installer, because no package manager here can.
 
-    `command` runs again whenever this machine's rendered set changes, so it must
-    converge rather than assume a clean machine: keep the installer's own skip or
-    overwrite behaviour (`MISE_INSTALL_SKIP_IF_EXISTS`), never add uninstall steps.
+    The install script re-runs whenever this machine's rendered set changes; `command`
+    runs only while `creates` is not an executable, so an installed tool is left to its
+    own self-update. The command never uninstalls.
     """
 
     command: NonEmpty  # sh, run as written; no default — an empty install is not one
+    # the executable the command leaves, in sh double-quote syntax ("$HOME/.local/bin/x")
+    creates: ShPath
 
 
 Spec = Brew | Dnf | Mise | Uv | Upstream

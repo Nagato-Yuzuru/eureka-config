@@ -86,9 +86,11 @@ def uv_tools(rs: Iterable[Resolved]) -> list[str]:
 
 
 def upstream_installs(rs: Iterable[Resolved]) -> list[str]:
-    """One installer command per line, run as written. They are the bootstrap tools, so
-    the install script runs them before anything that needs them."""
-    return [r.spec.command for r in rs if isinstance(r.spec, Upstream)]
+    """One installer command per line, guarded by what it creates. They are the bootstrap
+    tools, so the install script runs them before anything that needs them."""
+    return [
+        f'[ -x "{r.spec.creates}" ] || {r.spec.command}' for r in rs if isinstance(r.spec, Upstream)
+    ]
 
 
 def completions(rs: Iterable[Resolved]) -> list[str]:

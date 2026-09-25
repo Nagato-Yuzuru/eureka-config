@@ -214,7 +214,7 @@ def _installs(spec: Spec, name: str) -> tuple[str, str]:
     """What a resolved package occupies on its machine, as (kind, identity): two packages
     with the same pair would install one thing twice. Formula and cask are separate
     namespaces in a Brewfile; an upstream package is named by its key, so its identity is
-    the command it runs."""
+    the executable it creates."""
     match spec:
         case Formula():
             return "brew formula", name
@@ -226,8 +226,8 @@ def _installs(spec: Spec, name: str) -> tuple[str, str]:
             return "mise tool", name
         case Uv():
             return "uv tool", name
-        case Upstream(command=command):
-            return "upstream command", command
+        case Upstream(creates=creates):
+            return "upstream executable", creates
         case _:
             assert_never(spec)
 

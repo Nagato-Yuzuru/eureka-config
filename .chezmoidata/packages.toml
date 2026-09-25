@@ -31,12 +31,11 @@
 #                                    ones installed with the tool.
 #   uv        { name | version }     via: uv only. name on PyPI; version spelled
 #                                    `name@version`.
-#   upstream  { command }            via: upstream only. The project's own
-#                                    installer, run as written. It runs again
-#                                    whenever this machine's rendered set changes,
-#                                    so it must converge rather than assume a clean
-#                                    machine — keep the installer's own skip or
-#                                    overwrite behaviour. It installs; removing the
+#   upstream  { command | creates }  via: upstream only. The project's own
+#                                    installer, run as written, only while
+#                                    `creates` (the executable it leaves, sh
+#                                    syntax) is missing — an installed tool
+#                                    updates itself. It installs; removing the
 #                                    copy an old backend left is done by hand.
 #   completions map of command -> sh command whose stdout is that command's zsh
 #             completion. Compiled into ~/.config/mise/tasks/refresh-completions
@@ -95,7 +94,7 @@ on = ["darwin"]
 [packages.mise]
 on = ["darwin", "linux"]
 via = "upstream"
-upstream = { command = "curl https://mise.run | MISE_INSTALL_SKIP_IF_EXISTS=1 sh" }
+upstream = { command = "curl https://mise.run | sh", creates = "$HOME/.local/bin/mise" }
 completions = { mise = "mise completion zsh" }
 
 # always latest, never multi-version — and needed by chezmoi's own scripts before mise tools exist.
@@ -107,7 +106,7 @@ completions = { mise = "mise completion zsh" }
 [packages.uv]
 on = ["darwin", "linux"]
 overrides = [
-  { when = "darwin/amd64", via = "upstream", upstream = { command = "curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh" } },
+  { when = "darwin/amd64", via = "upstream", upstream = { command = "curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh", creates = "$HOME/.local/bin/uv" } },
 ]
 completions = { uv = "uv generate-shell-completion zsh" }
 
