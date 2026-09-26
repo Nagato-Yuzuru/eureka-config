@@ -223,16 +223,15 @@ function yazi() {
 alias cleanproxy='networksetup -setwebproxystate Wi-Fi off && networksetup -setsecurewebproxystate Wi-Fi off && networksetup -setautoproxystate Wi-Fi off'
 {{- end }}
 
-function wellcome() {
+function welcome() {
     if ! command -v cowsay &>/dev/null; then return; fi
 
     local cows=(alpaca bud-frogs cheese cupcake elephant eyes fox llama milk moose stegosaurus sus turtle tux)
-    local cow=$(shuf -n 1 -e "${cows[@]}")
-    local mood=$(shuf -n 1 -e -- -b -d -g -p -s -t -w)
+    local moods=(-b -d -g -p -s -t -w)
 
     figlet -c "Welcome $1" |
-        cowsay -n "$mood" -f "$cow" |
+        cowsay -n "${moods[RANDOM % $#moods + 1]}" -f "${cows[RANDOM % $#cows + 1]}" |
         lolcat
 }
 
-[[ -o interactive && -z "${INTELLIJ_ENVIRONMENT_READER}" ]] && wellcome "YuzuRu"
+[[ -o interactive && -o login && -z $TMUX && -z $INTELLIJ_ENVIRONMENT_READER ]] && welcome "YuzuRu"
