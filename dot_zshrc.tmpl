@@ -22,7 +22,9 @@ path=("$HOME/.local/bin" $path)
 # MISE
 
 eval "$(mise activate zsh)"
-eval "$(fnox activate zsh)"
+{{- if eq .chezmoi.os "darwin" }}
+eval "$(fnox activate zsh)"  # darwin-only in packages.toml
+{{- end }}
 
 {{- if eq .chezmoi.os "darwin" }}
 
