@@ -122,6 +122,11 @@ rustup = "rustup completions zsh rustup"
 # stub; without a nightly toolchain, the toolchain's static _cargo.
 cargo = "rustup toolchain list | grep -q '^nightly' && clap_stub cargo 'CARGO_COMPLETE=zsh cargo +nightly' || rustup completions zsh cargo"
 
+[packages.cargo-binstall]
+on = ["darwin", "linux"]
+via = "mise"
+
+
 [packages.make]
 on = ["darwin", "linux"]
 
@@ -293,6 +298,10 @@ completions = { golangci-lint = "golangci-lint completion zsh" }
 
 [packages.usage]
 on = ["darwin", "linux"]
+via = "mise"
+
+[packages.fnox]
+on = ["darwin"]
 via = "mise"
 
 [packages.cmake]
