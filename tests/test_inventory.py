@@ -13,7 +13,7 @@ invariants every valid inventory satisfies.
 
 Plus: the chezmoi consumers render to valid shell/toml with the artifact's lines inside, and
 the `artifact` template refuses stale data and machines nobody declared. Those run against a
-synthetic chezmoi source (the `source` fixture): tests/fixtures/inventory/.chezmoidata, its
+synthetic chezmoi source (the `source` fixture): tests/fixtures/inventory/chezmoidata, its
 compiled `.rendered/`, and copies of the templates under test — chosen so that every artifact
 is non-empty and machine-specific, which a real-data consumer test could not rely on.
 """
@@ -53,7 +53,9 @@ DATA = REPO_ROOT / ".chezmoidata"  # the real data: invariants only
 SCHEMA = REPO_ROOT / SCHEMA_DIR
 
 # The synthetic inventory every other test runs on (see its packages.toml for the design).
-FIXTURE_DATA = Path(__file__).resolve().parent / "fixtures" / "inventory" / ".chezmoidata"
+# Not named `.chezmoidata`: chezmoi merges every such directory in the source tree into its
+# data, .chezmoiignore notwithstanding, and this one sorts after the real one.
+FIXTURE_DATA = Path(__file__).resolve().parent / "fixtures" / "inventory" / "chezmoidata"
 SYN = Inventory.load(FIXTURE_DATA)
 MACHINES = list(SYN.machines)
 GENERATED = load_data(FIXTURE_DATA / "zsh.toml")["zsh"]["generatedCompletions"]
@@ -879,6 +881,25 @@ def test_real_data_compiles_every_artifact_for_every_declared_machine():
     real = Inventory.load(DATA)
     want = {f"{m}/{a}" for m in real.machines for a in ARTIFACTS} | {STAMP}
     assert set(render_tree(real, DATA)) == want
+
+
+def test_real_data_is_the_only_chezmoidata_in_the_source():
+    """chezmoi reads every `.chezmoidata` directory or `.chezmoidata.<format>` file in the source
+    tree, ignored paths included, and merges them over the real data: a test fixture named so
+    once pointed every XDG base directory at the fixture's values."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
+    ).stdout.split("\0")
+
+    def is_data(path: Path) -> bool:
+        return ".chezmoidata" in path.parent.parts or path.name.startswith(".chezmoidata.")
+
+    strays = [
+        p
+        for p in tracked
+        if p and is_data(Path(p)) and Path(p).parent != DATA.relative_to(REPO_ROOT)
+    ]
+    assert strays == []
 
 
 # --- the synthetic source: what the consumer tests can rely on ----------------------------------
