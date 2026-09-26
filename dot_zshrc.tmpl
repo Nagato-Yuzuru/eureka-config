@@ -1,17 +1,23 @@
+{{- $brewPrefix := "" }}
+{{- if eq .chezmoi.os "darwin" }}{{ $brewPrefix = ternary "/opt/homebrew" "/usr/local" (eq .chezmoi.arch "arm64") }}{{ end -}}
 export LANG=en_US.UTF-8
 
 {{- if eq .chezmoi.os "darwin" }}
-if [[ -x /opt/homebrew/bin/brew ]]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
-elif [[ -x /usr/local/bin/brew ]]; then
-    eval "$(/usr/local/bin/brew shellenv)"
-fi
+
+# What `brew shellenv` prints for this prefix, written out: forking brew cost more than every
+# other eval here combined. Its `export FPATH` is left out on purpose — fpath is built below,
+# and an exported FPATH leaks this shell's entries into every nested one.
+export HOMEBREW_PREFIX="{{ $brewPrefix }}"
+export HOMEBREW_CELLAR="{{ $brewPrefix }}/Cellar"
+export HOMEBREW_REPOSITORY="{{ ternary "/opt/homebrew" "/usr/local/Homebrew" (eq .chezmoi.arch "arm64") }}"
+export INFOPATH="{{ $brewPrefix }}/share/info:${INFOPATH:-}"
+path=("{{ $brewPrefix }}/bin" "{{ $brewPrefix }}/sbin" $path)
 {{- end }}
 
-# .zshenv puts ~/.local/bin first, but `brew shellenv` above prepends its own prefix and
-# takes the lead back. mise and uv install there from upstream, so re-assert it — otherwise
-# `mise activate` below runs whatever copy a package manager left behind.
-path=("$HOME/.local/bin" ${path:#$HOME/.local/bin})
+# .zshenv puts ~/.local/bin first, but the Homebrew prefix above takes the lead back. mise and
+# uv install there from upstream, so re-assert it — otherwise `mise activate` below runs
+# whatever copy a package manager left behind. (`typeset -U path` in .zshenv drops the later copy.)
+path=("$HOME/.local/bin" $path)
 
 # MISE
 
@@ -20,16 +26,8 @@ eval "$(fnox activate zsh)"
 
 {{- if eq .chezmoi.os "darwin" }}
 
-local brew_prefix="$(brew --prefix)"
-local gnu_path=""
-
-for gnu in make grep gawk; do
-    gnu_path="${brew_prefix}/opt/${gnu}/libexec/gnubin:$gnu_path"
-done
-
-export PATH="$gnu_path$PATH"
-
-export PATH="$PATH:${HOME}/Library/Application Support/JetBrains/Toolbox/scripts"
+path=("{{ $brewPrefix }}"/opt/{gawk,grep,make}/libexec/gnubin $path)
+path+=("${HOME}/Library/Application Support/JetBrains/Toolbox/scripts")
 {{- end }}
 
 export EDITOR=nvim
@@ -41,7 +39,7 @@ zsh_plugins_zsh=${ZDOTDIR:-$HOME}/.zsh_plugins.zsh
 
 
 {{- if eq .chezmoi.os "darwin" }}
-source "${brew_prefix}/opt/antidote/share/antidote/antidote.zsh"
+source "{{ $brewPrefix }}/opt/antidote/share/antidote/antidote.zsh"
 {{- else if eq .chezmoi.os "linux" }}
 source "${XDG_DATA_HOME}/zsh/antidote/antidote.zsh"  # cloned by .chezmoiexternal.toml.tmpl
 {{- end }}
@@ -64,21 +62,24 @@ fpath=(
     "${XDG_DATA_HOME}/zsh/site-functions"
     "$(antidote path zsh-users/zsh-completions)/src"
 {{- if eq .chezmoi.os "darwin" }}
-    "$(brew --prefix)/share/zsh/site-functions"
+    "{{ $brewPrefix }}/share/zsh/site-functions"
 {{- end }}
     "${fpath[@]}"
     "${XDG_CACHE_HOME}/{{ .zsh.generatedCompletions }}"
 )
 
-fpath=(${(u)fpath})
-
 autoload -Uz compinit
 
-if [[ -n ${ZDOTDIR:-$HOME}/.zcompdump(#qNmh+24) ]]; then
+# Full compinit (security audit + dump rebuild) once a day, the cached dump otherwise. An array
+# assignment, not `[[ -n …(#q…) ]]`: that form needs extendedglob, and without it the test
+# is a non-empty literal string, always true.
+zcompdump_stale=(${ZDOTDIR:-$HOME}/.zcompdump(Nmh+24))
+if [[ ! -s ${ZDOTDIR:-$HOME}/.zcompdump ]] || (( $#zcompdump_stale )); then
     compinit
 else
     compinit -C
 fi
+unset zcompdump_stale
 
 { zcompile ${ZDOTDIR:-$HOME}/.zcompdump; } &|
 
@@ -117,21 +118,14 @@ if command -v fzf &>/dev/null; then
     source <(fzf --zsh)
 fi
 
-{{- if eq .chezmoi.os "darwin" }}
-if command -v gdircolors &>/dev/null; then
-    eval "$(gdircolors -b)"
+{{- $dircolors := "dircolors" }}
+{{- if eq .chezmoi.os "darwin" }}{{ $dircolors = "gdircolors" }}{{ end }}
+if command -v {{ $dircolors }} &>/dev/null; then
+    eval "$({{ $dircolors }} -b)"
     zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
 else
     export CLICOLOR=1
 fi
-{{- else if eq .chezmoi.os "linux" }}
-if command -v dircolors &> /dev/null; then
-    eval "$(dircolors -b)"
-    zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
-else
-    export CLICOLOR=1
-fi
-{{- end }}
 
 zstyle ':completion:*:git-checkout:*' sort false
 zstyle ':fzf-tab:complete:*' fzf-preview \

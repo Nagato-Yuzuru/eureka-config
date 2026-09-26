@@ -1,10 +1,11 @@
-export PATH="${HOME}/.local/bin:$PATH"
+# One copy of each entry, the first: every prepend below and in .zshrc moves an entry to the
+# front instead of stacking another copy in each nested shell (tmux, IDE terminals, subshells).
+typeset -U path fpath
+
+path=("${HOME}/.local/bin" $path)
 
 # rustup's proxies (cargo, rustc, rust-analyzer) and `cargo install` binaries.
-case ":$PATH:" in
-*":${HOME}/.cargo/bin:"*) ;;
-*) export PATH="${HOME}/.cargo/bin:$PATH" ;;
-esac
+path=("${HOME}/.cargo/bin" $path)
 
 export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_DATA_HOME="$HOME/{{ .xdg.dataHome }}"
@@ -16,7 +17,4 @@ export XDG_CACHE_HOME="$HOME/{{ .xdg.cacheHome }}"
 export UV_NO_MODIFY_PATH=1
 
 export PNPM_HOME="${XDG_DATA_HOME}/pnpm"
-case ":$PATH:" in
-*":$PNPM_HOME/bin:"*) ;;
-*) export PATH="$PNPM_HOME/bin:$PATH" ;;
-esac
+path=("$PNPM_HOME/bin" $path)
