@@ -102,16 +102,16 @@ upstream = { command = "curl https://mise.run | sh", creates = "$HOME/.local/bin
 completions = { mise = "mise completion zsh" }
 
 # always latest, never multi-version — and needed by chezmoi's own scripts before mise tools exist.
-# darwin/amd64: Homebrew builds no Intel bottle for uv, and only the standalone installer leaves
-# `uv self update` working (a package-managed uv has it disabled). UV_NO_MODIFY_PATH keeps the
-# installer out of the chezmoi-managed shell profiles, here and on every later self-update.
+# The standalone installer on every machine, as for mise: Astral's release binaries are PGO
+# builds (macOS aarch64, Linux x86_64/aarch64; brew's and Fedora's are not), and only they keep
+# `uv self update` (brew's has it disabled, Fedora builds without it). UV_NO_MODIFY_PATH keeps
+# the installer out of the chezmoi-managed shell profiles, here and on every later self-update.
 # completions: neither the standalone installer nor brew's formula ships one (no _uv in its
 # site-functions), so the recipe is the only source on a Mac.
 [packages.uv]
 on = ["darwin", "linux"]
-overrides = [
-  { when = "darwin/amd64", via = "upstream", upstream = { command = "curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh", creates = "$HOME/.local/bin/uv", update = "uv self update" } },
-]
+via = "upstream"
+upstream = { command = "curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh", creates = "$HOME/.local/bin/uv", update = "uv self update" }
 completions = { uv = "uv generate-shell-completion zsh" }
 
 [packages.rustup]

@@ -63,10 +63,9 @@ done <<'EOF'
 EOF
 
 # Python CLIs, one venv each under `uv tool dir`, entry points in ~/.local/bin. uv is
-# installed above, by this machine's package manager or by its own installer. `uv tool
-# install` is idempotent: an already-installed tool is left alone (upgrades are
-# `uv tool upgrade`, by hand, like the system packages'); a `name@version` line re-pins
-# it when the pin moves.
+# installed above, by its own installer. `uv tool install` is idempotent: an
+# already-installed tool is left alone (upgrades are `uv tool upgrade`, by hand, like the
+# system packages'); a `name@version` line re-pins it when the pin moves.
 while read -r spec; do
     [ -n "$spec" ] || continue
     uv tool install "$spec"
