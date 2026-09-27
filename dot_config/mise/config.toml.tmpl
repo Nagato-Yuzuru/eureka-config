@@ -8,6 +8,7 @@ python.uv_venv_auto = "source" # use uv
 env_cache = true
 env_cache_ttl = "6h"
 npm.package_manager = "pnpm"
+minimum_release_age = "7d"
 # mise installs from mise.run (packages.toml), so no `brew upgrade`/`dnf upgrade` carries it.
 # It talks to aqua, GitHub releases and language registries that drift, so a stale
 # CLI breaks tool resolution, not just mise itself. Interval: auto_update_check_duration.
