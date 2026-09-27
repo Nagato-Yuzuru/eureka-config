@@ -338,7 +338,7 @@
     },
     "Upstream": {
       "additionalProperties": false,
-      "description": "Installed by the project's own installer, because no package manager here can.\n\nThe install script re-runs whenever this machine's rendered set changes; `command`\nruns only while `creates` is not an executable, so an installed tool is left to its\nown self-update. The command never uninstalls.",
+      "description": "Installed by the project's own installer, because no package manager here can.\n\nThe install script re-runs whenever this machine's rendered set changes; `command`\nruns only while `creates` is not an executable, so it installs and never upgrades.\nNo package manager upgrades it either: `update` is how, run by `mise run\nupgrade-upstream` for each one installed here. Absent for a tool that updates itself\nunasked (mise's auto_update). The command never uninstalls.",
       "properties": {
         "command": {
           "minLength": 1,
@@ -348,6 +348,12 @@
         "creates": {
           "pattern": "^[^\"`\\\\]+$",
           "title": "Creates",
+          "type": "string"
+        },
+        "update": {
+          "default": null,
+          "minLength": 1,
+          "title": "Update",
           "type": "string"
         }
       },

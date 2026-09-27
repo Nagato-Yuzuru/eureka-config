@@ -68,7 +68,8 @@ REFRESH_SCRIPT = Path("run_onchange_after_refresh-completions.sh.tmpl")
 MISE_CONFIG = Path("dot_config") / "mise" / "config.toml.tmpl"
 REFRESH_TASK = MISE_TASKS / "executable_refresh-completions.tmpl"
 AUDIT_TASK = MISE_TASKS / "executable_audit-completions.tmpl"
-CONSUMERS = (INSTALL_SCRIPT, REFRESH_SCRIPT, MISE_CONFIG, REFRESH_TASK, AUDIT_TASK)
+UPGRADE_TASK = MISE_TASKS / "executable_upgrade-upstream.tmpl"
+CONSUMERS = (INSTALL_SCRIPT, REFRESH_SCRIPT, MISE_CONFIG, REFRESH_TASK, AUDIT_TASK, UPGRADE_TASK)
 
 # --- harness ------------------------------------------------------------------------------------
 
@@ -558,13 +559,31 @@ RENDER_CASES = [
             ("completions", "darwin-amd64"): ["c b-recipe"],
         },
     ),
+    RenderCase(  # a tool that updates itself unasked, like mise with auto_update
+        "upstream-without-an-update-installs-but-renders-no-update",
+        {
+            "boot": {
+                "on": ["darwin"],
+                "via": "upstream",
+                "upstream": {"command": "i", "creates": "$HOME/b"},
+            }
+        },
+        {
+            ("upstream-installs", "darwin-arm64"): ['[ -x "$HOME/b" ] || i'],
+            ("upstream-updates", "darwin-arm64"): [],
+        },
+    ),
     RenderCase(
         "upstream-renders-its-command-guarded-by-what-it-creates",
         {
             "boot": {
                 "on": ["darwin", "linux"],
                 "via": "upstream",
-                "upstream": {"command": "curl https://x/install.sh | sh", "creates": "$HOME/b"},
+                "upstream": {
+                    "command": "curl https://x/install.sh | sh",
+                    "creates": "$HOME/b",
+                    "update": "b self update",
+                },
             }
         },
         {
@@ -574,6 +593,8 @@ RENDER_CASES = [
             ("upstream-installs", "linux-arm64"): [
                 '[ -x "$HOME/b" ] || curl https://x/install.sh | sh'
             ],
+            ("upstream-updates", "darwin-arm64"): ['if [ -x "$HOME/b" ]; then b self update; fi'],
+            ("upstream-updates", "linux-arm64"): ['if [ -x "$HOME/b" ]; then b self update; fi'],
             ("brewfile", "darwin-arm64"): [],
             ("dnf-list", "linux-arm64"): [],
         },
@@ -739,7 +760,13 @@ REJECTS = [
     ),
     Reject(  # without it, a re-run would re-install over the tool's own self-update
         "upstream-without-what-it-creates",
-        {"foo": {"on": ["darwin"], "via": "upstream", "upstream": {"command": "x"}}},
+        {
+            "foo": {
+                "on": ["darwin"],
+                "via": "upstream",
+                "upstream": {"command": "x"},
+            }
+        },
         "packages.foo.upstream.creates: Field required",
     ),
     Reject(  # rendered inside sh double quotes
@@ -1174,6 +1201,60 @@ def test_mise_config_renders_the_tools_table(machine: str, source: Path):
         "postinstall must stay on the changed-only path — a bare refresh regenerates "
         "every recipe after any mise install session, in any directory"
     )
+
+
+@pytest.mark.parametrize("machine", MACHINES)
+def test_upgrade_upstream_task_renders_to_valid_bash(machine: str, source: Path, tmp_path: Path):
+    script = tmp_path / "upgrade-upstream"
+    rendered = chezmoi_render(source / UPGRADE_TASK, machine, source)
+    script.write_text(rendered)
+    check_shell(script)
+    assert heredoc(rendered, "EOF") == lines(SYN, "upstream-updates", machine)
+
+
+def run_upgrade_task(
+    source: Path, machine: str, tmp_path: Path, installed: Mapping[str, str]
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Render this machine's upgrade-upstream task and run it with each `installed` tool
+    (name -> stub body) present at $HOME/.local/bin/<name>, also on PATH, recording its argv
+    to `<name>.log`. The fixture's upstream tools create and update themselves by that name."""
+    home = tmp_path / "home"
+    bin_dir = home / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    for name, body in installed.items():
+        (bin_dir / name).write_text(f"#!/bin/sh\n{recorder(tmp_path / f'{name}.log')}\n{body}\n")
+        (bin_dir / name).chmod(0o755)
+    script = tmp_path / "upgrade-upstream"
+    script.write_text(chezmoi_render(source / UPGRADE_TASK, machine, source))
+    proc = subprocess.run(
+        [BASH, str(script)],
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(home)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return proc, tmp_path
+
+
+@pytest.mark.parametrize("machine", MACHINES)
+def test_a_failing_update_does_not_skip_the_rest(machine: str, source: Path, tmp_path: Path):
+    """boot-<machine> sorts before bootshared, so its failure comes first; the shared tool is
+    still updated, and the failure still reaches the caller."""
+    proc, logs = run_upgrade_task(source, machine, tmp_path, {machine: "exit 1", "shared": ""})
+    assert proc.returncode != 0, "a failed update must reach the exit status"
+    assert (logs / f"{machine}.log").read_text().splitlines() == ["self-update"]
+    assert (logs / "shared.log").read_text().splitlines() == ["self-update"], (
+        "the update after a failing one was skipped"
+    )
+
+
+@pytest.mark.parametrize("machine", MACHINES)
+def test_an_upstream_tool_not_installed_here_is_skipped(machine: str, source: Path, tmp_path: Path):
+    """Supplying a missing tool is the install script's job; its absence is not a failure."""
+    proc, logs = run_upgrade_task(source, machine, tmp_path, {"shared": ""})
+    assert proc.returncode == 0, proc.stderr
+    assert (logs / "shared.log").read_text().splitlines() == ["self-update"]
+    assert not (logs / f"{machine}.log").exists()
 
 
 @pytest.mark.parametrize("machine", MACHINES)

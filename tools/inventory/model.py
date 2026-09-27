@@ -187,13 +187,16 @@ class Upstream(Strict):
     """Installed by the project's own installer, because no package manager here can.
 
     The install script re-runs whenever this machine's rendered set changes; `command`
-    runs only while `creates` is not an executable, so an installed tool is left to its
-    own self-update. The command never uninstalls.
+    runs only while `creates` is not an executable, so it installs and never upgrades.
+    No package manager upgrades it either: `update` is how, run by `mise run
+    upgrade-upstream` for each one installed here. Absent for a tool that updates itself
+    unasked (mise's auto_update). The command never uninstalls.
     """
 
     command: NonEmpty  # sh, run as written; no default — an empty install is not one
     # the executable the command leaves, in sh double-quote syntax ("$HOME/.local/bin/x")
     creates: ShPath
+    update: NonEmpty | None = None  # sh, run as written, only while `creates` is an executable
 
 
 Spec = Brew | Dnf | Mise | Uv | Upstream

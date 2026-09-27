@@ -3,7 +3,7 @@
 
 Every artifact is one line per package in key order, in the exact syntax the
 consumer reads: Brewfile lines, dnf names and repos, mise `[tools]` entries,
-`uv tool install` specs, upstream installer commands, `<command> <recipe>` for
+`uv tool install` specs, upstream installer and update commands, `<command> <recipe>` for
 refresh-completions and `<mise tool> <command>...` for its --changed filter.
 STAMP is the hash of the data files the tree was compiled from; the `artifact`
 template recomputes it and refuses to serve a stale tree.
@@ -93,6 +93,16 @@ def upstream_installs(rs: Iterable[Resolved]) -> list[str]:
     ]
 
 
+def upstream_updates(rs: Iterable[Resolved]) -> list[str]:
+    """One update command per line, for each upstream tool that declares one, run only where
+    it is installed: a missing tool is the install script's to supply, not a failure."""
+    return [
+        f'if [ -x "{r.spec.creates}" ]; then {r.spec.update}; fi'
+        for r in rs
+        if isinstance(r.spec, Upstream) and r.spec.update
+    ]
+
+
 def completions(rs: Iterable[Resolved]) -> list[str]:
     """`<command> <recipe>` for every package installing here that declares one."""
     return [f"{cmd} {recipe}" for r in rs for cmd, recipe in sorted(r.completions.items())]
@@ -116,6 +126,7 @@ ARTIFACTS: dict[str, Callable[[Iterable[Resolved]], list[str]]] = {
     "mise-tools": mise_tools,
     "uv-tools": uv_tools,
     "upstream-installs": upstream_installs,
+    "upstream-updates": upstream_updates,
     "completions": completions,
     "mise-completions": mise_completions,
 }

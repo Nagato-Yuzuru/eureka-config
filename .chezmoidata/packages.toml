@@ -31,12 +31,16 @@
 #                                    ones installed with the tool.
 #   uv        { name | version }     via: uv only. name on PyPI; version spelled
 #                                    `name@version`.
-#   upstream  { command | creates }  via: upstream only. The project's own
-#                                    installer, run as written, only while
-#                                    `creates` (the executable it leaves, sh
-#                                    syntax) is missing — an installed tool
-#                                    updates itself. It installs; removing the
-#                                    copy an old backend left is done by hand.
+#   upstream  { command | creates | update }   via: upstream only. command:
+#                                    the project's own installer, run as
+#                                    written, only while `creates` (the
+#                                    executable it leaves, sh syntax) is
+#                                    missing — it installs, never upgrades.
+#                                    update: the sh command that upgrades it,
+#                                    run by `mise run upgrade-upstream`; omit it
+#                                    only for a tool that updates itself unasked.
+#                                    Removing the copy an old backend left is
+#                                    done by hand.
 #   completions map of command -> sh command whose stdout is that command's zsh
 #             completion. Compiled into ~/.config/mise/tasks/refresh-completions
 #             (run by mise's postinstall hook, and by chezmoi whenever this
@@ -106,14 +110,14 @@ completions = { mise = "mise completion zsh" }
 [packages.uv]
 on = ["darwin", "linux"]
 overrides = [
-  { when = "darwin/amd64", via = "upstream", upstream = { command = "curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh", creates = "$HOME/.local/bin/uv" } },
+  { when = "darwin/amd64", via = "upstream", upstream = { command = "curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh", creates = "$HOME/.local/bin/uv", update = "uv self update" } },
 ]
 completions = { uv = "uv generate-shell-completion zsh" }
 
 [packages.rustup]
 on = ["darwin", "linux"]
 via = "upstream"
-upstream = { command = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path -c rust-analyzer -c rust-src", creates = "${CARGO_HOME:-$HOME/.cargo}/bin/rustup" }
+upstream = { command = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path -c rust-analyzer -c rust-src", creates = "${CARGO_HOME:-$HOME/.cargo}/bin/rustup", update = "rustup update" }
 
 [packages.rustup.completions]
 rustup = "rustup completions zsh rustup"

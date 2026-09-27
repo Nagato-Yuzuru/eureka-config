@@ -10,28 +10,28 @@
 common = { on = ["darwin", "linux"], dnf = { copr = "synth/common" } }
 kit = { on = ["darwin", "linux"], via = "mise", mise = { version = "stable", components = ["kit-src", "kit-doc"] }, completions = { kitc = "kitc completions zsh", kitd = "kitd completions zsh" } }
 pyshared = { on = ["darwin", "linux"], via = "uv", uv = { name = "py-shared", version = "2.0" } }
-bootshared = { on = ["darwin", "linux"], via = "upstream", upstream = { command = "curl -fsSL https://example.invalid/shared.sh | sh", creates = "$HOME/.local/bin/shared" } }
+bootshared = { on = ["darwin", "linux"], via = "upstream", upstream = { command = "curl -fsSL https://example.invalid/shared.sh | sh", creates = "$HOME/.local/bin/shared", update = "shared self-update" } }
 
 # --- darwin/arm64 only --------------------------------------------------------------------
 sys-darwin-arm64 = { on = ["darwin/arm64"], brew = { name = "synth/tap/formula-arm64" } }
 tool-darwin-arm64 = { on = ["darwin/arm64"], via = "mise", mise = { name = "npm:tool-darwin-arm64", version = "1" }, completions = { cmd-darwin-arm64 = "cmd-darwin-arm64 completion zsh" } }
 py-darwin-arm64 = { on = ["darwin/arm64"], via = "uv" }
-boot-darwin-arm64 = { on = ["darwin/arm64"], via = "upstream", upstream = { command = "curl -fsSL https://example.invalid/darwin-arm64.sh | sh", creates = "$HOME/.local/bin/darwin-arm64" } }
+boot-darwin-arm64 = { on = ["darwin/arm64"], via = "upstream", upstream = { command = "curl -fsSL https://example.invalid/darwin-arm64.sh | sh", creates = "$HOME/.local/bin/darwin-arm64", update = "darwin-arm64 self-update" } }
 
 # --- darwin/amd64 only --------------------------------------------------------------------
 sys-darwin-amd64 = { on = ["darwin/amd64"], brew = { cask = "cask-amd64" } }
 tool-darwin-amd64 = { on = ["darwin/amd64"], via = "mise", mise = { version = "2" }, completions = { cmd-darwin-amd64 = "cmd-darwin-amd64 completion zsh" } }
 py-darwin-amd64 = { on = ["darwin/amd64"], via = "uv", uv = { version = "0.1" } }
-boot-darwin-amd64 = { on = ["darwin/amd64"], via = "upstream", upstream = { command = "curl -fsSL https://example.invalid/darwin-amd64.sh | sh", creates = "$HOME/.local/bin/darwin-amd64" } }
+boot-darwin-amd64 = { on = ["darwin/amd64"], via = "upstream", upstream = { command = "curl -fsSL https://example.invalid/darwin-amd64.sh | sh", creates = "$HOME/.local/bin/darwin-amd64", update = "darwin-amd64 self-update" } }
 
 # --- linux/arm64 only ---------------------------------------------------------------------
 sys-linux-arm64 = { on = ["linux/arm64"], dnf = { name = "rpm-linux-arm64", copr = "synth/arm64" } }
 tool-linux-arm64 = { on = ["linux/arm64"], via = "mise", mise = { version = "3" }, completions = { cmd-linux-arm64 = "cmd-linux-arm64 completion zsh" } }
 py-linux-arm64 = { on = ["linux/arm64"], via = "uv" }
-boot-linux-arm64 = { on = ["linux/arm64"], via = "upstream", upstream = { command = "curl -fsSL https://example.invalid/linux-arm64.sh | sh", creates = "$HOME/.local/bin/linux-arm64" } }
+boot-linux-arm64 = { on = ["linux/arm64"], via = "upstream", upstream = { command = "curl -fsSL https://example.invalid/linux-arm64.sh | sh", creates = "$HOME/.local/bin/linux-arm64", update = "linux-arm64 self-update" } }
 
 # --- linux/amd64 only ---------------------------------------------------------------------
 sys-linux-amd64 = { on = ["linux/amd64"], dnf = { repofile = "https://example.invalid/amd64.repo" } }
 tool-linux-amd64 = { on = ["linux/amd64"], via = "mise", mise = { version = "4" }, completions = { cmd-linux-amd64 = "cmd-linux-amd64 completion zsh" } }
 py-linux-amd64 = { on = ["linux/amd64"], via = "uv" }
-boot-linux-amd64 = { on = ["linux/amd64"], via = "upstream", upstream = { command = "curl -fsSL https://example.invalid/linux-amd64.sh | sh", creates = "$HOME/.local/bin/linux-amd64" } }
+boot-linux-amd64 = { on = ["linux/amd64"], via = "upstream", upstream = { command = "curl -fsSL https://example.invalid/linux-amd64.sh | sh", creates = "$HOME/.local/bin/linux-amd64", update = "linux-amd64 self-update" } }

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#MISE description="update the tools installed by their own installer (packages.toml via = upstream)"
+# Each package manager upgrades what it installed (`brew upgrade`, `dnf upgrade`, `mise up`,
+# `uv tool upgrade --all`); nothing does that for an upstream install, whose installer only
+# ever runs while its executable is missing. This runs each one's `upstream.update` from
+# .chezmoidata/packages.toml, compiled per machine by `uv run render` (.rendered/) and
+# included by chezmoi; a tool not installed here is skipped.
+#
+# One failing update does not stop the rest; it carries to the exit status. Completions are
+# not regenerated — `mise run refresh-completions` when a new version changes them.
+set -uo pipefail
+
+status=0
+# The list comes in on fd 3, so an update that prompts still reads the terminal on stdin.
+while IFS= read -r cmd <&3; do
+    [[ -n $cmd ]] || continue
+    echo "upgrade-upstream: $cmd" >&2
+    sh -c "$cmd" || status=$?
+done 3<<'EOF'
+{{ includeTemplate "artifact" (merge (dict "name" "upstream-updates") .) -}}
+EOF
+
+exit "$status"
