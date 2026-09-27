@@ -4,3 +4,16 @@
 .rendered/STAMP: $(wildcard .chezmoidata/*.toml) $(wildcard tools/inventory/*.py) uv.lock
 	uv run render
 	@touch $@
+
+# The repo's checks, one entry point for a person and for prek's pytest hook alike.
+#   make check                       lint, then test: everything
+#   make test PYTEST_ARGS='-k gate'  pytest, after bringing .rendered/ up to date
+#   make lint                        every other prek hook, over all tracked files
+.PHONY: check test lint
+check: lint test
+
+test: .rendered/STAMP
+	uv run pytest -q $(PYTEST_ARGS)
+
+lint:
+	prek run --all-files --skip pytest

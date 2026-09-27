@@ -35,7 +35,8 @@ There is no separate build step.
 ```sh
 make                     # rebuild .rendered/ and .schema/ by hand
 uv run render schema     # only .schema/; works while a data file is broken
-uv run pytest            # everything, ~20 s
+make check               # every check: lint (all prek hooks) then test
+make test                # pytest only, ~20 s; PYTEST_ARGS='-k gate' to narrow
 prek install             # the git hooks in .pre-commit-config.yaml
 ```
 

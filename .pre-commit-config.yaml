@@ -61,9 +61,10 @@ repos:
         language: system
         files: \.ya?ml$
 
+      # `make test`, the same entry a person runs (Makefile). files: what the tests read.
       - id: pytest
         name: pytest
-        entry: uv run pytest -q
+        entry: make -s test
         language: system
         pass_filenames: false
-        files: ^(tests/|tools/|\.chezmoitemplates/|\.chezmoidata/|pyproject\.toml|uv\.lock|run_onchange_before_install-packages\.sh\.tmpl|run_onchange_after_refresh-completions\.sh\.tmpl|dot_claude/(modify_settings\.json|exact_claude-managed\.d/)|run_onchange_after_snapshot-claude-managed\.py\.tmpl|dot_config/mise/(config\.toml\.tmpl|tasks/)|dot_Brewfile\.tmpl)
+        files: ^(Makefile|tests/|tools/|\.chezmoitemplates/|\.chezmoidata/|pyproject\.toml|uv\.lock|run_onchange_before_install-packages\.sh\.tmpl|run_onchange_after_refresh-completions\.sh\.tmpl|dot_claude/(modify_settings\.json|exact_claude-managed\.d/|hooks/|agents/)|run_onchange_after_snapshot-claude-managed\.py\.tmpl|dot_config/mise/(config\.toml\.tmpl|tasks/)|dot_Brewfile\.tmpl)
