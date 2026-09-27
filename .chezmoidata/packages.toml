@@ -412,6 +412,34 @@ on = ["darwin", "linux"]
 via = "mise"
 completions = { hcloud = "hcloud completion zsh" }
 
+# -- Node CLIs (mise npm:) ----------------------------------------------------
+# One isolated install dir each (mise passes pnpm its own --global-dir), not pnpm's shared
+# global tree, whose path moves with every pnpm major.
+[packages.claude-agent-acp]
+on = ["darwin"]
+via = "mise"
+mise = { name = "npm:@agentclientprotocol/claude-agent-acp" }
+
+[packages.readwise-cli]
+on = ["darwin"]
+via = "mise"
+mise = { name = "npm:@readwise/cli" }
+
+[packages.typespec]
+on = ["darwin"]
+via = "mise"
+mise = { name = "npm:@typespec/compiler" }
+
+[packages.ctx7]
+on = ["darwin"]
+via = "mise"
+mise = { name = "npm:ctx7" }
+
+[packages.skills]
+on = ["darwin"]
+via = "mise"
+mise = { name = "npm:skills" }
+
 # -- Python CLIs (uv) ---------------------------------------------------------
 # `uv tool install`, one isolated venv each, entry points in ~/.local/bin.
 [packages.ruff]
