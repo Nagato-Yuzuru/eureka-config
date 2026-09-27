@@ -65,7 +65,7 @@
 # `# -- … --` lines only group; order is by hand.
 #
 # Not on linux on purpose (lab VM is a curated subset): git-cliff, ast-grep,
-# duckdb, antidote (git-repo external, see .chezmoiexternal.toml.tmpl).
+# duckdb. Not here at all: antidote, a git-repo external (.chezmoiexternal.toml.tmpl).
 
 # -- shell & core -----------------------------------------------------------
 [packages.git]
@@ -85,9 +85,6 @@ on = ["darwin", "linux"]
 on = ["darwin", "linux"]
 dnf = { copr = "atim/starship" }
 completions = { starship = "starship completions zsh" }
-
-[packages.antidote]
-on = ["darwin"]
 
 # mise.run is the recommended source on macOS and Linux alike: the single-binary release is
 # built with mise's optimised profile (the brew formula is slower and larger), and it is the

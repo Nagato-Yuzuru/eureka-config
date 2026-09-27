@@ -39,12 +39,7 @@ ANTIDOTE_HOME="${XDG_CACHE_HOME}/antidote"
 zsh_plugins_txt=${ZDOTDIR:-$HOME}/.zsh_plugins.txt
 zsh_plugins_zsh=${ZDOTDIR:-$HOME}/.zsh_plugins.zsh
 
-
-{{- if eq .chezmoi.os "darwin" }}
-source "{{ $brewPrefix }}/opt/antidote/share/antidote/antidote.zsh"
-{{- else if eq .chezmoi.os "linux" }}
 source "${XDG_DATA_HOME}/zsh/antidote/antidote.zsh"  # cloned by .chezmoiexternal.toml.tmpl
-{{- end }}
 
 
 antidote_clones=($ANTIDOTE_HOME/*(N/))

@@ -8,12 +8,11 @@
     url = "git@github.com:gpakosz/.tmux.git"
     refreshPeriod = "168h"
 
-{{ if eq .chezmoi.os "linux" -}}
-# antidote — sourced by .zshrc; macOS gets it from brew. Not
-# $XDG_DATA_HOME/antidote: antidote itself writes snapshots/ there (observed
-# on the lab VM), even though ANTIDOTE_HOME points at the cache dir.
+# antidote — sourced by .zshrc, on every machine: a plain zsh script, so a package manager
+# adds nothing a clone lacks (brew's formula is the same files plus man pages, which the
+# repo carries too). Not $XDG_DATA_HOME/antidote: antidote itself writes snapshots/ there
+# (observed on the lab VM), even though ANTIDOTE_HOME points at the cache dir.
 ["{{ .xdg.dataHome }}/zsh/antidote"]
     type = "git-repo"
     url = "git@github.com:mattmc3/antidote.git"
     refreshPeriod = "168h"
-{{ end -}}
