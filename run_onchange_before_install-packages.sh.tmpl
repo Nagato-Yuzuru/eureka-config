@@ -19,7 +19,9 @@ fi
 # the rest at the end, so only its exit status needs handling: letting it abort would stop
 # the bootstrap tools, the uv tools, and — this being a `run_onchange_before_` script —
 # every dotfile chezmoi was about to write, over one unbottled package.
-brew bundle install --file=- <<'EOF' || status=$?
+# --no-upgrade: this script only supplies what is missing, on Linux too; outdated
+# formulae wait for `brew upgrade` instead of riding along with an unrelated package change.
+brew bundle install --no-upgrade --file=- <<'EOF' || status=$?
 {{ includeTemplate "artifact" (merge (dict "name" "brewfile") .) -}}
 EOF
 {{- end }}

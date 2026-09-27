@@ -1103,7 +1103,7 @@ def test_install_script_renders_to_valid_shell(machine: str, source: Path, tmp_p
     check_shell(script)
     if _os(machine) == "darwin":
         assert "dnf" not in rendered
-        pkg_block = rendered.split("brew bundle install --file=-", 1)[1]
+        pkg_block = rendered.split("brew bundle install --no-upgrade --file=-", 1)[1]
         assert heredoc(pkg_block, "EOF") == lines(SYN, "brewfile", machine)
     else:
         assert "brew" not in rendered
