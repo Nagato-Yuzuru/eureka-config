@@ -19,13 +19,6 @@ path=("{{ $brewPrefix }}/bin" "{{ $brewPrefix }}/sbin" $path)
 # whatever copy a package manager left behind. (`typeset -U path` in .zshenv drops the later copy.)
 path=("$HOME/.local/bin" $path)
 
-# MISE
-
-eval "$(mise activate zsh)"
-{{- if eq .chezmoi.os "darwin" }}
-eval "$(fnox activate zsh)"  # darwin-only in packages.toml
-{{- end }}
-
 {{- if eq .chezmoi.os "darwin" }}
 
 path=("{{ $brewPrefix }}"/opt/{gawk,grep,make}/libexec/gnubin $path)
@@ -81,6 +74,15 @@ unset zcompdump_stale
 { zcompile ${ZDOTDIR:-$HOME}/.zcompdump; } &|
 
 autoload bashcompinit && bashcompinit
+
+# MISE — after compinit: mise's hook registers tool completions and, finding no compdef,
+# runs its own `compinit -i` against the bare fpath, writing a .zcompdump that the
+# `compinit -C` above then trusts for a day.
+
+eval "$(mise activate zsh)"
+{{- if eq .chezmoi.os "darwin" }}
+eval "$(fnox activate zsh)"  # darwin-only in packages.toml
+{{- end }}
 
 source $zsh_plugins_zsh
 
