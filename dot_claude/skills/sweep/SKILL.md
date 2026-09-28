@@ -9,7 +9,7 @@ Residue — text only the production history can justify: the "(not X)" a "don't
 
 ## 1. Dispatch
 
-Spawn the `sweeper` agent (Agent tool, `model: sonnet`; a fork inherits this session's context and blinds the sweep — always a fresh spawn). The briefing is these four fields, filled and sent verbatim:
+Spawn the `sweeper` agent (Agent tool; a fork inherits this session's context and blinds the sweep — always a fresh spawn). The briefing is these four fields, filled and sent verbatim:
 
 ```
 Sweep as first reader.

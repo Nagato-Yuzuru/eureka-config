@@ -1,0 +1,3 @@
+{{- /* A Workflow agent()'s model opt, and effort when the class sets one, for one routing class. Called with (list . "<class id>"). */ -}}
+{{- $c := includeTemplate "claude-binding" . | fromJson -}}
+model: '{{ $c.model }}'{{ with get $c "effort" }}, effort: '{{ . }}'{{ end -}}

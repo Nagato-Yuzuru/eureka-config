@@ -1,4 +1,4 @@
-"""Executable spec for the agent definitions (dot_claude/agents/*.md) and their wiring.
+"""Executable spec for the agent definitions (dot_claude/agents/*.md.tmpl) and their wiring.
 
 Invariants every valid agent config satisfies:
 - an agent declaring ``memory:`` does not disallow Write or Edit — the injected memory
@@ -7,30 +7,42 @@ Invariants every valid agent config satisfies:
 - frontmatter ``name`` equals the file stem, case included — APFS hides case renames
 - every hook command a claude-managed.d fragment references exists as an ``executable_``
   source under dot_claude/hooks/
+- routing has one source, .chezmoidata/claude.toml: every agent is the role of exactly one
+  routing class and renders that class's model and effort, and no other file under
+  dot_claude/ spells a model name the routing declares
 
 Behavior of require-agent-model.sh, driven as a subprocess with a fake $HOME (and a fake
 project dir) holding synthetic agent files: an Agent/Task call passes only with an
 explicit ``model``, a built-in exempt type, or a local agent whose frontmatter provably
 pins a model. The hook may be stricter than Claude Code's agent loader, never looser.
+Its deny message, like require-workflow-routing.sh's, carries the rendered routing table.
 """
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
+from pydantic import ValidationError
+
+from inventory.model import ClaudeDoc
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AGENTS_DIR = REPO_ROOT / "dot_claude" / "agents"
 HOOKS_DIR = REPO_ROOT / "dot_claude" / "hooks"
 MANAGED_DIR = REPO_ROOT / "dot_claude" / "exact_claude-managed.d"
 MODEL_HOOK = HOOKS_DIR / "executable_require-agent-model.sh"
+WORKFLOW_HOOK = HOOKS_DIR / "executable_require-workflow-routing.sh"
+ROUTING_TEXT = HOOKS_DIR / "agent-routing.txt.tmpl"
+ROUTING_DATA = REPO_ROOT / ".chezmoidata" / "claude.toml"
 
 WRITE_TOOLS = frozenset({"Write", "Edit"})
 
@@ -45,8 +57,29 @@ def parse_frontmatter(text: str) -> dict[str, Any]:
     return fields
 
 
+@functools.cache
+def render(tmpl: Path) -> str:
+    """`chezmoi execute-template` over the real source. An empty config (not the user's): its
+    read-source-state hook would run `make` from inside the test run."""
+    proc = subprocess.run(
+        [
+            "chezmoi", "execute-template", "--source", str(REPO_ROOT),
+            "--config-format", "toml", "--config", os.devnull, "--file", str(tmpl),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )  # fmt: skip
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout
+
+
 def frontmatter(path: Path) -> dict[str, Any]:
-    return parse_frontmatter(path.read_text())
+    return parse_frontmatter(render(path))
+
+
+def agent_name(path: Path) -> str:
+    return path.name.removesuffix(".md.tmpl")
 
 
 def tool_set(value: object) -> set[str]:
@@ -66,9 +99,21 @@ def memory_write_blockers(fields: dict[str, Any]) -> set[str]:
 
 
 def agent_files() -> list[Path]:
-    files = sorted(AGENTS_DIR.glob("*.md"))
+    files = sorted(AGENTS_DIR.glob("*.md.tmpl"))
     assert files, f"no agent definitions under {AGENTS_DIR}"
     return files
+
+
+def routing() -> dict[str, Any]:
+    return tomllib.loads(ROUTING_DATA.read_text())["claude"]["routing"]
+
+
+def classes() -> list[dict[str, Any]]:
+    return routing()["classes"]
+
+
+def routed_models() -> set[str]:
+    return {c["model"] for c in classes()} | set(routing().get("gated", []))
 
 
 # --- invariants over the real agent definitions ------------------------------------
@@ -76,7 +121,7 @@ def agent_files() -> list[Path]:
 
 def test_agent_name_matches_file_stem():
     for path in agent_files():
-        assert frontmatter(path).get("name") == path.stem, (
+        assert frontmatter(path).get("name") == agent_name(path), (
             f"{path.name}: frontmatter name must equal the file stem exactly (case included)"
         )
 
@@ -96,6 +141,102 @@ def test_managed_hook_commands_exist():
         referenced.update(re.findall(r"/\.claude/hooks/([A-Za-z0-9_.-]+)", fragment.read_text()))
     missing = sorted(name for name in referenced if not (HOOKS_DIR / f"executable_{name}").exists())
     assert not missing, f"fragments reference hooks with no executable_ source: {missing}"
+
+
+# --- routing: one source -----------------------------------------------------------
+
+
+def test_every_agent_is_the_role_of_exactly_one_routing_class():
+    roles = sorted(r for c in classes() for r in c.get("roles", []))
+    assert roles == sorted(agent_name(p) for p in agent_files())
+
+
+def test_agent_renders_its_class_model_and_effort():
+    for c in classes():
+        for role in c.get("roles", []):
+            fields = frontmatter(AGENTS_DIR / f"{role}.md.tmpl")
+            assert fields["model"] == c["model"], role
+            if "effort" in c:
+                assert fields["effort"] == c["effort"], role
+
+
+def test_agent_frontmatter_spells_each_rendered_key_once():
+    """A class that gains an effort must not meet a hand-written one: YAML keeps the last."""
+    for path in agent_files():
+        head = render(path).split("\n---\n", 1)[0].splitlines()
+        for key in ("model", "effort"):
+            assert sum(line.startswith(f"{key}:") for line in head) <= 1, (path.name, key)
+
+
+def model_names() -> re.Pattern[str]:
+    names = sorted(routed_models())
+    return re.compile(rf"\b({'|'.join(map(re.escape, names))})\b", re.IGNORECASE)
+
+
+# Display code turning model ids into names: it names models, it routes nothing.
+NOT_ROUTING = ("dot_claude/statusline/",)
+
+
+def test_model_names_live_only_in_the_routing_data():
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "dot_claude"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    ).stdout.split("\0")  # fmt: skip
+    hits = [
+        f"{rel}:{n}"
+        for rel in listed
+        if rel and not rel.startswith(NOT_ROUTING) and (REPO_ROOT / rel).is_file()
+        for n, line in enumerate(
+            (REPO_ROOT / rel).read_bytes().decode(errors="replace").splitlines(), 1
+        )
+        if model_names().search(line)
+    ]
+    assert hits == [], (
+        "a model name outside .chezmoidata/claude.toml is a second copy of the routing;"
+        " render it from the data (.chezmoitemplates/claude-*)"
+    )
+
+
+def claude_doc(
+    classes: list[dict[str, Any]] | None = None, gated: list[str] | None = None
+) -> dict[str, Any]:
+    if classes is None:
+        classes = [
+            {"id": "a", "work": "w", "model": "haiku", "effort": "low", "roles": ["x"]},
+            {"id": "b", "work": "w", "model": "opus", "roles": ["y"]},
+        ]
+    return {"claude": {"routing": {"classes": classes, "gated": gated or ["fable"]}}}
+
+
+def test_claude_doc_accepts_the_baseline():
+    ClaudeDoc.model_validate(claude_doc())
+
+
+@pytest.mark.parametrize(
+    ("doc", "why"),
+    [
+        (claude_doc(classes=[]), "at least 1 item"),
+        (claude_doc(classes=[{"id": "a", "work": "w", "model": "haiku"}] * 2), "class ids repeat"),
+        (
+            claude_doc(
+                classes=[
+                    {"id": "a", "work": "w", "model": "haiku", "roles": ["x"]},
+                    {"id": "b", "work": "w", "model": "opus", "roles": ["x"]},
+                ]
+            ),
+            "more than one class",
+        ),
+        (claude_doc(gated=["opus"]), "gated models are some class's model: \\['opus'\\]"),
+        (claude_doc(classes=[{"id": "a", "work": "w", "model": "gpt"}]), "Input should be"),
+        (
+            claude_doc(classes=[{"id": "a", "work": "w", "model": "haiku", "effort": "turbo"}]),
+            "Input should be",
+        ),
+    ],
+)
+def test_claude_doc_rejects(doc: dict[str, Any], why: str):
+    with pytest.raises(ValidationError, match=why):
+        ClaudeDoc.model_validate(doc)
 
 
 # --- the memory/write-tools check itself -------------------------------------------
@@ -150,14 +291,14 @@ def agent_text(name: str = "pinned", model_line: str = "model: sonnet", extra: s
     return f"---\nname: {name}\n{extra}{model_line}\n---\nbody\n"
 
 
-def run_hook_raw(home: Path, stdin: str, path: str | None = None) -> str:
+def run_hook_raw(home: Path, stdin: str, path: str | None = None, hook: Path = MODEL_HOOK) -> str:
     env = {**os.environ, "HOME": str(home)}
     if path is not None:
         env["PATH"] = path
     result = subprocess.run(
         # The shebang interpreter: the source is not +x until chezmoi applies it, and
         # /bin/bash is 3.2 on macOS, the oldest bash the hook must run under.
-        ["/bin/bash", str(MODEL_HOOK)],
+        ["/bin/bash", str(hook)],
         input=stdin,
         capture_output=True,
         text=True,
@@ -226,6 +367,38 @@ def test_builtin_exempt_types_allow_without_agent_file(home: Path, atype: str):
 )
 def test_unparseable_input_fails_closed(home: Path, stdin: str):
     assert "the hook input is not a JSON object" in deny_reason(run_hook_raw(home, stdin))
+
+
+def install_routing_text(home: Path) -> str:
+    """The real rendered routing table, where apply puts it; returns it without the newline."""
+    hooks = home / ".claude" / "hooks"
+    hooks.mkdir(parents=True, exist_ok=True)
+    text = render(ROUTING_TEXT)
+    (hooks / "agent-routing.txt").write_text(text)
+    return text.rstrip("\n")
+
+
+WORKFLOW_UNROUTED = {"tool_name": "Workflow", "tool_input": {"script": "agent('x', {})"}}
+
+
+@pytest.mark.parametrize(
+    ("hook", "payload"),
+    [(MODEL_HOOK, agent_call({"subagent_type": "ghost"})), (WORKFLOW_HOOK, WORKFLOW_UNROUTED)],
+)
+def test_deny_carries_the_rendered_routing_table(home: Path, hook: Path, payload: object):
+    table = install_routing_text(home)
+    reason = deny_reason(run_hook_raw(home, json.dumps(payload), hook=hook))
+    assert reason.endswith(f"Routing table: {table}")
+    assert all(m in table for m in routed_models())
+
+
+@pytest.mark.parametrize(
+    ("hook", "payload"),
+    [(MODEL_HOOK, agent_call({"subagent_type": "ghost"})), (WORKFLOW_HOOK, WORKFLOW_UNROUTED)],
+)
+def test_deny_names_a_missing_routing_table(home: Path, hook: Path, payload: object):
+    reason = deny_reason(run_hook_raw(home, json.dumps(payload), hook=hook))
+    assert reason.endswith("(missing: ~/.claude/hooks/agent-routing.txt; chezmoi apply renders it)")
 
 
 def test_missing_jq_fails_closed(home: Path, tmp_path: Path):

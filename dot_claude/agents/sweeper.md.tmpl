@@ -1,7 +1,7 @@
 ---
 name: sweeper
 description: First-reader residue sweep of a finished artifact — flags text only the production history can justify (the "(not X)" a "don't X" leaves behind, session labels, iteration narration, one-instance literals in general guidance) and returns per-finding patch files. Dispatched by the sweep skill with a four-field briefing. Invoke explicitly.
-model: sonnet
+{{ template "claude-agent-fields" . }}
 disallowedTools: Agent, NotebookEdit
 ---
 

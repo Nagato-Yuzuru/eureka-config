@@ -8,7 +8,9 @@
   },
   "permissions": {
     "ask": [
-      "Agent(model:*fable*)"
+{{- range $i, $m := .claude.routing.gated }}{{ if $i }},{{ end }}
+      "Agent(model:*{{ $m }}*)"
+{{- end }}
     ]
   },
   "hooks": {

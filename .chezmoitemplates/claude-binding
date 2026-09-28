@@ -1,0 +1,8 @@
+{{- /* One routing class, as JSON. Called with (list . "<class id>"). */ -}}
+{{- $id := index . 1 -}}
+{{- $found := "" -}}
+{{- range (index . 0).claude.routing.classes -}}
+{{- if eq .id $id }}{{ $found = toJson . }}{{ end -}}
+{{- end -}}
+{{- if not $found }}{{ fail (printf "no routing class %q in .chezmoidata/claude.toml" $id) }}{{ end -}}
+{{- $found -}}

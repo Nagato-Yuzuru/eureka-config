@@ -35,7 +35,9 @@ if grep -Eq '(model|agentType)[[:space:]]*:' <<<"$script"; then
   exit 0
 fi
 
-reason="Workflow script rejected: it calls agent() but contains no 'model:' or 'agentType:' routing anywhere, so every agent would silently inherit the main-loop model. Set opts.model on each agent() call per the routing table (web fetch / file search / log scan -> haiku; code reasoning / codegen -> sonnet; multi-file planning / refactoring -> opus; fable never as default), or use opts.agentType with a pinned definition (fetcher=haiku, coder=sonnet, architect=opus, Explore=haiku), then re-issue."
+routing=$(cat "$HOME/.claude/hooks/agent-routing.txt" 2>/dev/null) ||
+  routing="(missing: ~/.claude/hooks/agent-routing.txt; chezmoi apply renders it)"
+reason="Workflow script rejected: it calls agent() but contains no 'model:' or 'agentType:' routing anywhere, so every agent would silently inherit the main-loop model. Set opts.model on each agent() call by the class of work, or opts.agentType to one of the pinned agents, then re-issue. Routing table: $routing"
 
 jq -cn --arg reason "$reason" \
   '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'

@@ -1,0 +1,6 @@
+{{- /* The routing table as one paragraph, for prose and deny messages alike. Called with the root context. */ -}}
+{{- range $i, $c := .claude.routing.classes -}}
+{{- if $i }}; {{ end -}}
+{{ $c.work }} → {{ $c.model }}{{ with get $c "effort" }} at effort {{ . }}{{ end }}{{ with get $c "roles" }} (agent types: {{ join ", " . }}){{ end -}}
+{{- end -}}
+.{{ with .claude.routing.gated }} A spawn with {{ join " or " . }} asks for approval.{{ end -}}

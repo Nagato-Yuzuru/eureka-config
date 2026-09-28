@@ -1,0 +1,7 @@
+[claude.routing]
+gated = ["fable"]
+
+[[claude.routing.classes]]
+id = "only"
+work = "everything"
+model = "sonnet"

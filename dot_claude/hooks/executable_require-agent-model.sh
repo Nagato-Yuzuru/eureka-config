@@ -1,12 +1,19 @@
 #!/bin/bash
 # PreToolUse gate for Agent/Task: require an explicit `model`, or a subagent type
-# whose definition pins one. Mechanizes the model-routing table in ~/.claude/CLAUDE.md.
+# whose definition pins one. Which model is right is the caller's call; the deny message
+# carries the routing table (agent-routing.txt, rendered at apply) so it gets made.
 #
 # The definition check may be stricter than Claude Code's own agent loader, never
 # looser: anything this parser cannot prove pinned is denied.
 
+routing() {
+    cat "$HOME/.claude/hooks/agent-routing.txt" 2>/dev/null ||
+        printf '%s' "(missing: ~/.claude/hooks/agent-routing.txt; chezmoi apply renders it)"
+}
+
 deny() {
-    local reason="Agent call rejected: $1, so it would silently inherit the main-loop model. Re-issue with 'model' set per the routing table: web fetch / file search / log scan -> haiku; code reasoning / codegen -> sonnet; multi-file planning / refactoring / cross-file consistency -> opus; fable is never a default (per-case escalation only; requires user approval). Alternatively use an agent type whose .claude/agents/<type>.md frontmatter pins a model."
+    local reason
+    reason="Agent call rejected: $1, so it would silently inherit the main-loop model. Re-issue with 'model' set by the class of work, or use an agent type whose .claude/agents/<type>.md frontmatter pins a model. Routing table: $(routing)"
     if command -v jq >/dev/null; then
         jq -cn --arg reason "$reason" \
             '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'

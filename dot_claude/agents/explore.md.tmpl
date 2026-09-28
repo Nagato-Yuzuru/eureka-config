@@ -1,7 +1,7 @@
 ---
 name: explore
 description: Read-only code exploration backed by a persistent entry-point index (project memory), so repeat explorations extend the index instead of re-reading the codebase. Two modes — locate ("where is X / does it exist", breadth quick/medium/thorough, returns file:line pointers) and explain ("how does X work / why this design", traces execution end to end). Caller specifies the mode. Use proactively when the question is about existing code.
-model: sonnet
+{{ template "claude-agent-fields" . }}
 maxTurns: 40
 memory: project
 disallowedTools: Agent, NotebookEdit

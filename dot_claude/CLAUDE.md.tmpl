@@ -74,9 +74,6 @@ Prefer `deno run npm:<pkg>` for non-interactive, minimal-access tools (formatter
 | Type-check project / file      | `ty check [path]`                 |
 | Audit deps (missing / unused)  | `uv run --with deptry deptry .`   |
 
-## Subagents — Model Routing Notes
+## Subagents — Model Routing
 
-Delegation criteria and the routing table live in the `engineering` index. Two notes that stay here:
-
-- **Always set the model explicitly** — the Agent tool's `model` param, and `opts.model` on every Workflow `agent()` call. Workflow's `agent()` otherwise silently inherits the main-loop model, bypassing the routing table.
-- `sonnet`/`opus` boundary tie-breaks to `opus` when the change crosses files. `fable` is never a default: it is per-case escalation for reasoning beyond Opus's ceiling, at significantly higher cost — when in doubt, `opus` is the top of the table.
+Delegation criteria and the routing table live in the `engineering` index. **Always set the model explicitly** — the Agent tool's `model` param, and `opts.model` on every Workflow `agent()` call; both otherwise silently inherit the main-loop model.

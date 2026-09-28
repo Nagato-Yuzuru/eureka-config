@@ -1,8 +1,7 @@
 ---
 name: fetcher
 description: Retrieval and aggregation with no judgment required — web fetching, summarization, doc lookup, log scanning. Use proactively whenever the task is "find / collect / summarize", not "decide / design".
-model: haiku
-effort: low
+{{ template "claude-agent-fields" . }}
 maxTurns: 25
 disallowedTools: Agent, Write, Edit, NotebookEdit
 ---

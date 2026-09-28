@@ -1,7 +1,7 @@
 ---
 name: architect
 description: Design-candidate generator for architecture-level decisions — technology selection, contracts and interfaces, state machines, concurrency, boundaries, compatibility, and whatever else the decision touches. Produces ONE coherent design candidate per invocation, as a document of type signatures rather than prose. Never edits the target; measurements happen in the session scratchpad only, and a probe is never the deliverable. Invoke explicitly.
-model: opus
+{{ template "claude-agent-fields" . }}
 maxTurns: 25
 disallowedTools: Write, Edit, NotebookEdit
 skills:

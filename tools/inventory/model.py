@@ -30,6 +30,7 @@ from pydantic import (
     Tag,
     TypeAdapter,
     WithJsonSchema,
+    model_validator,
 )
 
 Os = Literal["darwin", "linux"]
@@ -306,12 +307,51 @@ class ZshDoc(Strict):
     zsh: Zsh
 
 
+ClaudeModel = Literal["haiku", "sonnet", "opus", "fable"]  # aliases Claude Code resolves
+
+
+class RoutingClass(Strict):
+    """One class of delegated work: the model it runs on, the agents that serve it."""
+
+    id: NonEmpty
+    work: NonEmpty
+    model: ClaudeModel
+    effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
+    roles: list[NonEmpty] = []
+
+
+class Routing(Strict):
+    classes: list[RoutingClass] = Field(min_length=1)
+    gated: list[ClaudeModel] = []  # a spawn with one asks for approval
+
+    @model_validator(mode="after")
+    def _one_home_each(self) -> Routing:
+        ids = [c.id for c in self.classes]
+        if dup := {i for i in ids if ids.count(i) > 1}:
+            raise ValueError(f"class ids repeat: {sorted(dup)}")
+        roles = [r for c in self.classes for r in c.roles]
+        if dup := {r for r in roles if roles.count(r) > 1}:
+            raise ValueError(f"roles in more than one class: {sorted(dup)}")
+        if both := sorted({c.model for c in self.classes} & set(self.gated)):
+            raise ValueError(f"gated models are some class's model: {both}")
+        return self
+
+
+class Claude(Strict):
+    routing: Routing
+
+
+class ClaudeDoc(Strict):
+    claude: Claude
+
+
 DOCS: dict[str, type[Strict]] = {
     "packages.toml": PackagesDoc,
     "platforms.toml": PlatformsDoc,
     "machines.toml": MachinesDoc,
     "xdg.toml": XdgDoc,
     "zsh.toml": ZshDoc,
+    "claude.toml": ClaudeDoc,
 }
 
 

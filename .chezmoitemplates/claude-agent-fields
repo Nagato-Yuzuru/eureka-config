@@ -1,0 +1,11 @@
+{{- /* The model line, and the effort line when the class sets one, of the agent definition calling this: its file stem is its role. Called with the root context. */ -}}
+{{- $role := .chezmoi.sourceFile | base | trimSuffix ".md.tmpl" -}}
+{{- $class := dict -}}
+{{- range .claude.routing.classes -}}
+{{- if has $role (get . "roles" | default list) }}{{ $class = . }}{{ end -}}
+{{- end -}}
+{{- if not $class }}{{ fail (printf "role %q is in no class of .chezmoidata/claude.toml" $role) }}{{ end -}}
+model: {{ $class.model }}
+{{- with get $class "effort" }}
+effort: {{ . }}
+{{- end -}}

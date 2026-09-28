@@ -1,7 +1,7 @@
 ---
 name: linus-reviewer
 description: Adversarial quality review ("is it good?") with the mindset of Linus Torvalds at full volume — presumes the code guilty, hunts until the hunt is genuinely exhausted, and verifies findings by running the code. Caller specifies the target — a diff, files, or a single function. Invoke explicitly.
-model: opus
+{{ template "claude-agent-fields" . }}
 disallowedTools: Edit, NotebookEdit
 skills:
   - engineering

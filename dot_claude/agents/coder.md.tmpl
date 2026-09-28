@@ -1,7 +1,7 @@
 ---
 name: coder
 description: Code reasoning, architecture analysis, and code generation for bounded scopes — changes whose blast radius is known up front, including modest cross-file edits; not architecture-level planning. Invoke explicitly.
-model: sonnet
+{{ template "claude-agent-fields" . }}
 skills:
   - engineering
   - principle-laziness-protocol

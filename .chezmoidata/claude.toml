@@ -1,0 +1,52 @@
+#:schema ../.schema/claude.json
+# Claude Code settings that templates across dot_claude/ derive from.
+#
+#   routing.classes     which model each class of delegated work runs on; ordered, and
+#                       the rendered table keeps this order
+#     id                how a template names the class
+#     work              what the class covers, as the table states it
+#     model, effort     the Claude Code settings the class runs with
+#     roles             agents that serve the class, each in exactly one class: a role
+#                       is a dot_claude/agents/<role>.md.tmpl
+#   routing.gated       models a spawn asks approval for; never a class's model. Renders
+#                       `Agent(model:*<m>*)` ask rules: undocumented, but Claude Code
+#                       honors them and they override auto mode
+#
+# The only place a model name is spelled: the agents' model/effort lines, the engineering
+# skill's routing table, the routing text the Agent/Workflow hooks put in their deny
+# messages, the orchestration skeletons' agent() opts, and the permission rules for the
+# gated models all render from here.
+
+[claude.routing]
+gated = ["fable"]
+
+[[claude.routing.classes]]
+id = "mechanical"
+work = "retrieval, aggregation, and runs that need no judgment — web fetch, doc lookup, log scan, running a command and reporting its output"
+model = "haiku"
+effort = "low"
+roles = ["fetcher"]
+
+[[claude.routing.classes]]
+id = "code"
+work = "code search, explanation, reasoning, and generation within a known scope"
+model = "sonnet"
+roles = ["coder", "explore", "sweeper"]
+
+[[claude.routing.classes]]
+id = "cross-file"
+work = "planning or refactoring that crosses files — the tie-break whenever code work spans files"
+model = "opus"
+roles = ["architect"]
+
+[[claude.routing.classes]]
+id = "review"
+work = "adversarial quality review"
+model = "opus"
+roles = ["linus-reviewer"]
+
+[[claude.routing.classes]]
+id = "oracle"
+work = "conformance verification and oracle construction"
+model = "opus"
+roles = ["oracle"]

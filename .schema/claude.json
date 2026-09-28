@@ -1,0 +1,115 @@
+{
+  "$defs": {
+    "Claude": {
+      "additionalProperties": false,
+      "properties": {
+        "routing": {
+          "$ref": "#/$defs/Routing"
+        }
+      },
+      "required": [
+        "routing"
+      ],
+      "title": "Claude",
+      "type": "object"
+    },
+    "Routing": {
+      "additionalProperties": false,
+      "properties": {
+        "classes": {
+          "items": {
+            "$ref": "#/$defs/RoutingClass"
+          },
+          "minItems": 1,
+          "title": "Classes",
+          "type": "array"
+        },
+        "gated": {
+          "default": [],
+          "items": {
+            "enum": [
+              "haiku",
+              "sonnet",
+              "opus",
+              "fable"
+            ],
+            "type": "string"
+          },
+          "title": "Gated",
+          "type": "array"
+        }
+      },
+      "required": [
+        "classes"
+      ],
+      "title": "Routing",
+      "type": "object"
+    },
+    "RoutingClass": {
+      "additionalProperties": false,
+      "description": "One class of delegated work: the model it runs on, the agents that serve it.",
+      "properties": {
+        "effort": {
+          "default": null,
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "title": "Effort",
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "model": {
+          "enum": [
+            "haiku",
+            "sonnet",
+            "opus",
+            "fable"
+          ],
+          "title": "Model",
+          "type": "string"
+        },
+        "roles": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        },
+        "work": {
+          "minLength": 1,
+          "title": "Work",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "work",
+        "model"
+      ],
+      "title": "RoutingClass",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "claude": {
+      "$ref": "#/$defs/Claude"
+    }
+  },
+  "required": [
+    "claude"
+  ],
+  "title": "ClaudeDoc",
+  "type": "object"
+}
