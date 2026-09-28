@@ -1,6 +1,6 @@
 ---
 name: orchestration
-description: "Process. Apply when structuring work into units or a multi-stage flow: deciding whether to decompose, choosing the shape (chain, fan-out, panel, evaluator loop), slicing into tickets, dispatching and collecting. Reached from the engineering index's Orchestration pointer."
+description: "Process. Apply when structuring work into units or a multi-stage flow: deciding whether to decompose, choosing the shape (chain, fan-out, panel, evaluator loop), slicing into tickets, dispatching and collecting."
 ---
 
 # Orchestration

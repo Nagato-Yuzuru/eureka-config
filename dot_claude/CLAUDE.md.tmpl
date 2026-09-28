@@ -6,7 +6,7 @@
 
 ## File Access Boundary — HARD RULE
 
-**Default-ask whitelist: file tools may touch the workspace and a short list of known-good paths; everything else prompts me first, for reads and writes alike.** There is deliberately no "sensitive paths" list — protection comes from the closed default, not from enumeration.
+**Default-ask whitelist: file tools may touch the workspace and a short list of known-good paths; everything else prompts me first, for reads and writes alike.**
 
 Allowed without asking:
 
@@ -17,7 +17,7 @@ Allowed without asking:
 
 Everything else asks. Authorization has three lifetimes:
 
-- **session** — approving the permission prompt auto-records that exact path for the rest of the session (a pending→promote handshake; nothing is recorded in `bypassPermissions`).
+- **session** — approving the permission prompt auto-records that exact path for the rest of the session (nothing is recorded in `bypassPermissions`).
 - **TTL / permanent** — a durable grant in `~/.claude/hooks/path-gate-grants.json`. Issued ONLY via the canonical command `~/.claude/hooks/path-gate.sh grant <path> <r|w|rw> [--global | --project DIR] [--ttl 7d]`. You (Claude) may run it when I ask for durable access — the native `permissions.ask` rules on `grant`/`revoke` always trigger a confirmation prompt, in every permission mode. Use exactly that invocation: never through copies, renames, variables, or other spellings, and never `revoke` or edit stores on your own initiative.
 - Read-only verbs `list` and `check <path> <r|w>` run freely.
 
@@ -38,8 +38,6 @@ The Bash tool runs through my interactive zsh config (shell snapshot), so these 
 | `date` | `gdate`                       | GNU flags (`-d`, `+%s%N`), not BSD `-v`                                                                                               |
 {{- end }}
 | `grep` | ripgrep (Claude Code wrapper) | gitignore/VCS-aware, skips binaries — **not POSIX grep** (won't search ignored/.git files), not colored; `command grep` for real grep |
-
-(`ls`/`fd` are aliased to `--color=auto` but that is a no-op here — color is auto-suppressed when output isn't a TTY.)
 
 ## JavaScript / TypeScript
 

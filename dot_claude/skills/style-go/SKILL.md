@@ -8,7 +8,7 @@ description: "Code & delivery. Apply when writing or reviewing Go. Run the golan
 ## Oracles first
 
 - **Baseline**: `golangci-baseline.yml` next to this file enforces the mechanical half of this skill; scope per engineering's repo regimes — Go's diff-scoped run is `golangci-lint run --new-from-rev=<base>`. Prose below carries only what linters cannot.
-- **Version-gated idiom** (which stdlib construct exists at this `go` directive): load `use-modern-go`. It applies to lines you write — never license to modernize surrounding code.
+- **Version-gated idiom** (which stdlib construct exists at this `go` directive): load `modern-go-guidelines:use-modern-go`. It applies to lines you write — never license to modernize surrounding code.
 - **Generation**: tools pinned via go.mod `tool` directive (`go get -tool`), invoked by `//go:generate go tool <name> ...`, so a fresh clone reproduces with `go generate ./...`; CI gates with `go generate ./... && git diff --exit-code`.
 - Test-time: `goleak` for goroutine leaks. `gofmt` on whole files you create or heavily edit is always safe — universal in Go, unlike Python formatters.
 

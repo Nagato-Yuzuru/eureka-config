@@ -20,7 +20,7 @@ This skill only runs when explicitly invoked (`/repo-learn`). Within a session, 
 
 ## Prepare before you guide (备课)
 
-Before sending the first anchor, explore until you could answer the user's question completely yourself. Never ask a guiding question you don't know the answer to — unverified Socratic guidance is hand-waving with extra steps. Use Explore subagents for broad scans (always set `model` explicitly, per the routing table). Your map stays private: it is the lesson plan, not the lesson.
+Before sending the first anchor, explore until you could answer the user's question completely yourself. Never ask a guiding question you don't know the answer to — unverified Socratic guidance is hand-waving with extra steps. Use the `explore` agent for broad scans (its definition pins the model). Your map stays private: it is the lesson plan, not the lesson.
 
 If you don't yet know why the user is studying this codebase (to contribute? to learn the language and its idioms? to evaluate adoption? to steal its design?), ask once — the goal decides which threads are worth pulling and which details to let go.
 

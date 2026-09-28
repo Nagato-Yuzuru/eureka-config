@@ -18,4 +18,4 @@ Order work as a sequence of small units, each ending in a state you can check, a
 - Verify before advancing. Red to green per unit, never deferred to a final batch.
 - Order the units so the sequence builds confidence on its own, for you while executing and for a reviewer reading the stack.
 
-Complements **principle-build-the-lever**, which makes the per-unit check cheap, and the Tests contract (positive/negative/boundary), which keeps each check real.
+Complements **principle-build-the-lever**, which makes the per-unit check cheap, and **principle-testing** (positive/negative/boundary cases), which keeps each check real.
