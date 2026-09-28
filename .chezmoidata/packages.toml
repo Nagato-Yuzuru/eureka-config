@@ -25,10 +25,14 @@
 #             { copr | repofile }    the standard repos (nothing), a COPR repo
 #                                    (owner/project) or a third-party .repo URL,
 #                                    enabled/added first.
-#   mise      { name | version | components }   via: mise only. name incl. the
-#                                    backend prefix ("npm:pnpm"); version in mise's
-#                                    syntax (default latest); components the extra
-#                                    ones installed with the tool.
+#   mise      { name | version | components | minimum_release_age }   via: mise
+#                                    only. name incl. the backend prefix
+#                                    ("npm:pnpm"); version in mise's syntax
+#                                    (default latest); components the extra ones
+#                                    installed with the tool; minimum_release_age
+#                                    this tool's cutoff in place of the global one
+#                                    (mise's syntax, "1d"), forwarded to pnpm for
+#                                    npm: tools.
 #   uv        { name | version }     via: uv only. name on PyPI; version spelled
 #                                    `name@version`.
 #   upstream  { command | creates | update }   via: upstream only. command:
@@ -416,10 +420,13 @@ completions = { hcloud = "hcloud completion zsh" }
 # -- Node CLIs (mise npm:) ----------------------------------------------------
 # One isolated install dir each (mise passes pnpm its own --global-dir), not pnpm's shared
 # global tree, whose path moves with every pnpm major.
+# mise forwards minimum_release_age to pnpm in a spelling pnpm 12 ignores, so pnpm's global
+# 7d still rejects what mise picks: until mise's fix ships, upgrade it with
+# `PNPM_CONFIG_MINIMUM_RELEASE_AGE=1440 mise up npm:@agentclientprotocol/claude-agent-acp`.
 [packages.claude-agent-acp]
 on = ["darwin"]
 via = "mise"
-mise = { name = "npm:@agentclientprotocol/claude-agent-acp" }
+mise = { name = "npm:@agentclientprotocol/claude-agent-acp", minimum_release_age = "1d" }
 
 [packages.readwise-cli]
 on = ["darwin"]

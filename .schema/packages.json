@@ -63,6 +63,12 @@
           "title": "Components",
           "type": "array"
         },
+        "minimum_release_age": {
+          "default": null,
+          "minLength": 1,
+          "title": "Minimum Release Age",
+          "type": "string"
+        },
         "name": {
           "default": null,
           "minLength": 1,
@@ -99,6 +105,7 @@
           "$ref": "#/$defs/Mise",
           "default": {
             "components": [],
+            "minimum_release_age": null,
             "name": null,
             "version": "latest"
           }

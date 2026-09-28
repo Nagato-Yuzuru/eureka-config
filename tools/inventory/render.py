@@ -68,11 +68,16 @@ def mise_tools(rs: Iterable[Resolved]) -> list[str]:
     for r in rs:
         if isinstance(r.spec, Mise):
             name, version = json.dumps(r.name), json.dumps(r.spec.version)
-            if not r.spec.components:
+            fields = [f"version = {version}"]
+            if r.spec.minimum_release_age:
+                fields.append(f"minimum_release_age = {json.dumps(r.spec.minimum_release_age)}")
+            if r.spec.components:
+                comps = ", ".join(json.dumps(c) for c in r.spec.components)
+                fields.append(f"components = [{comps}]")
+            if len(fields) == 1:
                 out.append(f"{name} = {version}")
             else:
-                comps = ", ".join(json.dumps(c) for c in r.spec.components)
-                out.append(f"{name} = {{ version = {version}, components = [{comps}] }}")
+                out.append(f"{name} = {{ {', '.join(fields)} }}")
     return out
 
 

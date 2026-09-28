@@ -163,6 +163,9 @@ class Mise(Strict):
     version: NonEmpty = "latest"
     # extra components installed with the tool; absent means none, an empty list is a mistake
     components: Annotated[list[NonEmpty], Field(min_length=1)] = []
+    # this tool's own cutoff, in place of settings.minimum_release_age; for npm: tools mise
+    # forwards it to the package manager, so it bounds the whole dependency tree
+    minimum_release_age: NonEmpty | None = None
 
 
 class Uv(Strict):

@@ -237,6 +237,30 @@ RENDER_CASES = [
         },
     ),
     RenderCase(
+        "minimum-release-age-renders-an-inline-table",
+        {"foo": {"on": ["darwin"], "via": "mise", "mise": {"minimum_release_age": "1d"}}},
+        {
+            ("mise-tools", "darwin-arm64"): [
+                '"foo" = { version = "latest", minimum_release_age = "1d" }'
+            ]
+        },
+    ),
+    RenderCase(
+        "minimum-release-age-sits-beside-components",
+        {
+            "foo": {
+                "on": ["darwin"],
+                "via": "mise",
+                "mise": {"version": "1", "minimum_release_age": "3d", "components": ["x"]},
+            }
+        },
+        {
+            ("mise-tools", "darwin-arm64"): [
+                '"foo" = { version = "1", minimum_release_age = "3d", components = ["x"] }'
+            ]
+        },
+    ),
+    RenderCase(
         "components-without-a-version-still-get-one",
         {"foo": {"on": ["darwin"], "via": "mise", "mise": {"components": ["only"]}}},
         {("mise-tools", "darwin-arm64"): ['"foo" = { version = "latest", components = ["only"] }']},

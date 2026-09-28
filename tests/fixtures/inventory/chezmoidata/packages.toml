@@ -14,7 +14,7 @@ bootshared = { on = ["darwin", "linux"], via = "upstream", upstream = { command 
 
 # --- darwin/arm64 only --------------------------------------------------------------------
 sys-darwin-arm64 = { on = ["darwin/arm64"], brew = { name = "synth/tap/formula-arm64" } }
-tool-darwin-arm64 = { on = ["darwin/arm64"], via = "mise", mise = { name = "npm:tool-darwin-arm64", version = "1" }, completions = { cmd-darwin-arm64 = "cmd-darwin-arm64 completion zsh" } }
+tool-darwin-arm64 = { on = ["darwin/arm64"], via = "mise", mise = { name = "npm:tool-darwin-arm64", version = "1", minimum_release_age = "1d" }, completions = { cmd-darwin-arm64 = "cmd-darwin-arm64 completion zsh" } }
 py-darwin-arm64 = { on = ["darwin/arm64"], via = "uv" }
 boot-darwin-arm64 = { on = ["darwin/arm64"], via = "upstream", upstream = { command = "curl -fsSL https://example.invalid/darwin-arm64.sh | sh", creates = "$HOME/.local/bin/darwin-arm64", update = "darwin-arm64 self-update" } }
 
