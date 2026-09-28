@@ -13,6 +13,12 @@ minimum_release_age = "7d"
 # It talks to aqua, GitHub releases and language registries that drift, so a stale
 # CLI breaks tool resolution, not just mise itself. Interval: auto_update_check_duration.
 auto_update = true
+# `mise activate` also puts the shims dir on PATH, ahead of ~/.local/bin and the system dirs,
+# to install missing or lazy tools on first call. Tools here are batch-installed, so all it
+# does is route every command that has a leftover shim through mise (~50ms per call), and
+# make `command -v` succeed for tools that are no longer active. Active tools keep their
+# real bin dirs on PATH; a command missing entirely still reaches mise's not-found handler.
+activate_shims = false
 
 [settings.github]
 credential_command = "gh auth token"
