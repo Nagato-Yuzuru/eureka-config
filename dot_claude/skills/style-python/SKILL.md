@@ -1,6 +1,6 @@
 ---
 name: style-python
-description: "Code & delivery. Apply when writing or reviewing Python. Run the ruff baseline + ty check (diff-scoped via lint-diff.py in foreign repos); type until illegal states don't check; parse, don't grope; capabilities enter via __init__; TaskGroup-scoped concurrency; generator pipelines for item streams. Env/package commands live in CLAUDE.md (uv table)."
+description: "Code & delivery. Apply when writing or reviewing Python. Run the ruff baseline + ty check (diff-scoped via lint-diff.py in foreign repos); type until illegal states don't check; parse, don't grope; capabilities enter via __init__; TaskGroup-scoped concurrency; generator pipelines for item streams."
 ---
 
 # Python style
@@ -72,5 +72,3 @@ description: "Code & delivery. Apply when writing or reviewing Python. Run the r
 Package boundaries and the public surface (`__init__.py` re-exports and `__all__` are deliberate design); when a pipeline materializes; pydantic model vs plain dataclass at internal seams. Decide explicitly; the why goes in a comment.
 
 For worked shapes — capability injection with shutdown hooks, TaskGroup skeleton, shared Annotated vocabulary, RootModel branding, generator pipeline — read `references/patterns.md`.
-
-Environment and package-management commands (uv table, PEP 723 scripts) live in CLAUDE.md.
