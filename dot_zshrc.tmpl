@@ -231,4 +231,6 @@ function welcome() {
         lolcat
 }
 
-[[ -o interactive && -o login && -z $TMUX && -z $INTELLIJ_ENVIRONMENT_READER ]] && welcome "YuzuRu"
+if [[ -o interactive && -o login && -z $TMUX && -z $INTELLIJ_ENVIRONMENT_READER ]]; then
+    welcome "YuzuRu"
+fi
