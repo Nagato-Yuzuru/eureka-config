@@ -7,7 +7,7 @@ description: "Code & delivery. Apply when writing or reviewing Go. Run the golan
 
 ## Oracles first
 
-- **Baseline**: `golangci-baseline.yml` next to this file enforces the mechanical half of this skill; scope per engineering's repo regimes — Go's diff-scoped run is `golangci-lint run --new-from-rev=<base>`. Prose below carries only what linters cannot.
+- **Baseline**: `golangci-baseline.yml` next to this file enforces the mechanical half of this skill; in a repo you own, install it and hold it at zero findings repo-wide; in a foreign repo, gate only the diff, against the repo's own config when it has one, otherwise against the baseline left uncommitted: `golangci-lint run --new-from-rev=<base>`. Prose below carries only what linters cannot.
 - **Version-gated idiom** (which stdlib construct exists at this `go` directive): load `modern-go-guidelines:use-modern-go`. It applies to lines you write — never license to modernize surrounding code.
 - **Generation**: tools pinned via go.mod `tool` directive (`go get -tool`), invoked by `//go:generate go tool <name> ...`, so a fresh clone reproduces with `go generate ./...`; CI gates with `go generate ./... && git diff --exit-code`.
 - Test-time: `goleak` for goroutine leaks. `gofmt` on whole files you create or heavily edit is always safe — universal in Go, unlike Python formatters.
@@ -23,7 +23,7 @@ description: "Code & delivery. Apply when writing or reviewing Go. Run the golan
 ## Sum types & enums
 
 - Variants carrying data: sealed interface (`type Event interface{ isEvent() }`) marked `//sumtype:decl` — gochecksumtype forces type switches to cover every variant.
-- Scalar enums: named type + generated const block. Regime-1 tool: `go-enum` (via tool directive) for String/Parse/Marshal; foreign repos use whatever the repo already generates with. The zero value is either the meaningful default or `XxxUnspecified = 0`. External input enters through `ParseXxx` at the boundary.
+- Scalar enums: named type + generated const block. In a repo you own, generate String/Parse/Marshal with `go-enum` (via tool directive); a foreign repo uses whatever it already generates with. The zero value is either the meaningful default or `XxxUnspecified = 0`. External input enters through `ParseXxx` at the boundary.
 - Exhaustive switches list every member **and** keep a fail-loud `default:` — the linter guards known members, the default guards out-of-range values (Go enums aren't closed). One enum style per repo.
 
 ## Concurrency
@@ -41,7 +41,7 @@ description: "Code & delivery. Apply when writing or reviewing Go. Run the golan
 - Wiring: hand-wire in `main` by default — **principle-explicit-dependencies** carries the invariants (gochecknoglobals/gochecknoinits are its lint shadow).
 - HTTP clients and servers get explicit timeouts; bare `http.Get` and zero-value `http.Server` don't ship.
 - Signals (logs, metrics, spans): load `principle-observability` before emitting. Its Go grounding: emit through `log/slog` directly; scope fields via `logger.With(...)`; ambient fields via a ctx-aware `Handler`; semconv attribute names from `go.opentelemetry.io/otel/semconv`.
-- Tests default to table-driven, `if got != want` / `cmp.Diff`; assertion libraries are regime-1 opinionated tooling — follow the repo's incumbent style.
+- Tests default to table-driven, `if got != want` / `cmp.Diff`; bring in an assertion library only in a repo you own; in a foreign repo follow its incumbent style.
 - Packages are named by the capability they provide; `utils`/`helpers`/`common` is a naming failure (low severity — fix when touching).
 
 **Write Go, not JavaScript/Java.** Litmus test: if the code would translate nearly line-for-line, rewrite with native constructs:

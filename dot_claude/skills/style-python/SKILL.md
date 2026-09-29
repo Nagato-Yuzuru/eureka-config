@@ -7,7 +7,7 @@ description: "Code & delivery. Apply when writing or reviewing Python. Run the r
 
 ## Oracles first
 
-- **Baseline**: `ruff-baseline.toml` beside this file, plus `ty check` (mypy only as a foreign repo's incumbent). Scope per engineering's repo regimes; `~/.config/ruff/ruff.toml` carries the same core and is ruff's automatic fallback when a repo has no config, so regime 2/3 runs are `uv run lint-diff.py <base> [--config …]` (script beside this file). Prose below carries only what the checkers cannot.
+- **Baseline**: `ruff-baseline.toml` beside this file, plus `ty check` (mypy only as a foreign repo's incumbent). In a repo you own, install the baseline and hold it at zero findings repo-wide. In a foreign repo, only the diff is gated: against the repo's own config when it has one, otherwise against the baseline, which stays uncommitted; `~/.config/ruff/ruff.toml` carries the same core and is ruff's automatic fallback when a repo has no config, so a foreign-repo run is `uv run lint-diff.py <base> [--config …]` (script beside this file). Prose below carries only what the checkers cannot.
 - **Every third-party import is declared via `uv add` in the same change** — code importing an undeclared package is incomplete. Audit with `uv run --with deptry deptry .` (never via `uvx`: an isolated env mis-guesses module names, e.g. `pyyaml`→`yaml`). In a monorepo run it per package; whitelist runtime-only backends via `[tool.deptry.per_rule_ignores]`.
 - Version-gated modernization is mechanical: ruff's UP family follows the repo's `requires-python`.
 
@@ -49,7 +49,7 @@ description: "Code & delivery. Apply when writing or reviewing Python. Run the r
 ## Streams & bulk
 
 - A stream of items transforms as generator stages (`yield` per stage) — lazy, constant-memory, early-terminating. Materialize when you need `len`, random access, or multiple passes.
-- Bulk columnar work (joins, group-bys, aggregation) goes to an engine — polars/duckdb/numpy — not hand-rolled dict loops; plain Python is right for small-n munging. Engine deps are regime-1 tooling.
+- Bulk columnar work (joins, group-bys, aggregation) goes to an engine — polars/duckdb/numpy — not hand-rolled dict loops; plain Python is right for small-n munging. Add an engine dep only in a repo you own; a foreign repo uses what it already declares.
 
 ## Concurrency
 
