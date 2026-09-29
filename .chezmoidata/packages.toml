@@ -443,12 +443,12 @@ via = "mise"
 mise = { name = "npm:@typespec/compiler" }
 
 [packages.ctx7]
-on = ["darwin"]
+on = ["darwin", "linux"]
 via = "mise"
 mise = { name = "npm:ctx7" }
 
 [packages.skills]
-on = ["darwin"]
+on = ["darwin", "linux"]
 via = "mise"
 mise = { name = "npm:skills" }
 
