@@ -487,6 +487,9 @@ on = ["linux"]
 [packages.bpftrace]
 on = ["linux"]
 
+[packages.tcpdump]
+on = ["linux"]
+
 [packages.pahole]
 on = ["linux"]
 dnf = { name = "dwarves" }
