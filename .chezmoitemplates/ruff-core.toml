@@ -30,6 +30,8 @@ select = [
   "TRY002", # raise vanilla Exception
   "G",      # no interpolation in log calls
   "LOG",    # logger acquisition/usage
+  "TD006",  # TODO spelled in capitals
+  "FIX003", # XXX, the non-canonical spelling of WARN
 ]
 ignore = ["D1"] # docstring presence is judgment, not lint
 fixable = ["ALL"]

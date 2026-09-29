@@ -21,7 +21,10 @@ linters:
     - revive
     - sloglint
     - nolintlint
+    - godox
   settings:
+    godox:
+      keywords: [XXX, BUG] # the non-canonical spellings of WARN and FIXME
     errorlint:
       errorf: false # deliberate %v keeps foreign causes out of the %w contract chain
     sloglint:

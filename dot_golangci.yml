@@ -36,6 +36,7 @@ linters:
     - misspell # 注释/字符串拼写检查
     - predeclared # 防止覆盖内置名（true/false/nil 等）
     - exhaustive # switch 对 enum 要穷举
+    - godox # 注释标记用规范写法（FIXME 而非 BUG，WARN 而非 XXX）
 
 
       # 测试
@@ -43,6 +44,9 @@ linters:
     - tparallel # 测试缺少 t.Parallel()
 
   settings:
+    godox:
+      keywords: [XXX, BUG] # 只标非规范写法；TODO/FIXME/HACK 本身合法
+
     gocritic:
       enabled-tags:
         - diagnostic
