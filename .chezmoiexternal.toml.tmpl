@@ -1,4 +1,5 @@
-# Upstream repos cloned under $XDG_DATA_HOME (see .chezmoidata/xdg.toml).
+# Git repos cloned into place — upstream tools under $XDG_DATA_HOME (see .chezmoidata/xdg.toml),
+# plus my own nvim config under ~/.config.
 # Tracks upstream default branch; pulled at most once per refreshPeriod
 # (force with `chezmoi apply --refresh-externals`).
 
@@ -16,3 +17,13 @@
     type = "git-repo"
     url = "git@github.com:mattmc3/antidote.git"
     refreshPeriod = "168h"
+
+# Neovim config — my own repo, edited and pushed from inside the clone, so the refresh
+# pull is --ff-only: local commits or a dirty tree fail the pull loudly instead of
+# chezmoi growing merge commits in it. Literal .config: see .chezmoidata/xdg.toml.
+[".config/nvim"]
+    type = "git-repo"
+    url = "git@github.com:Nagato-Yuzuru/my-nvim-config.git"
+    refreshPeriod = "168h"
+    [".config/nvim".pull]
+        args = ["--ff-only"]
