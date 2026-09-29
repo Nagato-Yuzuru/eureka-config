@@ -1,0 +1,15 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# ///
+# chezmoi modify_ filter for ~/.claude/settings.json. chezmoi renders every
+# claude-managed.d fragment into this file, so each diff, status, and apply merges
+# the source's fragments as they render now. The engine is tools/claude_managed.py.
+import sys
+
+sys.dont_write_bytecode = True  # no __pycache__ inside the chezmoi source tree
+sys.path.insert(0, {{ joinPath .chezmoi.sourceDir "tools" | toJson }})
+import claude_managed
+
+FRAGMENTS = {{ includeTemplate "claude-managed-fragments" . | toJson }}
+sys.exit(claude_managed.main(FRAGMENTS, {{ joinPath .chezmoi.sourceDir "claude-managed.d" | toJson }}))

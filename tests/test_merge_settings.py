@@ -11,11 +11,10 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-from conftest import ENGINE_PATH
+from conftest import engine_argv
 
 
 def hook_entry(command: str, matcher: str = "Bash", timeout: int = 5) -> dict:
@@ -649,18 +648,11 @@ def run_filter(
     env = dict(os.environ)
     env.pop("CLAUDE_MANAGED_FORCE", None)  # never inherit force from the developer's shell
     env.update(env_extra or {})
-    fragment_dir = tmp_path / "claude-managed.d"
-    if fragments is not None:
-        fragment_dir.mkdir(exist_ok=True)
-        for name, fragment in fragments.items():
-            content = fragment if isinstance(fragment, str) else json.dumps(fragment)
-            (fragment_dir / name).write_text(content)
     if base is not None:
         (tmp_path / "base.json").write_text(json.dumps(base))
-    env["CLAUDE_FRAGMENT_DIR"] = str(fragment_dir)
     env["CLAUDE_BASE_FILE"] = str(tmp_path / "base.json")
     return subprocess.run(
-        [sys.executable, str(ENGINE_PATH)],
+        engine_argv("main", fragments or {}, "src/claude-managed.d"),
         input=stdin,
         capture_output=True,
         text=True,
@@ -736,13 +728,7 @@ class TestFilterIO:
         assert result.stdout == ""
         assert "settings.json is not valid JSON" in result.stderr
 
-    def test_missing_dir_passes_through(self, tmp_path):
-        result = run_filter('{"keep": true}', tmp_path)
-        assert result.returncode == 0
-        assert result.stdout == '{"keep": true}'
-        assert "passthrough" in result.stderr
-
-    def test_empty_dir_retires_everything_we_managed(self, tmp_path):
+    def test_zero_fragments_retire_everything_we_managed(self, tmp_path):
         result = run_filter('{"a": 1, "keep": true}', tmp_path, fragments={}, base={"a": 1})
         assert result.returncode == 0
         assert json.loads(result.stdout) == {"keep": True}

@@ -1,27 +1,28 @@
-#!/usr/bin/env -S uv run --script
 # ruff: noqa: T201
-# /// script
-# requires-python = ">=3.12"
-# ///
 """Merge the chezmoi-managed fragments into Claude Code's settings.json.
 
-chezmoi ``modify_`` filter: receives the current contents of
+Engine behind two chezmoi wrappers, which import this file from the source
+dir and pass it the fragments chezmoi rendered into them:
+``dot_claude/modify_settings.json.tmpl`` calls ``main`` and
+``run_onchange_after_snapshot-claude-managed.py.tmpl`` calls ``snapshot``.
+
+``main`` is a ``modify_`` filter: it receives the current contents of
 ``~/.claude/settings.json`` on stdin and writes the merged contents to stdout.
-chezmoi runs this on every ``diff``/``status``/``apply``/``--dry-run``, so it
+chezmoi runs it on every ``diff``/``status``/``apply``/``--dry-run``, so it
 must stay a pure filter — stdout is the only side effect.
 
 Data / state / command:
-    data     ``~/.claude/claude-managed.d/*.json`` — one fragment per feature,
-             composed in filename order into the settings subset we own.
-             chezmoi targets themselves, applied before this filter (targets
-             apply in name order and ``claude-managed.d`` < ``settings.json``).
-             The source dir is ``exact_``, so deleting a feature's source file
-             deletes its rendered fragment on the same apply.
+    data     ``claude-managed.d/*.json[.tmpl]`` in the chezmoi source — one
+             fragment per feature, rendered by chezmoi into the wrappers
+             (``.chezmoitemplates/claude-managed-fragments``) and composed in
+             name order into the settings subset we own. Every chezmoi command
+             therefore merges the source's fragments as they render now:
+             ``chezmoi diff`` shows what a fragment edit does to settings.json,
+             and applying settings.json alone uses the current fragments.
     state    ``~/.claude/.claude-managed.applied.json`` — the *composed*
-             fragment as of the last converged apply, advanced by
-             ``run_onchange_after_snapshot-claude-managed.py.tmpl`` only after
-             verifying settings == merge result, so it can never run ahead of
-             the target. The base is what distinguishes "our own value evolved
+             fragment as of the last converged apply, advanced by ``snapshot``
+             only after verifying settings == merge result, so it can never
+             run ahead of the target. The base is what distinguishes "our own value evolved
              -> converge" from "someone else changed it -> conflict", and "left
              the fragment -> retire" from "foreign -> keep".
              Format: the composed data plus a top-level ``"$merge"`` holding
@@ -75,9 +76,8 @@ Compose (fragments -> one effective fragment, before the three-way merge):
     derivable claim key is a compose error — all fragments are chezmoi-managed,
     so these are our own authoring bugs: reported together, exit 1, target
     untouched.
-    An existing-but-empty fragment dir composes to the empty fragment and
-    retires everything we ever managed; a *missing* dir means "not deployed
-    here" and passes settings through untouched.
+    Zero fragments compose to the empty fragment and retire everything we
+    ever managed.
 
 Retirement (a path in base but gone from the composed fragment): value still
 == base -> removed; objects recurse per key, keeping foreign keys. Anything
@@ -658,9 +658,7 @@ def merge_composed(
     return merger
 
 
-# Path resolution — env overrides exist for tests and manual runs. The snapshot
-# script (run_onchange_after_snapshot-claude-managed.py.tmpl) imports these so
-# both sides always agree on locations.
+# Path resolution — env overrides exist for tests and manual runs.
 
 
 def _env_path(var: str, default: Path) -> Path:
@@ -669,10 +667,6 @@ def _env_path(var: str, default: Path) -> Path:
 
 def settings_file() -> Path:
     return _env_path("CLAUDE_SETTINGS_FILE", Path.home() / ".claude/settings.json")
-
-
-def fragment_dir() -> Path:
-    return _env_path("CLAUDE_FRAGMENT_DIR", Path.home() / ".claude/claude-managed.d")
 
 
 def base_file() -> Path:
@@ -712,28 +706,28 @@ def load_base(path: Path) -> Base:
         return Base(data=strip_reserved(raw), policy=None)
 
 
-def load_fragments(directory: Path) -> list[tuple[str, dict[str, Json]]]:
-    """Parse every *.json fragment in filename order.
+def parse_fragments(rendered: str) -> list[tuple[str, dict[str, Json]]]:
+    """Parse the fragments a wrapper embeds — ``[[name, text], ...]`` — in name order.
 
     A corrupt fragment is a hard error (they are chezmoi-managed; fail loudly).
 
     Raises:
-        ExceptionGroup: of json.JSONDecodeError (file context via ``add_note``)
-        and TypeError, collected across the whole directory, not just the first.
+        ExceptionGroup: of json.JSONDecodeError (fragment context via ``add_note``)
+        and TypeError, collected across every fragment, not just the first.
     """
     fragments: list[tuple[str, dict[str, Json]]] = []
     errors: list[Exception] = []
-    for path in sorted(directory.glob("*.json")):
+    for name, text in sorted(json.loads(rendered)):
         try:
-            parsed = json.loads(path.read_text())
+            parsed = json.loads(text)
         except json.JSONDecodeError as exc:
-            exc.add_note(f"{path.name}: invalid JSON")
+            exc.add_note(f"{name}: invalid JSON")
             errors.append(exc)
             continue
         if not isinstance(parsed, dict):
-            errors.append(TypeError(f"{path.name}: fragment must be a JSON object"))
+            errors.append(TypeError(f"{name}: fragment must be a JSON object"))
             continue
-        fragments.append((path.name, parsed))
+        fragments.append((name, parsed))
     if errors:
         raise ExceptionGroup("invalid fragments", errors)
     return fragments
@@ -744,7 +738,9 @@ def _describe(exc: BaseException) -> str:
     return ": ".join((*getattr(exc, "__notes__", ()), str(exc)))
 
 
-def main() -> int:
+def main(rendered: str, source: str) -> int:
+    """The modify_ filter over the ``rendered`` fragments; ``source`` names where they
+    live, for the messages."""
     raw = sys.stdin.read()
     has_input = bool(raw.strip())
     try:
@@ -759,20 +755,13 @@ def main() -> int:
         )
         return 1
 
-    directory = fragment_dir()
-    if not directory.is_dir():
-        # Not deployed on this machine; pass the target through untouched.
-        print(f"claude-managed: fragment dir {directory} missing; passthrough", file=sys.stderr)
-        sys.stdout.write(raw if has_input else "{}\n")
-        return 0
-
     try:
-        composed = compose(load_fragments(directory))
+        composed = compose(parse_fragments(rendered))
     except ExceptionGroup as eg:
         for exc in eg.exceptions:
             print(f"⚠ claude-managed: {_describe(exc)}", file=sys.stderr)
         print(
-            f"  settings.json left untouched. Fix the fragments in {directory}, then re-run.",
+            f"  settings.json left untouched. Fix the fragments in {source}, then re-run.",
             file=sys.stderr,
         )
         return 1
@@ -799,7 +788,7 @@ def main() -> int:
         retry = ",".join(c.path for c in (*result.conflicts, *result.forced))
         print(
             "  settings.json left untouched. Take a live value by aligning its fragment"
-            f" (chezmoi edit {directory}); take the desired values with:\n"
+            f" in {source}; take the desired values with:\n"
             f"    CLAUDE_MANAGED_FORCE='{retry}' chezmoi apply",
             file=sys.stderr,
         )
@@ -824,5 +813,57 @@ def main() -> int:
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+def snapshot(rendered: str) -> int:
+    """Advance the base once the settings merge has converged.
+
+    Runs after all targets, including the settings merge, have been written. The
+    base only advances after VERIFYING that live settings == merge result with
+    zero conflicts. If the fragments don't compose, or the merge target failed or
+    was skipped, the base stays put — a stale base can only produce fail-safe
+    conflicts, never silent overwrites, and it can never run ahead of settings and
+    manufacture false ones. Each refusal is a quiet no-op: the filter already
+    reported the real problem this apply.
+    """
+    try:
+        composed = compose(parse_fragments(rendered))
+    except ExceptionGroup:
+        print(
+            "claude-managed: fragments not composable; base snapshot left untouched",
+            file=sys.stderr,
+        )
+        return 0
+
+    try:
+        current = json.loads(settings_file().read_text())
+    except FileNotFoundError:
+        current = {}
+    except json.JSONDecodeError:
+        print(
+            "claude-managed: settings.json is not valid JSON; base snapshot left untouched",
+            file=sys.stderr,
+        )
+        return 0
+    if not isinstance(current, dict):
+        print(
+            "claude-managed: settings.json is not a JSON object; base snapshot left untouched",
+            file=sys.stderr,
+        )
+        return 0
+
+    path = base_file()
+    result = merge_composed(current, composed, load_base(path))
+    if result.conflicts or not _same(result.merged, current):
+        print(
+            "claude-managed: settings not converged; base snapshot left untouched", file=sys.stderr
+        )
+        return 0
+
+    text = json.dumps(base_snapshot(composed), indent=2, ensure_ascii=False) + "\n"
+    try:
+        if path.read_text() == text:
+            return 0
+    except FileNotFoundError:
+        pass
+    path.write_text(text)
+    print("✓ claude-managed: base snapshot advanced")
+    return 0

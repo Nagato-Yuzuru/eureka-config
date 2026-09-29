@@ -1,116 +1,17 @@
 #!/usr/bin/env -S uv run --script
-# ruff: noqa: T201
 # /// script
 # requires-python = ">=3.12"
 # ///
-"""Advance the three-way-merge base once the settings merge has converged.
-
-Counterpart of ``dot_claude/modify_settings.json`` (which it imports for the
-compose + merge engine and path resolution). ``run_onchange_after_``: re-runs
-exactly when this rendered file changes, and the fragment-hash line below ties
-that to the content of ``dot_claude/exact_claude-managed.d/`` — adding,
-editing, and deleting a fragment all change the rendered hash list — so the
-base advances on the same apply that changed the fragments, after all targets
-(including the settings merge) have been written.
-
-The base is only advanced after VERIFYING that live settings == merge result
-with zero conflicts. If the fragments don't compose, or the merge target
-failed or was skipped, the base stays put — a stale base can only produce
-fail-safe conflicts, never silent overwrites, and it can never run ahead of
-settings and manufacture false ones.
-
-The base records the composed policy next to the data (``base_snapshot`` in the
-engine owns the format), so retirement can follow the strategies the values
-were written under even after their declaring fragment is gone.
-"""
-
-# chezmoi's glob resolves relative patterns against the DESTINATION dir, so the
-# source dir must be joined explicitly or the list is silently empty.
-# fragment-hash: {{ range glob (joinPath .chezmoi.sourceDir "dot_claude/exact_claude-managed.d/*") }}{{ base . }}={{ include . | sha256sum }} {{ end }}
-
-from __future__ import annotations
-
-import importlib.machinery
-import importlib.util
-import json
-import os
+# Advances the settings merge's base snapshot once an apply has converged; the
+# engine is tools/claude_managed.py. chezmoi re-runs a run_onchange_ script when its
+# rendered text changes, and this text embeds the rendered fragments, so it re-runs
+# exactly when a fragment renders differently — an edit, an added or deleted
+# fragment, or a .chezmoidata change a fragment template reads.
 import sys
-from pathlib import Path
 
+sys.dont_write_bytecode = True  # no __pycache__ inside the chezmoi source tree
+sys.path.insert(0, {{ joinPath .chezmoi.sourceDir "tools" | toJson }})
+import claude_managed
 
-def load_engine():
-    # Never write __pycache__ next to the engine: bytecode inside the chezmoi
-    # source tree would itself be picked up as a source-state entry on the next
-    # apply (dot_claude/__pycache__/modify_*.pyc parses as a modify_ script).
-    sys.dont_write_bytecode = True
-    engine_path = Path(
-        os.environ.get("CLAUDE_ENGINE_FILE")
-        or Path(os.environ["CHEZMOI_SOURCE_DIR"]) / "dot_claude" / "modify_settings.json"
-    )
-    loader = importlib.machinery.SourceFileLoader("modify_settings", str(engine_path))
-    spec = importlib.util.spec_from_loader("modify_settings", loader)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["modify_settings"] = module
-    loader.exec_module(module)
-    return module
-
-
-def main() -> int:
-    engine = load_engine()
-
-    directory = engine.fragment_dir()
-    if not directory.is_dir():
-        return 0
-    try:
-        composed = engine.compose(engine.load_fragments(directory))
-    except ExceptionGroup:
-        print(
-            "claude-managed: fragments not composable; base snapshot left untouched",
-            file=sys.stderr,
-        )
-        return 0  # the modify target already reported the real problem
-
-    settings_path = engine.settings_file()
-    try:
-        current = json.loads(settings_path.read_text())
-    except FileNotFoundError:
-        current = {}
-    except json.JSONDecodeError:
-        # Same live file the modify_ target itself would refuse to parse; that
-        # target already reported this to the user this apply. Quiet no-op,
-        # like the "not composable"/"not converged" cases below.
-        print(
-            "claude-managed: settings.json is not valid JSON; base snapshot left untouched",
-            file=sys.stderr,
-        )
-        return 0
-    if not isinstance(current, dict):
-        print(
-            "claude-managed: settings.json is not a JSON object; base snapshot left untouched",
-            file=sys.stderr,
-        )
-        return 0
-
-    base_path = engine.base_file()
-    result = engine.merge_composed(current, composed, engine.load_base(base_path))
-    if result.conflicts or not engine._same(result.merged, current):
-        print(
-            "claude-managed: settings not converged; base snapshot left untouched",
-            file=sys.stderr,
-        )
-        return 0  # the modify target already reported the real problem
-
-    text = json.dumps(engine.base_snapshot(composed), indent=2, ensure_ascii=False) + "\n"
-    try:
-        if base_path.read_text() == text:
-            return 0
-    except FileNotFoundError:
-        pass
-    base_path.write_text(text)
-    print("✓ claude-managed: base snapshot advanced")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+FRAGMENTS = {{ includeTemplate "claude-managed-fragments" . | toJson }}
+sys.exit(claude_managed.snapshot(FRAGMENTS))

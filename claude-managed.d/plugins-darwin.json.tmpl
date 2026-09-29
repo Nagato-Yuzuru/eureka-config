@@ -1,0 +1,10 @@
+{{- /* macOS only: the playwright plugin drives a real browser, nothing to drive on a headless box. */ -}}
+{{ if eq .chezmoi.os "darwin" -}}
+{
+  "enabledPlugins": {
+    "playwright@claude-plugins-official": true
+  }
+}
+{{- else -}}
+{}
+{{ end -}}

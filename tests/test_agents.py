@@ -38,7 +38,7 @@ from inventory.model import ClaudeDoc
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AGENTS_DIR = REPO_ROOT / "dot_claude" / "agents"
 HOOKS_DIR = REPO_ROOT / "dot_claude" / "hooks"
-MANAGED_DIR = REPO_ROOT / "dot_claude" / "exact_claude-managed.d"
+MANAGED_DIR = REPO_ROOT / "claude-managed.d"
 MODEL_HOOK = HOOKS_DIR / "executable_require-agent-model.sh"
 WORKFLOW_HOOK = HOOKS_DIR / "executable_require-workflow-routing.sh"
 ROUTING_TEXT = HOOKS_DIR / "agent-routing.txt.tmpl"

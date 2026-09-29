@@ -172,14 +172,18 @@ tools whose completion nobody else installs need a recipe.
 | `run_onchange_after_install-yazi-*` | `ya pkg install` on `package.toml` change |
 | `run_onchange_after_refresh-*.sh` | regenerates zsh completions on recipe list change |
 | `dot_config/mise/tasks/` | `refresh-completions`, `audit-completions` |
-| `dot_claude/` | Claude Code: CLAUDE.md, hooks, skills, managed-settings fragments |
+| `dot_claude/` | Claude Code: CLAUDE.md, hooks, skills, the settings.json merge |
+| `claude-managed.d/` | managed-settings fragments, rendered into the merge (not deployed) |
 | `tests/` | pytest for the inventory and settings merge engine |
 
 ## Claude Code managed settings
 
 `~/.claude/settings.json` is co-owned: chezmoi manages a declared subset via
-per-feature fragments in `dot_claude/exact_claude-managed.d/`, everything else
-belongs to Claude Code and the user.
+per-feature fragments in `claude-managed.d/`, everything else belongs to Claude
+Code and the user. The fragments are not deployed: chezmoi renders them into
+`dot_claude/modify_settings.json.tmpl` (the merge) and
+`run_onchange_after_snapshot-claude-managed.py.tmpl` (the three-way-merge base),
+so `chezmoi diff` shows what a fragment edit does to `settings.json`.
 
 ### Operations
 
@@ -187,10 +191,9 @@ belongs to Claude Code and the user.
 - **Remove a feature:** delete its source file. Managed hooks and list elements
   vanish on the next apply; user-modified values are left with a warning.
 - **Scope to one platform:** split into `<feature>.json` and
-  `<feature>-<os>.json`, exclude the second in `.chezmoiignore`.
+  `<feature>-<os>.json.tmpl`, the second rendering `{}` off its platform.
 - **Resolve a conflict:** `chezmoi apply` exits 1 when the live value differs
-  from what we own. To keep the live value, align the fragment
-  (`chezmoi edit`). To take ours, paste the `CLAUDE_MANAGED_FORCE='...'`
+  from what we own. To keep the live value, align the fragment. To take ours, paste the `CLAUDE_MANAGED_FORCE='...'`
   command from the error output.
 
 ### Fragment `$merge` strategies
@@ -203,12 +206,11 @@ belongs to Claude Code and the user.
 
 `$legacyHooks` lists retired hook basenames to purge.
 
-Full semantics: docstring of `dot_claude/modify_settings.json`, tested in
-`tests/`.
+Full semantics: docstring of `tools/claude_managed.py`, tested in `tests/`.
 
 ### Plugins
 
-`plugins.json` holds plugins for every machine; `plugins-darwin.json` holds
+`plugins.json` holds plugins for every machine; `plugins-darwin.json.tmpl` holds
 macOS-only ones. Add a plugin id to the right file, `chezmoi apply`. Delete
 the line and the key is retired on the next apply.
 

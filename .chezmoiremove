@@ -1,0 +1,2 @@
+# Once deployed as fragment files; the settings.json wrappers now embed them.
+.claude/claude-managed.d

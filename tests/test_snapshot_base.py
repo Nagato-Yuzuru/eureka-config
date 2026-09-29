@@ -10,10 +10,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
-from conftest import ENGINE_PATH, SNAPSHOT_PATH
+from conftest import engine_argv
 
 FRAGMENTS = {
     "core.json": {
@@ -34,39 +33,38 @@ CONVERGED = {"permissions": {"ask": ["Agent(model:*fable*)", "Extra"]}, "a": 1, 
 def run_snapshot(
     tmp_path: Path,
     settings: dict | list | str | None,
-    fragments: dict[str, dict] | None = FRAGMENTS,
+    fragments: dict[str, dict] = FRAGMENTS,
     base: dict | None = None,
 ):
-    """Run the snapshot script. A ``str`` settings value is written verbatim
+    """Run the snapshot. A ``str`` settings value is written verbatim
     (for deliberately-invalid content); anything else is JSON-serialized."""
     env = dict(os.environ)
-    fragment_dir = tmp_path / "claude-managed.d"
-    if fragments is not None:
-        fragment_dir.mkdir(exist_ok=True)
-        for name, fragment in fragments.items():
-            (fragment_dir / name).write_text(json.dumps(fragment))
     if settings is not None:
         content = settings if isinstance(settings, str) else json.dumps(settings)
         (tmp_path / "settings.json").write_text(content)
     if base is not None:
         (tmp_path / "base.json").write_text(json.dumps(base))
     env |= {
-        "CLAUDE_ENGINE_FILE": str(ENGINE_PATH),
-        "CLAUDE_FRAGMENT_DIR": str(fragment_dir),
         "CLAUDE_SETTINGS_FILE": str(tmp_path / "settings.json"),
         "CLAUDE_BASE_FILE": str(tmp_path / "base.json"),
     }
     return subprocess.run(
-        [sys.executable, str(SNAPSHOT_PATH)], capture_output=True, text=True, env=env
+        engine_argv("snapshot", fragments), capture_output=True, text=True, env=env
     )
 
 
-def run_filter(stdin: str, env_extra: dict[str, str]) -> subprocess.CompletedProcess:
+def run_filter(
+    stdin: str, fragments: dict[str, dict], env_extra: dict[str, str]
+) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     env.update(env_extra)
     env.pop("CLAUDE_MANAGED_FORCE", None)
     return subprocess.run(
-        [sys.executable, str(ENGINE_PATH)], input=stdin, capture_output=True, text=True, env=env
+        engine_argv("main", fragments, "src/claude-managed.d"),
+        input=stdin,
+        capture_output=True,
+        text=True,
+        env=env,
     )
 
 
@@ -89,17 +87,12 @@ class TestSnapshot:
         then retires its ensure list per element via the recorded policy."""
         run_snapshot(tmp_path, CONVERGED)
         settings = json.dumps(CONVERGED)
-        env = {
-            "CLAUDE_FRAGMENT_DIR": str(tmp_path / "claude-managed.d"),
-            "CLAUDE_BASE_FILE": str(tmp_path / "base.json"),
-        }
-        converged = run_filter(settings, env)
+        env = {"CLAUDE_BASE_FILE": str(tmp_path / "base.json")}
+        converged = run_filter(settings, FRAGMENTS, env)
         assert (converged.returncode, converged.stdout) == (0, settings)
 
-        (tmp_path / "claude-managed.d" / "extra.json").unlink()
-        (tmp_path / "claude-managed.d" / "core.json").write_text(json.dumps({"a": 1}))
         live = {**CONVERGED, "permissions": {"ask": ["Agent(model:*fable*)", "user", "Extra"]}}
-        retired = run_filter(json.dumps(live), env)
+        retired = run_filter(json.dumps(live), {"core.json": {"a": 1}}, env)
         assert retired.returncode == 0, retired.stderr
         assert json.loads(retired.stdout) == {
             "permissions": {"ask": ["user"]},
@@ -124,7 +117,7 @@ class TestSnapshot:
         assert json.loads((tmp_path / "base.json").read_text()) == {"x": True}
 
     def test_full_retirement_with_converged_settings_advances_base_to_empty(self, tmp_path):
-        """An emptied fragment dir (existing, zero fragments) composes to
+        """Zero fragments compose to
         `{}`; once live settings reflect the retirement, the base must
         advance to `{}` too, not get stuck on the last non-empty snapshot.
         """
@@ -176,8 +169,3 @@ class TestSnapshot:
         assert result.returncode == 0
         assert result.stdout == ""
         assert (tmp_path / "base.json").stat().st_mtime_ns == mtime
-
-    def test_missing_fragment_dir_is_noop(self, tmp_path):
-        result = run_snapshot(tmp_path, None, fragments=None)
-        assert result.returncode == 0
-        assert not (tmp_path / "base.json").exists()

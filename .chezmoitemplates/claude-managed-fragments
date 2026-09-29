@@ -1,0 +1,12 @@
+{{- /* Every claude-managed.d fragment, rendered, as a JSON array of [name, text] in filename order; a .json.tmpl fragment is named without its .tmpl. Called with the root context. */ -}}
+{{- $out := list -}}
+{{- range glob (joinPath .chezmoi.sourceDir "claude-managed.d/*") -}}
+{{- if hasSuffix ".json.tmpl" . -}}
+{{- $out = append $out (list (base . | trimSuffix ".tmpl") (includeTemplate . $)) -}}
+{{- else if hasSuffix ".json" . -}}
+{{- $out = append $out (list (base .) (include .)) -}}
+{{- else -}}
+{{- fail (printf "claude-managed.d/%s: a fragment is *.json or *.json.tmpl" (base .)) -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $out -}}
