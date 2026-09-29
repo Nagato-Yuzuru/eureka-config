@@ -1,25 +1,34 @@
 #!/usr/bin/env bash
-# PreToolUse hook: block npm/npx in favor of pnpm/deno
-# Reads tool input from stdin (JSON with tool_name and tool_input)
+# PreToolUse hook: block npm/npx in Bash commands in favor of pnpm/deno.
+# Reads tool input from stdin (JSON with tool_name and tool_input). Matching uses only
+# bash and jq, so no missing tool can turn a match into a silent pass; without jq it
+# blocks rather than guess.
 
-set -euo pipefail
+set -uo pipefail
 
-INPUT=$(cat)
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
-
-# Only check Bash tool calls
-if [[ "$TOOL_NAME" != "Bash" ]]; then
-    exit 0
+if ! command -v jq >/dev/null; then
+    echo "BLOCKED: jq is unavailable, so block-npm.sh cannot check this command." >&2
+    exit 2
 fi
 
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+INPUT=$(cat)
+[[ "$(jq -r '.tool_name // empty' <<<"$INPUT")" == "Bash" ]] || exit 0
+COMMAND=$(jq -r '.tool_input.command // empty' <<<"$INPUT")
 
-# Check for npm/npx usage in command position only.
-# 1. Strip single- and double-quoted strings so text like echo "use npm" is ignored.
-# 2. Strip comments (# ...).
-# 3. Match npm/npx only at command position: start of line, or after && || ; | ( — optionally preceded by sudo.
-SANITIZED=$(echo "$COMMAND" | sed "s/'[^']*'//g; s/\"[^\"]*\"//g; s/#.*//")
-if echo "$SANITIZED" | grep -qP '(?:^|&&|\|\|?|;|\()\s*(?:sudo\s+)?\bn(?:pm|px)\b'; then
+# npm/npx only in command position:
+# 1. Strip single- and double-quoted strings, then comments, so `echo "use npm"` is ignored.
+# 2. Newlines separate commands like `;` does.
+# 3. Command position: the start, or after ; & | ( ` $( — then any run of wrappers
+#    (sudo, command, env, exec, time, nohup) and VAR=value assignments, then npm/npx,
+#    bare or as a path, ending the word.
+SANITIZED=$(sed "s/'[^']*'//g; s/\"[^\"]*\"//g; s/#.*//" <<<"$COMMAND")
+SANITIZED=${SANITIZED//$'\n'/;}
+# shellcheck disable=SC2016 # a literal backtick: it opens a command substitution
+start='(^|[;&|(`])[[:space:]]*'
+wrappers='((sudo|command|env|exec|time|nohup)[[:space:]]+|[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*'
+# shellcheck disable=SC2016 # a literal backtick: it opens a command substitution
+word='([^[:space:];&|()`]*/)?np[mx]([[:space:];&|)`]|$)'
+if [[ "$SANITIZED" =~ $start$wrappers$word ]]; then
     cat >&2 <<'EOF'
 BLOCKED: Do not use npm or npx.
 
