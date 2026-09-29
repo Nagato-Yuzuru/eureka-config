@@ -54,7 +54,7 @@ Prefer `deno run npm:<pkg>` for non-interactive, minimal-access tools (formatter
 
 ## Python
 
-- **Never invoke the system Python or modify system-level packages** — `python(3)`, `pip(3)`, `python -m pip`, `sudo pip`, `virtualenv`, `poetry` are all forbidden, even inside a venv. Everything goes through `uv`.
+- **Never invoke the system Python or modify system-level packages** — everything goes through `uv`, even inside a venv. (A PreToolUse hook blocks `python`, `pip`, `virtualenv`, and `poetry`; its error message carries this map.)
 - Static type checking: `ty`.
 - Single-file scripts with deps: PEP 723 inline metadata + `uv run file.py`, not a full project. Manage the metadata through uv — `uv init --script` to create, `uv add --script` to add deps — not by hand-editing the inline block (it is a tool-owned file, per principle-reproducible-state).
 

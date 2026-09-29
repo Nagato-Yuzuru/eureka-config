@@ -1,7 +1,8 @@
-"""Executable spec for dot_claude/hooks/executable_block-npm.sh, the PreToolUse hook that
-refuses npm/npx in Bash commands (pnpm and deno replace them).
+"""Executable spec for dot_claude/hooks/executable_block-package-managers.sh, the PreToolUse
+hook that refuses npm/npx (pnpm and deno replace them) and python/pip/virtualenv/poetry (uv
+replaces them) in Bash commands.
 
-- npm/npx in command position is blocked (exit 2): at the start, after a separator or a
+- a blocked name in command position is blocked (exit 2): at the start, after a separator or a
   subshell/substitution opener, behind the common wrappers (sudo, command, env, exec, time,
   nohup) and variable assignments, or spelled as a path
 - the same words anywhere else pass: inside quotes, in comments, as parts of other words
@@ -20,7 +21,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-HOOK = REPO_ROOT / "dot_claude" / "hooks" / "executable_block-npm.sh"
+HOOK = REPO_ROOT / "dot_claude" / "hooks" / "executable_block-package-managers.sh"
 BASH = "/bin/bash"  # the oldest bash the hook must run under (3.2 on macOS)
 
 
@@ -111,3 +112,49 @@ def test_missing_jq_blocks(tmp_path: Path):
     result = run("ls", path=str(empty))
     assert result.returncode == 2
     assert "jq is unavailable" in result.stderr
+
+
+PYTHON_BLOCKED = [
+    "python script.py",
+    "python3 -c 'print(1)'",
+    "python3.12 -m venv .venv",
+    "python -m pip install x",
+    "pip install requests",
+    "pip3 install x",
+    "sudo pip install x",
+    "virtualenv .venv",
+    "poetry add x",
+    "/usr/bin/python3 x.py",
+    ".venv/bin/python x.py",
+    "cd app && python manage.py",
+    "FOO=1 python x.py",
+    "echo $(python -V)",
+]
+
+PYTHON_ALLOWED = [
+    "uv run python x.py",
+    "uv run x.py",
+    "uv add requests",
+    "uvx ruff check",
+    "uv run --with deptry deptry .",
+    "echo 'python x.py'",
+    "ls python/",
+    "cat pip.conf",
+    "pipx list",
+    "python-config --help",
+    "git log -- pyproject.toml",
+    "grep -r poetry docs",
+]
+
+
+@pytest.mark.parametrize("command", PYTHON_BLOCKED)
+def test_python_tools_in_command_position_are_blocked(command: str):
+    result = run(command)
+    assert result.returncode == 2, command
+    assert "everything goes through uv" in result.stderr
+
+
+@pytest.mark.parametrize("command", PYTHON_ALLOWED)
+def test_uv_and_python_outside_command_position_pass(command: str):
+    result = run(command)
+    assert (result.returncode, result.stderr) == (0, ""), command
