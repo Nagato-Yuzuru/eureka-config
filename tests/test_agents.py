@@ -137,10 +137,28 @@ def test_memory_agents_keep_write_tools():
 
 def test_managed_hook_commands_exist():
     referenced: set[str] = set()
-    for fragment in sorted(MANAGED_DIR.glob("*.json*")):
-        referenced.update(re.findall(r"/\.claude/hooks/([A-Za-z0-9_.-]+)", fragment.read_text()))
+    for source in [*sorted(MANAGED_DIR.glob("*.json*")), *agent_files()]:
+        referenced.update(re.findall(r"/\.claude/hooks/([A-Za-z0-9_.-]+)", source.read_text()))
     missing = sorted(name for name in referenced if not (HOOKS_DIR / f"executable_{name}").exists())
-    assert not missing, f"fragments reference hooks with no executable_ source: {missing}"
+    assert not missing, f"fragments or agents reference hooks with no executable_ source: {missing}"
+
+
+def test_explore_registers_its_write_gate():
+    """The gate relies on running only inside explore, so explore registers it itself."""
+    entries = frontmatter(AGENTS_DIR / "explore.md.tmpl")["hooks"]["PreToolUse"]
+    gated = {
+        tool
+        for entry in entries
+        if any(
+            h["command"].endswith("/.claude/hooks/scope-explore-writes.sh") for h in entry["hooks"]
+        )
+        for tool in entry["matcher"].split("|")
+    }
+    assert gated >= WRITE_TOOLS
+    for fragment in MANAGED_DIR.glob("*.json*"):
+        assert "scope-explore-writes" not in fragment.read_text(), (
+            f"{fragment.name}: a global registration would gate every agent's writes"
+        )
 
 
 # --- routing: one source -----------------------------------------------------------

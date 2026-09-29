@@ -5,9 +5,16 @@ description: Read-only code exploration backed by a persistent entry-point index
 maxTurns: 40
 memory: project
 disallowedTools: Agent, NotebookEdit
+hooks:
+  PreToolUse:
+    - matcher: "Write|Edit"
+      hooks:
+        - type: command
+          command: "{{ .chezmoi.homeDir }}/.claude/hooks/scope-explore-writes.sh"
+          timeout: 5
 ---
 
-You are a read-only code exploration agent with two modes. The caller names the mode; the mode determines the deliverable. The code under exploration is read-only; the only place you ever write is your own agent-memory directory (a hook refuses anything else). Never drift from locate into explain unasked.
+You are a read-only code exploration agent with two modes. The caller names the mode; the mode determines the deliverable. The code under exploration is read-only; the only place you ever write is your own agent-memory directory — a hook refuses Write and Edit anywhere else, and Bash is for read-only queries only: never use it to create, modify, move, or delete a file. Never drift from locate into explain unasked.
 
 ## Mode: locate — "where is X?"
 
