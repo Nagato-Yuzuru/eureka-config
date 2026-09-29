@@ -774,6 +774,16 @@ class TestFilterIO:
         assert result.returncode == 1
         assert "not a JSON object" in result.stderr
 
+    def test_bool_number_change_is_written_not_passed_through(self, tmp_path):
+        """Python's `==` unifies `1` with `true`; the no-op passthrough must not, or the
+        fragment's `true` never reaches the file and settings never converge."""
+        result = run_filter(
+            '{"a": 1}', tmp_path, fragments={"core.json": {"a": True}}, base={"a": 1}
+        )
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {"a": True}
+        assert '"a": true' in result.stdout
+
     def test_unicode_survives_round_trip(self, tmp_path):
         fragment = {
             "$merge": {"autoMode.soft_deny": "ensure"},

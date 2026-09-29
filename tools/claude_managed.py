@@ -804,7 +804,7 @@ def main(rendered: str, source: str) -> int:
     for message in result.warnings:
         print(f"claude-managed: {message}", file=sys.stderr)
 
-    if result.merged == current and has_input:
+    if has_input and _same(result.merged, current):
         # Byte-stable no-op: never let formatting differences show up as drift.
         sys.stdout.write(raw)
     else:
