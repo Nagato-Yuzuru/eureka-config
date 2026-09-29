@@ -221,6 +221,9 @@ items:
       - name: Rename
         key: r
         command: command-prompt -p "Rename session:" -I "#S" "rename-session -- \"%%\""
+      - name: Set path
+        key: d
+        command: command-prompt -p "Session path:" -I "#{session_path}" "attach-session -c \"%%\""
   - name: +Client
     key: C
     menu:
