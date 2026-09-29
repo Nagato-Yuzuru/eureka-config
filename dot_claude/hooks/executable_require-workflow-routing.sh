@@ -6,9 +6,22 @@
 # be decided mechanically, so this hook doesn't try; the deny message below carries
 # the routing table so the choice at least gets made deliberately.
 
-input=$(cat)
+deny() {
+  local reason="Workflow script rejected: $1"
+  if command -v jq >/dev/null; then
+    jq -cn --arg reason "$reason" \
+      '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
+  else
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Workflow script rejected: jq is unavailable, so require-workflow-routing.sh cannot check the call."}}'
+  fi
+  exit 0
+}
 
-tool=$(jq -r '.tool_name // empty' <<<"$input")
+command -v jq >/dev/null || deny "jq is unavailable"
+input=$(cat)
+jq -e 'type == "object"' >/dev/null 2>&1 <<<"$input" || deny "the hook input is not a JSON object"
+
+tool=$(jq -r '.tool_name | strings' <<<"$input")
 if [[ "$tool" != "Workflow" ]]; then
   exit 0
 fi
@@ -37,7 +50,4 @@ fi
 
 routing=$(cat "$HOME/.claude/hooks/agent-routing.txt" 2>/dev/null) ||
   routing="(missing: ~/.claude/hooks/agent-routing.txt; chezmoi apply renders it)"
-reason="Workflow script rejected: it calls agent() but contains no 'model:' or 'agentType:' routing anywhere, so every agent would silently inherit the main-loop model. Set opts.model on each agent() call by the class of work, or opts.agentType to one of the pinned agents, then re-issue. Routing table: $routing"
-
-jq -cn --arg reason "$reason" \
-  '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
+deny "it calls agent() but contains no 'model:' or 'agentType:' routing anywhere, so every agent would silently inherit the main-loop model. Set opts.model on each agent() call by the class of work, or opts.agentType to one of the pinned agents, then re-issue. Routing table: $routing"

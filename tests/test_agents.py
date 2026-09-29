@@ -16,6 +16,12 @@ project dir) holding synthetic agent files: an Agent/Task call passes only with 
 explicit ``model``, a built-in exempt type, or a local agent whose frontmatter provably
 pins a model. The hook may be stricter than Claude Code's agent loader, never looser.
 Its deny message, like require-workflow-routing.sh's, carries the rendered routing table.
+
+Behavior of require-workflow-routing.sh, a textual screen rather than a JS parse: a
+Workflow whose inline script (or, absent one, readable scriptPath file) calls agent() is
+denied only when no ``model:`` or ``agentType:`` token appears anywhere in it; named
+workflows and scripts without agent() pass. Like require-agent-model.sh, it denies when jq
+is missing or the input is not a JSON object.
 """
 
 from __future__ import annotations
@@ -417,6 +423,87 @@ def test_deny_carries_the_rendered_routing_table(home: Path, hook: Path, payload
 def test_deny_names_a_missing_routing_table(home: Path, hook: Path, payload: object):
     reason = deny_reason(run_hook_raw(home, json.dumps(payload), hook=hook))
     assert reason.endswith("(missing: ~/.claude/hooks/agent-routing.txt; chezmoi apply renders it)")
+
+
+# require-workflow-routing.sh: a textual screen for agent() spawns with no routing at all
+
+
+def workflow_call(tool_input: dict[str, object]) -> dict[str, Any]:
+    return {"tool_name": "Workflow", "tool_input": tool_input}
+
+
+def workflow_decision(home: Path, payload: object) -> str:
+    stdin = payload if isinstance(payload, str) else json.dumps(payload)
+    return run_hook_raw(home, stdin, hook=WORKFLOW_HOOK)
+
+
+ROUTED_SCRIPTS = [
+    "agent('x', {model: 'sonnet'})",
+    "agent('x', {model : 'sonnet'})",
+    "agent('x', {agentType: 'coder'})",
+    "await agent(p, opts)\nconst opts = {\n  model:\n 'haiku' }",
+]
+
+
+@pytest.mark.parametrize("script", ROUTED_SCRIPTS)
+def test_workflow_with_routing_passes(home: Path, script: str):
+    assert workflow_decision(home, workflow_call({"script": script})) == ""
+
+
+@pytest.mark.parametrize("script", ["return 1", "phase('x')", ""])
+def test_workflow_without_agents_passes(home: Path, script: str):
+    assert workflow_decision(home, workflow_call({"script": script})) == ""
+
+
+@pytest.mark.parametrize(
+    "script",
+    ["agent('x', {})", "await agent(prompt)", "parallel([() => agent('a', {label: 'l'})])"],
+)
+def test_workflow_spawning_unrouted_agents_denies(home: Path, script: str):
+    reason = deny_reason(workflow_decision(home, workflow_call({"script": script})))
+    assert "contains no 'model:' or 'agentType:' routing" in reason
+
+
+def test_workflow_script_path_is_screened(home: Path, tmp_path: Path):
+    unrouted = tmp_path / "unrouted.js"
+    unrouted.write_text("agent('x', {})\n")
+    routed = tmp_path / "routed.js"
+    routed.write_text("agent('x', {model: 'sonnet'})\n")
+    assert deny_reason(workflow_decision(home, workflow_call({"scriptPath": str(unrouted)})))
+    assert workflow_decision(home, workflow_call({"scriptPath": str(routed)})) == ""
+
+
+def test_inline_script_wins_over_script_path(home: Path, tmp_path: Path):
+    routed = tmp_path / "routed.js"
+    routed.write_text("agent('x', {model: 'sonnet'})\n")
+    call = workflow_call({"script": "agent('x', {})", "scriptPath": str(routed)})
+    assert deny_reason(workflow_decision(home, call))
+
+
+@pytest.mark.parametrize(
+    "tool_input", [{"name": "review-changes"}, {"scriptPath": "/nonexistent/wf.js"}, {}]
+)
+def test_workflow_without_readable_script_passes(home: Path, tool_input: dict[str, object]):
+    assert workflow_decision(home, workflow_call(tool_input)) == ""
+
+
+@pytest.mark.parametrize("tool", ["Agent", "Bash", ""])
+def test_workflow_hook_ignores_other_tools(home: Path, tool: str):
+    payload = {"tool_name": tool, "tool_input": {"script": "agent('x', {})"}}
+    assert workflow_decision(home, payload) == ""
+
+
+@pytest.mark.parametrize("stdin", ["", "not json", "[]", "null"])
+def test_workflow_hook_unparseable_input_fails_closed(home: Path, stdin: str):
+    assert "the hook input is not a JSON object" in deny_reason(workflow_decision(home, stdin))
+
+
+def test_workflow_hook_missing_jq_fails_closed(home: Path, tmp_path: Path):
+    empty = tmp_path / "empty-path"
+    empty.mkdir()
+    payload = json.dumps(workflow_call({"script": "agent('x', {})"}))
+    out = run_hook_raw(home, payload, path=str(empty), hook=WORKFLOW_HOOK)
+    assert "jq is unavailable" in deny_reason(out)
 
 
 def test_missing_jq_fails_closed(home: Path, tmp_path: Path):
