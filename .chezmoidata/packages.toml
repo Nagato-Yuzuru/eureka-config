@@ -131,6 +131,10 @@ cargo = "rustup toolchain list | grep -q '^nightly' && clap_stub cargo 'CARGO_CO
 on = ["darwin", "linux"]
 via = "mise"
 
+[packages.claude-code]
+on = ["darwin", "linux"]
+via = "upstream"
+upstream = { command = "curl -fsSL https://claude.ai/install.sh | bash", creates = "$HOME/.local/bin/claude" }
 
 [packages.make]
 on = ["darwin", "linux"]
