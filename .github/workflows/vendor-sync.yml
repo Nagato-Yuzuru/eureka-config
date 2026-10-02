@@ -1,0 +1,124 @@
+# Weekly fork maintenance: run every upstream script in tools/vendor/ (the contract is in
+# tools/vendor/_upstream.py), then open or update the one vendor-sync PR with what changed and
+# the upstream originals in full. A script that fails leaves its targets alone and turns the
+# run red after the PR step, with its reason in the log.
+# Needs the repo setting "Allow GitHub Actions to create and approve pull requests".
+name: vendor-sync
+
+"on":
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: vendor-sync
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      BRANCH: vendor-sync
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Run the upstream scripts
+        id: scripts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VENDOR_ORIGINALS: ${{ runner.temp }}/originals
+        run: |
+          failed=()
+          for script in tools/vendor/[!_]*.py; do
+            uv run --script "$script" || failed+=("$(basename "$script" .py)")
+          done
+          echo "failed=${failed[*]}" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the PR
+        env:
+          FAILED: ${{ steps.scripts.outputs.failed }}
+          ORIGINALS: ${{ runner.temp }}/originals
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          mapfile -t refs < <(git status --porcelain --untracked-files=all -- 'tools/vendor/*.ref' | awk '{print $2}')
+          if (( ${#refs[@]} == 0 )); then
+            echo "no upstream output changed"
+            exit 0
+          fi
+
+          body="$RUNNER_TEMP/body.md"
+          originals="$RUNNER_TEMP/originals.md"
+          {
+            echo "Upstream changes at least 7 days old (the pnpm/uv/mise release cooldown)."
+            echo "The diff is what Claude will load once merged; the originals are below."
+            echo
+            for ref in "${refs[@]}"; do
+              name=$(basename "$ref" .ref)
+              read -r repo sha date < "$ref"
+              old=$(git show "HEAD:$ref" 2>/dev/null | awk '{print $2}' || true)
+              if [[ -n "$old" ]]; then
+                link="https://github.com/$repo/compare/$old...$sha"
+              else
+                link="https://github.com/$repo/tree/$sha"
+              fi
+              echo "- **$name**: \`$repo\` at ${sha:0:12}, committed $date — $link"
+            done
+            if [[ -n "$FAILED" ]]; then
+              echo
+              echo "**Failed, left unchanged:** $FAILED. See the workflow log for which rewrite broke."
+            fi
+          } > "$body"
+          {
+            for ref in "${refs[@]}"; do
+              name=$(basename "$ref" .ref)
+              while IFS= read -r -d '' file; do
+                echo "<details><summary>upstream <code>$name: ${file#"$ORIGINALS/$name/"}</code></summary>"
+                echo
+                echo '`````markdown'
+                cat "$file"
+                echo '`````'
+                echo "</details>"
+              done < <(find "$ORIGINALS/$name" -type f -print0 | sort -z)
+            done
+          } > "$originals"
+          # GitHub caps a PR body at 65536 characters; past that, the links carry the originals.
+          if (( $(wc -c < "$body") + $(wc -c < "$originals") < 60000 )); then
+            { echo; echo "## Upstream originals"; echo; cat "$originals"; } >> "$body"
+          else
+            { echo; echo "Originals omitted: too large for a PR body; follow the links."; } >> "$body"
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git add -A -- dot_claude dot_agents tools/vendor
+          git commit -q -m "chore(vendor): sync upstream files"
+          # Same content as the open PR already carries: leave its branch and history alone.
+          if git fetch -q origin "$BRANCH" 2>/dev/null && git diff --quiet FETCH_HEAD HEAD; then
+            echo "$BRANCH already carries this content"
+          else
+            git push -q --force origin "$BRANCH"
+          fi
+          pr=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [[ -n "$pr" ]]; then
+            gh pr edit "$pr" --body-file "$body"
+          else
+            gh pr create --base "$BASE" --head "$BRANCH" \
+              --title "chore(vendor): sync upstream files" --body-file "$body"
+          fi
+
+      - name: Fail when a script failed
+        if: steps.scripts.outputs.failed != ''
+        env:
+          FAILED: ${{ steps.scripts.outputs.failed }}
+        run: |
+          echo "::error::upstream scripts failed: $FAILED"
+          exit 1

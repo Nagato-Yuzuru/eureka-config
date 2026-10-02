@@ -40,3 +40,11 @@ known-first-party = ["inventory"]
 
 [tool.deptry]
 known_first_party = ["inventory"]
+
+# tools/vendor/ is a directory of PEP 723 scripts sharing _upstream.py, not a package: the
+# tests and the type checker import them the way `uv run --script` does, by directory.
+[tool.pytest.ini_options]
+pythonpath = ["tools/vendor"]
+
+[tool.ty.environment]
+extra-paths = ["tools/vendor"]
