@@ -54,7 +54,7 @@ Prefer `deno run npm:<pkg>` for non-interactive, minimal-access tools (formatter
 
 ## Python
 
-- **Never invoke the system Python or modify system-level packages** — everything goes through `uv`, even inside a venv. (A PreToolUse hook blocks `python`, `pip`, `virtualenv`, and `poetry`; its error message carries this map.)
+- **Packages and environments go through `uv`, never pip, virtualenv, poetry, or `python -m pip`/`venv`** — so installs keep the 7-day release cooldown and land in a manifest. (A PreToolUse hook blocks those; its error message carries this map.) Plain `python3` is fine for stdlib-only code; inside a uv project, run the project's code with `uv run`, which uses the project environment.
 - Static type checking: `ty`.
 - Single-file scripts with deps: PEP 723 inline metadata + `uv run file.py`, not a full project. Manage the metadata through uv — `uv init --script` to create, `uv add --script` to add deps — not by hand-editing the inline block (it is a tool-owned file, per principle-reproducible-state).
 
@@ -65,7 +65,8 @@ Prefer `deno run npm:<pkg>` for non-interactive, minimal-access tools (formatter
 | Add a dev dependency           | `uv add --dev <pkg>`              |
 | Run a script                   | `uv run <script>`                 |
 | One-off tool execution         | `uvx <tool>`                      |
-| Run Python directly            | `uv run python`                   |
+| Stdlib-only one-off            | `python3 -c …` / `python3 x.py`   |
+| One-off needing a package      | `uv run --with <pkg> python …`    |
 | Create a PEP 723 script        | `uv init --script <file.py>`      |
 | Add a dep to a PEP 723 script  | `uv add --script <file.py> <pkg>` |
 | Run a PEP 723 inline-meta file | `uv run <file.py>`                |

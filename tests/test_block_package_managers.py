@@ -1,11 +1,14 @@
 """Executable spec for dot_claude/hooks/executable_block-package-managers.sh, the PreToolUse
-hook that refuses npm/npx (pnpm and deno replace them) and python/pip/virtualenv/poetry (uv
-replaces them) in Bash commands.
+hook that refuses npm/npx (pnpm and deno replace them) and the Python installers — pip,
+virtualenv, poetry, python -m pip/venv/ensurepip (uv replaces them) — in Bash commands.
 
 - a blocked name in command position is blocked (exit 2): at the start, after a separator or a
   subshell/substitution opener, behind the common wrappers (sudo, command, env, exec, time,
   nohup) and variable assignments, or spelled as a path
-- the same words anywhere else pass: inside quotes, in comments, as parts of other words
+- the same words anywhere else pass: inside quotes, in comments, as parts of other words, and
+  in the body of a heredoc whose delimiter is quoted; an unquoted heredoc's body, and every
+  line after a terminator, are still checked
+- python itself passes, whatever it runs, unless it runs an installer module
 - matching needs nothing beyond bash and jq, so it cannot silently pass where GNU grep is
   missing; without jq the hook blocks rather than guess
 """
@@ -89,6 +92,39 @@ def test_npm_outside_command_position_passes(command: str):
     assert (result.returncode, result.stderr) == (0, ""), command
 
 
+HEREDOC_ALLOWED = [
+    "git commit -F - <<'EOF'\nfix: stop calling `npx tsc`\n\nnpm i is gone too\nEOF",
+    'cat > notes.md <<"END"\n- npx x\nEND',
+    "cat <<\\EOF\npip install x\nEOF",
+    "cat <<-'EOF'\n\tnpx x\n\tEOF",
+    "cat <<'A' && cat <<'B'\nnpx\nA\nB",  # the second body is checked, and holds no command
+]
+
+HEREDOC_BLOCKED = [
+    # Unquoted: the shell runs $(...) inside the body.
+    "cat <<EOF\n$(npm i)\nEOF",
+    # The command after the terminator is a command again.
+    "cat <<'EOF'\ntext\nEOF\nnpx x",
+    # A here-string is not a heredoc; the next line is a command.
+    "cat <<<'x'\nnpx y",
+    # A body line that only contains the delimiter does not end the heredoc early.
+    "cat <<'EOF'\n EOF\nEOF\nnpm i",
+]
+
+
+@pytest.mark.parametrize("command", HEREDOC_ALLOWED)
+def test_quoted_heredoc_bodies_are_text(command: str):
+    result = run(command)
+    assert (result.returncode, result.stderr) == (0, ""), command
+
+
+@pytest.mark.parametrize("command", HEREDOC_BLOCKED)
+def test_commands_around_and_inside_expanded_heredocs_are_checked(command: str):
+    result = run(command)
+    assert result.returncode == 2, command
+    assert "BLOCKED: Do not use npm or npx." in result.stderr
+
+
 def test_other_tools_pass():
     assert run("npm i", tool="Read").returncode == 0
 
@@ -115,23 +151,34 @@ def test_missing_jq_blocks(tmp_path: Path):
 
 
 PYTHON_BLOCKED = [
-    "python script.py",
-    "python3 -c 'print(1)'",
     "python3.12 -m venv .venv",
     "python -m pip install x",
+    "python3 -mpip install x",
+    "python3 -I -m pip install x",
+    "sudo python3 -m pip install x",
+    "env FOO=1 python3 -m ensurepip",
+    ".venv/bin/python -m pip install x",
+    "cd app && python -m venv .venv",
     "pip install requests",
     "pip3 install x",
     "sudo pip install x",
+    ".venv/bin/pip install x",
+    "pip list",
     "virtualenv .venv",
     "poetry add x",
+]
+
+PYTHON_ALLOWED = [
+    "python script.py",
+    "python3 -c 'print(1)'",
     "/usr/bin/python3 x.py",
     ".venv/bin/python x.py",
     "cd app && python manage.py",
     "FOO=1 python x.py",
     "echo $(python -V)",
-]
-
-PYTHON_ALLOWED = [
+    "python3 -m json.tool data.json",
+    "python3 -m pipx_like_module",
+    "python3 -c 'import pip'",
     "uv run python x.py",
     "uv run x.py",
     "uv add requests",
@@ -148,13 +195,13 @@ PYTHON_ALLOWED = [
 
 
 @pytest.mark.parametrize("command", PYTHON_BLOCKED)
-def test_python_tools_in_command_position_are_blocked(command: str):
+def test_python_installers_in_command_position_are_blocked(command: str):
     result = run(command)
     assert result.returncode == 2, command
-    assert "everything goes through uv" in result.stderr
+    assert "BLOCKED: Python packages and environments go through uv" in result.stderr
 
 
 @pytest.mark.parametrize("command", PYTHON_ALLOWED)
-def test_uv_and_python_outside_command_position_pass(command: str):
+def test_python_itself_uv_and_names_outside_command_position_pass(command: str):
     result = run(command)
     assert (result.returncode, result.stderr) == (0, ""), command
