@@ -393,6 +393,12 @@ mise = { name = "go:github.com/prometheus-community/promql-langserver/cmd/promql
 on = ["darwin", "linux"]
 via = "mise"
 
+[packages.selene]
+on = ["linux/arm64"]
+via = "mise"
+mise = { name = "cargo:selene" }
+
+
 [packages.luarocks]
 on = ["darwin", "linux"]
 via = "system"
