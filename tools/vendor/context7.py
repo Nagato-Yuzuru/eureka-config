@@ -43,8 +43,8 @@ def rule(text: str) -> str:
 
 # upstream path -> (target in the chezmoi source, rewrite)
 FILES: dict[str, tuple[str, Callable[[str], str]]] = {
-    "skills/find-docs/SKILL.md": ("dot_claude/skills/find-docs/SKILL.md", skill),
-    "rules/context7-cli.md": ("dot_claude/rules/context7.md", rule),
+    "skills/find-docs/SKILL.md": ("dot_agents/skills/find-docs/SKILL.md", skill),
+    "rules/context7-cli.md": ("dot_agents/rules/context7.md", rule),
 }
 
 
