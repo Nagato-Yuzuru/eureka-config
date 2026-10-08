@@ -37,16 +37,19 @@ roles = ["coder", "explore", "sweeper"]
 id = "cross-file"
 work = "planning or refactoring that crosses files — the tie-break whenever code work spans files"
 model = "opus"
+effort = "high"
 roles = ["architect"]
 
 [[claude.routing.classes]]
 id = "review"
 work = "adversarial quality review"
 model = "opus"
+effort = "xhigh"
 roles = ["linus-reviewer"]
 
 [[claude.routing.classes]]
 id = "oracle"
 work = "conformance verification and oracle construction"
 model = "opus"
+effort = "high"
 roles = ["oracle"]
