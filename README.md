@@ -174,6 +174,7 @@ tools whose completion nobody else installs need a recipe.
 | `dot_config/mise/tasks/` | `refresh-completions`, `audit-completions` |
 | `dot_claude/` | Claude Code: CLAUDE.md, hooks, skills, the settings.json merge |
 | `claude-managed.d/` | managed-settings fragments, rendered into the merge (not deployed) |
+| `claude/` | Claude Code mods, developed here, linked to `~/.claude/mods` (not deployed) |
 | `tests/` | pytest for the inventory and settings merge engine |
 
 ## Claude Code managed settings
@@ -216,6 +217,10 @@ the line and the key is retired on the next apply.
 
 Gotcha: `chezmoi apply` declares the plugin but does not install it. On a new
 machine, run the `claude plugin install` line Claude Code prints.
+
+Our own mods live in `claude/mods/`, linked to `~/.claude/mods` and enabled by
+`claude-managed.d/local-mods.json.tmpl`; [claude/mods/README.md](claude/mods/README.md)
+has the layout and the change, check and debug steps.
 
 Not managed on purpose: `~/.claude/local-plugins/` (would produce errors on
 machines without it), plugins set to `false` (the UI already holds that state).

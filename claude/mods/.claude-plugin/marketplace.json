@@ -1,0 +1,5 @@
+{
+  "name": "local-mods",
+  "owner": {"name": "Nagato Yuzuru"},
+  "plugins": [{"name": "zle-words", "source": "./zle-words"}]
+}

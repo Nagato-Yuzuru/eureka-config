@@ -1,0 +1,10 @@
+# A prek workspace project: these hooks run in claude/mods/, on top of the
+# repo root's checks. Needs `pnpm install` here once.
+repos:
+  - repo: local
+    hooks:
+      - id: mods-check
+        name: claude mods check
+        entry: pnpm check
+        language: system
+        pass_filenames: false

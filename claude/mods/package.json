@@ -1,0 +1,20 @@
+{
+  "name": "claude-mods",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "oxlint",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "check": "pnpm gen-types && oxfmt --check && oxlint && pnpm typecheck && pnpm validate && pnpm test",
+    "typecheck": "for c in */tsconfig.json; do tsc -p \"$c\" --noEmit || exit 1; done",
+    "gen-types": "for m in */.claude-plugin/plugin.json; do claude -p --plugin-dir \"${m%/.claude-plugin/plugin.json}\" /exit > /dev/null; done",
+    "validate": "claude plugin validate . && for m in */.claude-plugin/plugin.json; do claude plugin validate \"${m%/.claude-plugin/plugin.json}\" || exit 1; done",
+    "test": "for m in */.claude-plugin/plugin.json; do claude plugin test \"${m%/.claude-plugin/plugin.json}\" || exit 1; done"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.71.0",
+    "oxlint": "^1.86.0",
+    "typescript": "^7.0.2"
+  }
+}

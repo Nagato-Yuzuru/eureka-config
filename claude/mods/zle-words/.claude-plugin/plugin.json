@@ -1,0 +1,5 @@
+{
+  "name": "zle-words",
+  "version": "0.1.0",
+  "description": "zsh's word widgets in the prompt box (ctrl+w, alt+backspace/b/f/d), word boundaries from $WORDCHARS"
+}

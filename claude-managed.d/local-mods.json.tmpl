@@ -1,0 +1,14 @@
+{{- /* Mods in claude/mods/, linked to ~/.claude/mods, registered as a directory marketplace. */ -}}
+{
+  "enabledPlugins": {
+    "zle-words@local-mods": true
+  },
+  "extraKnownMarketplaces": {
+    "local-mods": {
+      "source": {
+        "source": "directory",
+        "path": {{ joinPath .chezmoi.homeDir ".claude" "mods" | toJson }}
+      }
+    }
+  }
+}
