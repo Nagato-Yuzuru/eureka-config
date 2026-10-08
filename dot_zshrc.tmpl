@@ -62,14 +62,17 @@ autoload -Uz compinit
 
 # Full compinit (security audit + dump rebuild) once a day, the cached dump otherwise. An array
 # assignment, not `[[ -n …(#q…) ]]`: that form needs extendedglob, and without it the test
-# is a non-empty literal string, always true.
-zcompdump_stale=(${ZDOTDIR:-$HOME}/.zcompdump(Nmh+24))
-if [[ ! -s ${ZDOTDIR:-$HOME}/.zcompdump ]] || (( $#zcompdump_stale )); then
+zcompdump=${ZDOTDIR:-$HOME}/.zcompdump
+zcompdump_stale=($zcompdump(Nmh+24) ${^fpath}(N/e:'[[ $REPLY -nt $zcompdump ]]':))
+if [[ ! -s $zcompdump ]] || (( $#zcompdump_stale )); then
+    # compinit rewrites an existing dump only when the count of completion files changed, so
+    # a stale dump would keep its old mtime and every later shell would take this branch again.
+    rm -f $zcompdump
     compinit
 else
     compinit -C
 fi
-unset zcompdump_stale
+unset zcompdump zcompdump_stale
 
 { zcompile ${ZDOTDIR:-$HOME}/.zcompdump; } &|
 
