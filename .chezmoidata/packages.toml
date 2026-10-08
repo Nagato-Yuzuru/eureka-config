@@ -410,7 +410,7 @@ on = ["darwin"]
 via = "mise"
 
 [packages.typescript]
-on = ["darwin"]
+on = ["darwin", "linux"]
 via = "mise"
 mise = { name = "npm:typescript" }
 
