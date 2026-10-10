@@ -2,7 +2,7 @@
 # requires-python = ">=3.12"
 # dependencies = []
 # ///
-"""Fork of Context7's CLI skill and rule (upstash/context7). They call `npx ctx7@latest`, which
+"""Fork of Context7's CLI skill (upstash/context7). It calls `npx ctx7@latest`, which
 fetches past the 7-day release cooldown and which block-package-managers denies; ctx7 is
 installed by mise (packages.toml), so the fork calls it by name. Replaces `ctx7 setup`, which
 must not run again: it would rewrite the targets in place."""
@@ -37,14 +37,9 @@ def skill(text: str) -> str:
     return replace(text, "npx ctx7@latest", "ctx7")
 
 
-def rule(text: str) -> str:
-    return replace(text, "npx ctx7@latest", "ctx7")
-
-
 # upstream path -> (target in the chezmoi source, rewrite)
 FILES: dict[str, tuple[str, Callable[[str], str]]] = {
     "skills/find-docs/SKILL.md": ("dot_agents/skills/find-docs/SKILL.md", skill),
-    "rules/context7-cli.md": ("dot_agents/rules/context7.md", rule),
 }
 
 
