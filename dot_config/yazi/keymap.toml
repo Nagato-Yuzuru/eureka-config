@@ -22,3 +22,18 @@ desc = "Cut + system clipboard"
 on = "<C-p>"
 run = "plugin clipboard -- --action=paste"
 desc = "Paste from system clipboard"
+
+[[mgr.prepend_keymap]]
+on = "z"
+run = "plugin zjump -- query"
+desc = "Jump via zoxide query, like shell z"
+
+[[mgr.prepend_keymap]]
+on = "Z"
+run = "plugin zjump -- interactive"
+desc = "Jump via zoxide picker, like shell zi"
+
+[[mgr.prepend_keymap]]
+on = "<C-t>"
+run = "plugin fzf"
+desc = "Jump to a file/directory via fzf"
