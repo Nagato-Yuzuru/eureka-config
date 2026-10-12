@@ -34,7 +34,13 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from inventory.cli import main
-from inventory.inventory import DATA_FILES, Inventory, InventoryError, load_data
+from inventory.inventory import (
+    DATA_FILES,
+    LOCAL_PACKAGES,
+    Inventory,
+    InventoryError,
+    load_data,
+)
 from inventory.model import DOCS
 from inventory.render import (
     ARTIFACTS,
@@ -924,6 +930,43 @@ def test_platform_system_manager_is_one_we_render_for():
         Inventory({"debian": {"os": "linux", "system": "apt"}}, {}, {})
 
 
+# --- the local layer: packages.local.toml -------------------------------------------------------
+
+
+def _local_data(tmp_path: Path, local: str) -> Path:
+    """The synthetic data files with a packages.local.toml beside them."""
+    data = Path(shutil.copytree(FIXTURE_DATA, tmp_path / ".chezmoidata"))
+    (data / LOCAL_PACKAGES).write_text(local)
+    return data
+
+
+def test_local_layer_adds_packages(tmp_path: Path):
+    inv = Inventory.load(_local_data(tmp_path, '[packages.extra]\non = ["darwin"]\n'))
+    for m in MACHINES:
+        assert ('brew "extra"' in lines(inv, "brewfile", m)) == (_os(m) == "darwin")
+
+
+def test_local_entry_replaces_the_tracked_one_whole(tmp_path: Path):
+    """Like mise.local.toml: a key the local file declares means what the local file says,
+    nothing of the tracked entry carries over — not its `on`, its backend, its completions."""
+    inv = Inventory.load(_local_data(tmp_path, '[packages.kit]\non = ["darwin"]\n'))
+    for m in MACHINES:
+        on_darwin = _os(m) == "darwin"
+        assert ('brew "kit"' in lines(inv, "brewfile", m)) == on_darwin
+        assert not any(line.startswith('"kit" ') for line in lines(inv, "mise-tools", m))
+        assert not any(line.startswith("kitc ") for line in lines(inv, "completions", m))
+
+
+def test_local_entries_are_checked_like_tracked_ones(tmp_path: Path):
+    with pytest.raises(InventoryError, match=r"^packages\.oops\.on"):
+        Inventory.load(_local_data(tmp_path, '[packages.oops]\non = ["mars"]\n'))
+
+
+def test_local_file_rejects_a_stray_top_level_table(tmp_path: Path):
+    with pytest.raises(InventoryError, match="package: Extra inputs are not permitted"):
+        Inventory.load(_local_data(tmp_path, '[package.extra]\non = ["darwin"]\n'))
+
+
 # --- real data ----------------------------------------------------------------------------------
 
 
@@ -1001,6 +1044,35 @@ def test_artifact_template_refuses_a_stale_tree(source: Path, tmp_path: Path):
     src = _source_copy(source, tmp_path)
     with (src / ".chezmoidata" / DATA_FILES[1]).open("a") as f:
         f.write("\n# an edit nobody rendered\n")
+    with pytest.raises(AssertionError, match=r"\.rendered/ is stale"):
+        chezmoi_render(_artifact_tmpl(tmp_path, "brewfile"), MACHINES[0], src)
+
+
+def _rendered_with_local(source: Path, tmp_path: Path, local: str) -> Path:
+    src = _source_copy(source, tmp_path)
+    (src / ".chezmoidata" / LOCAL_PACKAGES).write_text(local)
+    assert main(["all", "--root", str(src)]) == 0
+    return src
+
+
+def test_artifact_template_serves_a_tree_rendered_with_the_local_file(source: Path, tmp_path: Path):
+    """The template's hash and STAMP agree on the local file: a tree rendered with it is
+    current, and serves what it declares."""
+    src = _rendered_with_local(source, tmp_path, '[packages.extra]\non = ["darwin"]\n')
+    got = chezmoi_render(_artifact_tmpl(tmp_path, "brewfile"), MACHINES[0], src)
+    assert 'brew "extra"' in got.splitlines()
+
+
+@pytest.mark.parametrize("change", ["edited", "deleted"])
+def test_artifact_template_refuses_a_tree_stale_on_the_local_file(
+    change: str, source: Path, tmp_path: Path
+):
+    src = _rendered_with_local(source, tmp_path, '[packages.extra]\non = ["darwin"]\n')
+    local = src / ".chezmoidata" / LOCAL_PACKAGES
+    if change == "edited":
+        local.write_text('[packages.other]\non = ["darwin"]\n')
+    else:
+        local.unlink()
     with pytest.raises(AssertionError, match=r"\.rendered/ is stale"):
         chezmoi_render(_artifact_tmpl(tmp_path, "brewfile"), MACHINES[0], src)
 

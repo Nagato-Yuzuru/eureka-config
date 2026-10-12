@@ -334,3 +334,6 @@ cython_debug/
 # before anything reads it, so it is a build product. .schema/ is committed instead: the
 # editor reads that one, and nothing builds it before you open a file.
 .rendered/
+
+# This machine's own packages, layered over packages.toml (tools/inventory/inventory.py).
+.chezmoidata/packages.local.toml

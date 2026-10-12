@@ -1,13 +1,19 @@
 {{- /* This machine's copy of one compiled artifact — `name` is a key of ARTIFACTS in
        tools/inventory/render.py — from .rendered/<os>-<arch>/, the tree `uv run render`
-       compiles from .chezmoidata/{platforms,machines,packages}.toml. Args: name, plus the
-       root data (`merge (dict "name" …) .`). Refuses a tree compiled from other data than
-       what is here now, and a machine machines.toml does not declare. */ -}}
+       compiles from .chezmoidata/{platforms,machines,packages}.toml and the gitignored
+       packages.local.toml. Args: name, plus the root data (`merge (dict "name" …) .`).
+       Refuses a tree compiled from other data than what is here now, and a machine
+       machines.toml does not declare. */ -}}
 {{- $machine := printf "%s-%s" .chezmoi.os .chezmoi.arch -}}
 {{- if not (hasKey .machines $machine) -}}
   {{- fail (printf "machines.toml: %s is not declared, nothing is rendered for it" $machine) -}}
 {{- end -}}
-{{- $want := printf "%s%s%s" (include ".chezmoidata/machines.toml") (include ".chezmoidata/packages.toml") (include ".chezmoidata/platforms.toml") | sha256sum -}}
+{{- /* Name order, as render.py's stamp(): the local layer sorts between machines and packages. */ -}}
+{{- $local := "" -}}
+{{- if stat (joinPath .chezmoi.sourceDir ".chezmoidata/packages.local.toml") -}}
+  {{- $local = include ".chezmoidata/packages.local.toml" -}}
+{{- end -}}
+{{- $want := printf "%s%s%s%s" (include ".chezmoidata/machines.toml") $local (include ".chezmoidata/packages.toml") (include ".chezmoidata/platforms.toml") | sha256sum -}}
 {{- $have := include ".rendered/STAMP" | trim -}}
 {{- if ne $want $have -}}
   {{- fail ".rendered/ is stale: .chezmoidata changed since the last `uv run render`" -}}

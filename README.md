@@ -95,6 +95,14 @@ If no package manager ships the tool's completion, add a `completions` recipe.
 - brew / dnf / uv: only ever install; manual uninstall required.
 - Generated completions disappear on the same apply.
 
+### Packages only this machine has
+
+`.chezmoidata/packages.local.toml` is gitignored and written like
+`packages.toml` (same tables, same schema line: `#:schema ../.schema/packages.json`).
+It works like `mise.local.toml`: a key it declares replaces that entry of
+`packages.toml` whole, and any other key is added. It lives only on this
+machine, so nothing backs it up, and `git clean -x` deletes it.
+
 ### The fields
 
 | Field | What |

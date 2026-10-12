@@ -64,6 +64,11 @@
 #             `via` and the blocks only — not `on`, not `completions` (fpath order
 #             arbitrates per-backend differences).
 #
+# packages.local.toml, beside this file and gitignored, holds what only this machine
+# installs: the same tables, a key it declares replacing this file's entry of that key whole
+# (nothing carries over), any other key added. chezmoi's own `.packages` data merges the two
+# the other way round; nothing reads it — every consumer goes through `uv run render`.
+#
 # One [packages.<key>] table per package, one field per line; `completions` is
 # inline when short, its own [packages.<key>.completions] table when not. The
 # `# -- … --` lines only group; order is by hand.

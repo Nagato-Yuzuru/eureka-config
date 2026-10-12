@@ -1,5 +1,9 @@
 """The inventory: the three data files (.chezmoidata/*.toml) loaded, validated, and resolved per machine.
 
+packages.local.toml, beside packages.toml and gitignored, is this machine's own layer: the
+same document, its entries replacing the tracked ones of the same key whole (as
+mise.local.toml does mise.toml's), its other keys added.
+
 Resolution is the one place the domain rules live: a selector matches a machine
 through its platform's OS; matching overrides deep-merge over the package (maps
 merge, lists and scalars replace) and the result is parsed as a whole again, so
@@ -49,6 +53,7 @@ from inventory.model import (
 )
 
 DATA_FILES = ("machines.toml", "packages.toml", "platforms.toml")
+LOCAL_PACKAGES = "packages.local.toml"
 
 _PLATFORMS = TypeAdapter(dict[str, Platform])
 _MACHINES = TypeAdapter(dict[str, Machine])
@@ -288,11 +293,17 @@ class Inventory:
         """Every .chezmoidata file checked whole against its document model — a stray or
         misspelt top-level table, an empty key, xdg/zsh typos all fail here. An error
         inside a packages.toml entry is left to the per-entry parse below, whose message
-        names the override and the choice."""
+        names the override and the choice. The local layer is checked the same way, as a
+        packages.toml that may be empty."""
         docs = {f: load_data(data_dir / f) for f in DOCS}
-        for name, doc in DOCS.items():
+        checks = [(name, doc, docs[name]) for name, doc in DOCS.items()]
+        local: dict[str, Any] = {}
+        if (data_dir / LOCAL_PACKAGES).exists():
+            local = {"packages": {}} | load_data(data_dir / LOCAL_PACKAGES)
+            checks.append(("packages.toml", DOCS["packages.toml"], local))
+        for name, doc, data in checks:
             try:
-                doc.model_validate(docs[name])
+                doc.model_validate(data)
             except ValidationError as e:
                 if name == "packages.toml" and all(len(x["loc"]) > 2 for x in e.errors()):
                     continue
@@ -300,7 +311,7 @@ class Inventory:
         return cls(
             docs["platforms.toml"]["platforms"],
             docs["machines.toml"]["machines"],
-            docs["packages.toml"]["packages"],
+            docs["packages.toml"]["packages"] | local.get("packages", {}),
         )
 
     # --- resolution ---------------------------------------------------------------------------

@@ -5,8 +5,8 @@ Every artifact is one line per package in key order, in the exact syntax the
 consumer reads: Brewfile lines, dnf names and repos, mise `[tools]` entries,
 `uv tool install` specs, upstream installer and update commands, `<command> <recipe>` for
 refresh-completions and `<mise tool> <command>...` for its --changed filter.
-STAMP is the hash of the data files the tree was compiled from; the `artifact`
-template recomputes it and refuses to serve a stale tree.
+STAMP is the hash of the data files the tree was compiled from, packages.local.toml
+included; the `artifact` template recomputes it and refuses to serve a stale tree.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from inventory.inventory import DATA_FILES, Inventory
+from inventory.inventory import DATA_FILES, LOCAL_PACKAGES, Inventory
 from inventory.model import (
     DOCS,
     Cask,
@@ -147,11 +147,13 @@ def render_machine(inv: Inventory, machine_id: str) -> dict[str, str]:
 
 
 def stamp(data_dir: Path) -> str:
-    """sha256 of the data files, concatenated in name order — the same bytes the
-    `artifact` template hashes."""
+    """sha256 of the data files, the local layer included where there is one, concatenated
+    in name order — the same bytes the `artifact` template hashes."""
     h = hashlib.sha256()
-    for f in DATA_FILES:
-        h.update((data_dir / f).read_bytes())
+    for f in sorted((*DATA_FILES, LOCAL_PACKAGES)):
+        path = data_dir / f
+        if f in DATA_FILES or path.exists():
+            h.update(path.read_bytes())
     return h.hexdigest()
 
 
