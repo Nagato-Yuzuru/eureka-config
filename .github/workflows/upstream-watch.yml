@@ -1,0 +1,37 @@
+# Weekly watch of upstreams our files were forked from but no longer track line by line (the
+# principle-* skills came from cursor/plugins' pstack). The reviewed point lives in the issues
+# (contract in tools/upstream-watch.sh); closing the issue a run opens marks its head reviewed.
+# First run needs a closed issue carrying a `<!-- upstream-watch head=<sha> -->` marker.
+name: upstream-watch
+
+"on":
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: upstream-watch
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      UPSTREAM: cursor/plugins
+      PATHSPEC: pstack/skills/principle-*/SKILL.md
+      LABEL: upstream-watch
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Clone upstream
+        run: git clone -q --filter=blob:none --no-checkout "https://github.com/$UPSTREAM" "$RUNNER_TEMP/upstream"
+      - name: Diff upstream since the reviewed point
+        run: bash tools/upstream-watch.sh "$RUNNER_TEMP/upstream"
