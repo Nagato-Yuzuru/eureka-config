@@ -33,3 +33,6 @@ Makefile
 # Repo-only: Claude Code mods, developed here and deployed as the ~/.claude/mods
 # symlink (dot_claude/symlink_mods.tmpl)
 claude/
+
+# Repo-only: the repo's own dev tools (mise.toml), not the user's mise config
+mise.toml

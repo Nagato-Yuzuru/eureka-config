@@ -10,9 +10,7 @@ name: vendor-sync
     - cron: "23 4 * * 1"
   workflow_dispatch: {}
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: vendor-sync
@@ -20,6 +18,10 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
     env:
       BRANCH: vendor-sync
       GH_TOKEN: ${{ github.token }}

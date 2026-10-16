@@ -60,6 +60,14 @@ repos:
         language: system
         files: \.ya?ml$
 
+      # Pinned by the repo's mise.toml, which the shell may not have activated.
+      - id: jactionlint
+        name: jactionlint
+        entry: mise x -- jactionlint
+        language: system
+        pass_filenames: false
+        files: ^(\.github/|mise\.toml$)
+
       # `make test`, the same entry a person runs (Makefile). files: what the tests read.
       - id: pytest
         name: pytest
