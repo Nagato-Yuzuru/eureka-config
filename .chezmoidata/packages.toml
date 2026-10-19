@@ -399,7 +399,7 @@ on = ["darwin", "linux"]
 via = "mise"
 
 [packages.selene]
-on = ["linux/arm64"]
+on = ["darwin", "linux"]
 via = "mise"
 mise = { name = "cargo:selene" }
 
