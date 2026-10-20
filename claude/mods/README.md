@@ -23,6 +23,10 @@ jbcontext index                                          # once, in the repo
 claude plugin enable jbcontext@local-mods --scope local  # writes .claude/settings.local.json
 ```
 
+The first index is by hand on purpose: the plugin's session hooks run
+`jbcontext index --only-incremental`, which refreshes an existing index and
+skips a repository that has none, so no full upload ever starts unattended.
+
 Claude Code reads the main worktree's local settings from every linked
 worktree, so one enable covers them all. Where the plugin is off, nothing of it
 loads: no skill, no hook, no `jbcontext` run. `claude plugin disable
