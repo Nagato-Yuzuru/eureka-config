@@ -36,6 +36,13 @@ class Commit:
     date: datetime
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Release:
+    tag: str
+    published: datetime
+    notes: str
+
+
 class GitHub:
     def __init__(self, token: str | None) -> None:
         self._headers = {"User-Agent": "vendor-sync", "Accept": "application/vnd.github+json"}
@@ -57,6 +64,19 @@ class GitHub:
         c = commits[0]
         date = datetime.fromisoformat(c["commit"]["committer"]["date"])
         return Commit(repo=repo, sha=c["sha"], date=date)
+
+    def commit(self, repo: str, ref: str) -> Commit:
+        """The commit `ref` (a branch, tag, or sha) names."""
+        c = json.loads(self._get(f"https://api.github.com/repos/{repo}/commits/{ref}"))
+        date = datetime.fromisoformat(c["commit"]["committer"]["date"])
+        return Commit(repo=repo, sha=c["sha"], date=date)
+
+    def release(self, repo: str, tag: str) -> Release:
+        """The published release for `tag`; raises HTTPError 404 when there is none (yet)."""
+        r = json.loads(self._get(f"https://api.github.com/repos/{repo}/releases/tags/{tag}"))
+        return Release(
+            tag=tag, published=datetime.fromisoformat(r["published_at"]), notes=r["body"] or ""
+        )
 
     def fetch(self, commit: Commit, path: str) -> str:
         quoted = urllib.parse.quote(path)

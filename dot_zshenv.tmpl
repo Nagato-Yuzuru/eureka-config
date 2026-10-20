@@ -18,3 +18,7 @@ export UV_NO_MODIFY_PATH=1
 
 export PNPM_HOME="${XDG_DATA_HOME}/pnpm"
 path=("$PNPM_HOME/bin" $path)
+
+# The Air Context CLI (packages.toml, via upstream), installed with --no-path-update: its
+# installer would otherwise source ~/.jbcontext/env from .zshrc.
+path=("${HOME}/.jbcontext/bin" $path)

@@ -3,5 +3,5 @@
   "printWidth": 80,
   "singleQuote": true,
   "bracketSpacing": false,
-  "ignorePatterns": ["*/.claude-plugin/types/**"]
+  "ignorePatterns": ["*/.claude-plugin/types/**", "jbcontext/skills/**"]
 }

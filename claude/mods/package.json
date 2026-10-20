@@ -10,7 +10,7 @@
     "typecheck": "for c in */tsconfig.json; do tsc -p \"$c\" --noEmit || exit 1; done",
     "gen-types": "for m in */.claude-plugin/plugin.json; do claude -p --plugin-dir \"${m%/.claude-plugin/plugin.json}\" /exit > /dev/null; done",
     "validate": "claude plugin validate . && for m in */.claude-plugin/plugin.json; do claude plugin validate \"${m%/.claude-plugin/plugin.json}\" || exit 1; done",
-    "test": "for m in */.claude-plugin/plugin.json; do claude plugin test \"${m%/.claude-plugin/plugin.json}\" || exit 1; done"
+    "test": "for t in */tests; do claude plugin test \"${t%/tests}\" || exit 1; done"
   },
   "devDependencies": {
     "oxfmt": "^0.71.0",

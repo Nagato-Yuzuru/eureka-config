@@ -5,20 +5,24 @@ all run their output through.
 - The scripts' NPX pattern catches npm/npx in command position and nothing inside a word.
 - `converge` writes only changed targets, moves the ref only with them, compares bytes (so a
   CRLF upstream converges too), and leaves the originals for the PR body.
+- jbcontext maps a CLI build to its release tag, adopts a release only past its cooldown, moves
+  the packages.toml pin and nothing else, and refuses a skill that teaches any subcommand but
+  `search`.
 
 The scripts themselves need the network; the workflow runs them.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import _upstream
 import context7
 import find_skills
+import jbcontext
 import pytest
-from _upstream import Commit, UpstreamChanged, converge, forbid, replace
+from _upstream import Commit, Release, UpstreamChanged, converge, forbid, replace
 
 VENDOR = Path(__file__).resolve().parent.parent / "tools" / "vendor"
 
@@ -112,6 +116,72 @@ def test_crlf_output_converges(tmp_path: Path):
 def test_originals_land_under_the_scripts_name(tmp_path: Path):
     run(tmp_path, C1, "A", originals_dir=tmp_path / "orig")
     assert (tmp_path / "orig" / "up" / "u" / "a.md").read_text() == "orig A"
+
+
+# --- jbcontext ---------------------------------------------------------------------------------
+
+
+def test_a_cli_build_maps_to_its_release_tag():
+    assert jbcontext.tag_of("0.9.17.1213") == "v0.9.17"
+
+
+@pytest.mark.parametrize("version", ["0.9.17", "<html>302 Found</html>", "", "1.0.0.12-eap"])
+def test_a_version_txt_that_is_no_build_number_fails(version: str):
+    with pytest.raises(UpstreamChanged, match="not <major>.<minor>.<patch>.<build>"):
+        jbcontext.tag_of(version)
+
+
+@pytest.mark.parametrize(
+    ("age", "cooled"),
+    [
+        (timedelta(0), False),
+        (timedelta(days=2) - timedelta(seconds=1), False),
+        (timedelta(days=2), True),
+        (timedelta(days=9), True),
+    ],
+)
+def test_a_release_is_adopted_once_the_cooldown_has_passed(age: timedelta, cooled: bool):
+    now = datetime(2026, 10, 21, 4, 23, tzinfo=UTC)
+    release = Release(tag="v0.9.17", published=now - age, notes="")
+    assert jbcontext.cooled(release, now) is cooled
+
+
+@pytest.mark.parametrize(
+    "line",
+    ['jbcontext search "<query>"', 'jbcontext search -p src/auth "JWT"', "Use `jbcontext search`"],
+)
+def test_the_skill_may_teach_jbcontext_search(line: str):
+    forbid(line, jbcontext.OTHER_SUBCOMMAND)
+
+
+@pytest.mark.parametrize(
+    "line", ["jbcontext index", "run `jbcontext  repos x`", "jbcontext searches"]
+)
+def test_the_skill_may_not_teach_another_subcommand(line: str):
+    with pytest.raises(UpstreamChanged, match="still matches"):
+        forbid(line, jbcontext.OTHER_SUBCOMMAND)
+
+
+PACKAGES = """\
+[packages.uv]
+upstream = { command = "i", creates = "$HOME/uv" }
+
+[packages.jbcontext.upstream]
+version = "0.9.16.1100"
+command = "i {version}"
+"""
+
+
+def test_the_pin_moves_and_nothing_else_does():
+    moved = jbcontext.pin(PACKAGES, "0.9.17.1213")
+    assert moved == PACKAGES.replace('version = "0.9.16.1100"', 'version = "0.9.17.1213"')
+    assert moved != PACKAGES
+
+
+def test_a_pin_line_shared_with_another_package_is_refused():
+    shared = PACKAGES + '\n[packages.other.upstream]\nversion = "0.9.16.1100"\n'
+    with pytest.raises(UpstreamChanged, match="occurs 2 times in packages.toml, not once"):
+        jbcontext.pin(shared, "0.9.17.1213")
 
 
 def test_helpers_take_the_ref_from_the_caller(tmp_path: Path):

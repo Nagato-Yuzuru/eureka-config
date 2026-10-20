@@ -2,11 +2,38 @@
 
 Mods are Claude Code plugins whose behaviour is a TypeScript hooks module. This
 folder holds ours, laid out like the [`mods/` folder of the Claude Code
-repository](https://github.com/anthropics/claude-code/tree/main/mods).
+repository](https://github.com/anthropics/claude-code/tree/main/mods), and the
+local plain plugins that share their marketplace and checks.
 
 | Mod                      | What it does                                                                                                    |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------- |
 | [`zle-words`](zle-words) | zsh's word widgets in the prompt box: `ctrl+w`, `alt+backspace`, `alt+b/f/d`, word boundaries from `$WORDCHARS` |
+
+| Plugin                   | What it does                                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| [`jbcontext`](jbcontext) | Air Context semantic code search, per repo: the `context-search` skill, and session hooks that keep the index fresh |
+
+## jbcontext: enabled per repo
+
+Indexing uploads code chunks to JetBrains, so the plugin is off by default
+(`claude-managed.d/jbcontext.json`) and turned on per repository:
+
+```sh
+jbcontext index                                          # once, in the repo
+claude plugin enable jbcontext@local-mods --scope local  # writes .claude/settings.local.json
+```
+
+Claude Code reads the main worktree's local settings from every linked
+worktree, so one enable covers them all. Where the plugin is off, nothing of it
+loads: no skill, no hook, no `jbcontext` run. `claude plugin disable
+jbcontext@local-mods --scope local` turns it back off; `jbcontext remove-index`
+deletes what was uploaded.
+
+`tools/vendor/jbcontext.py` owns `.claude-plugin/plugin.json` and
+`skills/context-search/`, and the jbcontext pin in `.chezmoidata/packages.toml`
+that the CLI is installed at: the skill is the one released with that version,
+and the plugin's version mirrors it. Edit none by hand; the vendor-sync PR moves
+them together.
 
 ## How it is wired
 
