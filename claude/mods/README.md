@@ -2,11 +2,42 @@
 
 Mods are Claude Code plugins whose behaviour is a TypeScript hooks module. This
 folder holds ours, laid out like the [`mods/` folder of the Claude Code
-repository](https://github.com/anthropics/claude-code/tree/main/mods).
+repository](https://github.com/anthropics/claude-code/tree/main/mods), and the
+local plain plugins that share their marketplace and checks.
 
 | Mod                      | What it does                                                                                                    |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------- |
 | [`zle-words`](zle-words) | zsh's word widgets in the prompt box: `ctrl+w`, `alt+backspace`, `alt+b/f/d`, word boundaries from `$WORDCHARS` |
+
+| Plugin                   | What it does                                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| [`jbcontext`](jbcontext) | Air Context semantic code search, per repo: the `context-search` skill, and session hooks that keep the index fresh |
+
+## jbcontext: enabled per repo
+
+Indexing uploads code chunks to JetBrains, so the plugin is off by default
+(`claude-managed.d/jbcontext.json`) and turned on per repository:
+
+```sh
+jbcontext index                                          # once, in the repo
+claude plugin enable jbcontext@local-mods --scope local  # writes .claude/settings.local.json
+```
+
+The first index is by hand on purpose: the plugin's session hooks run
+`jbcontext index --only-incremental`, which refreshes an existing index and
+skips a repository that has none, so no full upload ever starts unattended.
+
+Claude Code reads the main worktree's local settings from every linked
+worktree, so one enable covers them all. Where the plugin is off, nothing of it
+loads: no skill, no hook, no `jbcontext` run. `claude plugin disable
+jbcontext@local-mods --scope local` turns it back off; `jbcontext remove-index`
+deletes what was uploaded.
+
+`tools/vendor/jbcontext.py` owns `.claude-plugin/plugin.json` and
+`skills/context-search/`, and the jbcontext pin in `.chezmoidata/packages.toml`
+that the CLI is installed at: the skill is the one released with that version,
+and the plugin's version mirrors it. Edit none by hand; the vendor-sync PR moves
+them together.
 
 ## How it is wired
 
@@ -52,13 +83,13 @@ pnpm check     # gen-types, oxfmt, oxlint, tsc, validate, test
 `.pre-commit-config.yaml` here makes this folder a prek workspace project, so a
 commit runs `pnpm check` too, on top of the repo root's checks.
 
-| Script           | What it does                                                                                                                                                                                                                                        |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm gen-types` | Has the installed Claude Code load each mod once (`claude -p --plugin-dir <mod> /exit`, no model call), which writes `<mod>/.claude-plugin/types/`. The types match the installed version and are not committed; rerun after upgrading Claude Code. |
-| `pnpm fmt`       | Formats in place.                                                                                                                                                                                                                                   |
-| `pnpm typecheck` | `tsc` per mod, against the generated types.                                                                                                                                                                                                         |
-| `pnpm validate`  | `claude plugin validate` on the marketplace and each mod: manifests, and the static analysis Claude Code runs before loading a hooks module.                                                                                                        |
-| `pnpm test`      | `claude plugin test` per mod: runs `tests/` against Claude Code's own host, no session or network.                                                                                                                                                  |
+| Script           | What it does                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm gen-types` | Has the installed Claude Code load each mod once (`claude -p --plugin-dir <mod> /exit`, no model call), which writes `<mod>/.claude-plugin/types/`. Print mode writes them only for a mod under development; `CLAUDE_CODE_PLUGIN_DIR_WATCH=1` marks it so, an undocumented switch that a Claude Code release may drop. The types match the installed version and are not committed; rerun after upgrading Claude Code. |
+| `pnpm fmt`       | Formats in place.                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `pnpm typecheck` | `tsc` per mod, against the generated types.                                                                                                                                                                                                                                                                                                                                                                            |
+| `pnpm validate`  | `claude plugin validate` on the marketplace and each mod: manifests, and the static analysis Claude Code runs before loading a hooks module.                                                                                                                                                                                                                                                                           |
+| `pnpm test`      | `claude plugin test` per mod: runs `tests/` against Claude Code's own host, no session or network.                                                                                                                                                                                                                                                                                                                     |
 
 ## Debug a mod that does nothing
 

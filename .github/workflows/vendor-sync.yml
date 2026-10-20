@@ -59,7 +59,7 @@ jobs:
           body="$RUNNER_TEMP/body.md"
           originals="$RUNNER_TEMP/originals.md"
           {
-            echo "Upstream changes at least 7 days old (the pnpm/uv/mise release cooldown)."
+            echo "Upstream changes past each script's cooldown (7 days, the pnpm/uv/mise release cooldown; jbcontext 2)."
             echo "The diff is what Claude will load once merged; the originals are below."
             echo
             for ref in "${refs[@]}"; do
@@ -101,7 +101,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           git switch -C "$BRANCH"
-          git add -A -- dot_claude dot_agents tools/vendor
+          git add -A -- .chezmoidata dot_claude dot_agents claude/mods tools/vendor
           git commit -q -m "chore(vendor): sync upstream files"
           # Same content as the open PR already carries: leave its branch and history alone.
           if git fetch -q origin "$BRANCH" 2>/dev/null && git diff --quiet FETCH_HEAD HEAD; then

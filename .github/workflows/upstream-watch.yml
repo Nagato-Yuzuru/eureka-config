@@ -1,7 +1,9 @@
-# Weekly watch of upstreams our files were forked from but no longer track line by line (the
-# principle-* skills came from cursor/plugins' pstack). The reviewed point lives in the issues
-# (contract in tools/upstream-watch.sh); closing the issue a run opens marks its head reviewed.
-# First run needs a closed issue carrying a `<!-- upstream-watch head=<sha> -->` marker.
+# Weekly watch of upstreams our files were forked from but no longer track line by line: the
+# principle-* skills came from cursor/plugins' pstack; Air Context's agent harness (instructions,
+# hooks, subagents, MCP, the skills we do not vendor) is reviewed rather than adopted. The
+# reviewed point lives in each entry's issues (contract in tools/upstream-watch.sh); closing the
+# issue a run opens marks its head reviewed. An entry's first run needs a closed issue with its
+# label carrying a `<!-- upstream-watch head=<sha> -->` marker.
 name: upstream-watch
 
 "on":
@@ -11,9 +13,6 @@ name: upstream-watch
 
 permissions: {}
 
-concurrency:
-  group: upstream-watch
-
 jobs:
   watch:
     runs-on: ubuntu-latest
@@ -21,12 +20,29 @@ jobs:
     permissions:
       contents: read
       issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - upstream: cursor/plugins
+            pathspec: pstack/skills/principle-*/SKILL.md
+            label: upstream-watch
+            track: head
+          # Released with the CLI, so reviewed per release tag. context-search is vendored by
+          # tools/vendor/jbcontext.py and arrives as the vendor-sync PR instead.
+          - upstream: JetBrains/context
+            pathspec: instructions hooks agents skills mcp :!skills/context-search
+            label: upstream-watch:jbcontext
+            track: releases
+    concurrency:
+      group: upstream-watch-${{ matrix.label }}
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      UPSTREAM: cursor/plugins
-      PATHSPEC: pstack/skills/principle-*/SKILL.md
-      LABEL: upstream-watch
+      UPSTREAM: ${{ matrix.upstream }}
+      PATHSPEC: ${{ matrix.pathspec }}
+      LABEL: ${{ matrix.label }}
+      TRACK: ${{ matrix.track }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

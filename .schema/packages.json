@@ -345,7 +345,7 @@
     },
     "Upstream": {
       "additionalProperties": false,
-      "description": "Installed by the project's own installer, because no package manager here can.\n\nThe install script re-runs whenever this machine's rendered set changes; `command`\nruns only while `creates` is not an executable, so it installs and never upgrades.\nNo package manager upgrades it either: `update` is how, run by `mise run\nupgrade-upstream` for each one installed here. Absent for a tool that updates itself\nunasked (mise's auto_update). The command never uninstalls.",
+      "description": "Installed by the project's own installer, because no package manager here can.\n\nThe install script re-runs whenever this machine's rendered set changes; `command`\nruns only while `creates` is not an executable, so it installs and never upgrades.\nNo package manager upgrades it either: `update` is how, run by `mise run\nupgrade-upstream` for each one installed here. Absent for a tool that updates itself\nunasked (mise's auto_update). The command never uninstalls.\n\n`version` pins it. Installers take a version each their own way (a flag, an argument, a\nURL path), so the entry writes `{version}` where its installer wants it and resolution\nfills it in. A pinned entry names the version in `creates` too, so moving the pin leaves\n`creates` missing and the next run installs; and it has no `update`, because moving the\npin is the only upgrade.",
       "properties": {
         "command": {
           "minLength": 1,
@@ -361,6 +361,12 @@
           "default": null,
           "minLength": 1,
           "title": "Update",
+          "type": "string"
+        },
+        "version": {
+          "default": null,
+          "minLength": 1,
+          "title": "Version",
           "type": "string"
         }
       },

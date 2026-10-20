@@ -35,14 +35,19 @@
 #                                    npm: tools.
 #   uv        { name | version }     via: uv only. name on PyPI; version spelled
 #                                    `name@version`.
-#   upstream  { command | creates | update }   via: upstream only. command:
-#                                    the project's own installer, run as
+#   upstream  { version | command | creates | update }   via: upstream only.
+#                                    command: the project's own installer, run as
 #                                    written, only while `creates` (the
 #                                    executable it leaves, sh syntax) is
 #                                    missing — it installs, never upgrades.
 #                                    update: the sh command that upgrades it,
 #                                    run by `mise run upgrade-upstream`; omit it
 #                                    only for a tool that updates itself unasked.
+#                                    version: a pin, filled in wherever command
+#                                    and creates write `{version}` (each
+#                                    installer takes it its own way); creates
+#                                    must name it, so moving the pin installs,
+#                                    and a pinned tool has no update.
 #                                    Removing the copy an old backend left is
 #                                    done by hand.
 #   completions map of command -> sh command whose stdout is that command's zsh
@@ -140,6 +145,27 @@ via = "mise"
 on = ["darwin", "linux"]
 via = "upstream"
 upstream = { command = "curl -fsSL https://claude.ai/install.sh | bash", creates = "$HOME/.local/bin/claude" }
+
+# Air Context CLI, behind the per-repo jbcontext plugin (claude/mods/jbcontext). The pin is
+# tools/vendor/jbcontext.py's to move, with the skill released alongside: the vendor-sync PR.
+# The installer keeps every version side by side under versions/ and only flips
+# bin/active-version.txt, so the command prunes the others; and the CLI is set against its
+# own upgrades and against rewriting agent prompts on one. --no-path-update: PATH is
+# .zshenv's. Back to a version still on disk: `jbcontext upgrade --version=<v> --skip-agents`,
+# since its versions/ entry already satisfies creates.
+[packages.jbcontext]
+on = ["darwin", "linux"]
+via = "upstream"
+
+[packages.jbcontext.upstream]
+version = "0.9.17.1213"
+command = """\
+  curl -fsSL https://download.jetbrains.com/jetbrains-context/release/download-jbcontext.sh \
+  | bash -s -- --version={version} --no-path-update \
+  && find "$HOME/.jbcontext/versions" -mindepth 1 -maxdepth 1 ! -name {version} -exec rm -rf {} + \
+  && "$HOME/.jbcontext/bin/jbcontext" config set updates.auto-update false \
+  && "$HOME/.jbcontext/bin/jbcontext" config set updates.skip-agents-on-upgrade true"""
+creates = "$HOME/.jbcontext/versions/{version}/jbcontext_binary"
 
 [packages.make]
 on = ["darwin", "linux"]

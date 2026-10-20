@@ -1,0 +1,13 @@
+{
+  "$merge": {
+    "permissions.allow": "ensure"
+  },
+  "enabledPlugins": {
+    "jbcontext@local-mods": false
+  },
+  "permissions": {
+    "allow": [
+      "Bash(jbcontext search:*)"
+    ]
+  }
+}
