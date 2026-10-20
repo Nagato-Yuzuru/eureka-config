@@ -629,6 +629,27 @@ RENDER_CASES = [
             ("dnf-list", "linux-arm64"): [],
         },
     ),
+    RenderCase(  # each installer takes the version its own way; the entry says where
+        "upstream-pinned-fills-its-version-where-the-entry-names-it",
+        {
+            "boot": {
+                "on": ["darwin"],
+                "via": "upstream",
+                "upstream": {
+                    "version": "1.2.3",
+                    "command": "curl https://x/i.sh | sh -s -- --version={version} && b gc {version}",
+                    "creates": "$HOME/v/{version}/b",
+                },
+            }
+        },
+        {
+            ("upstream-installs", "darwin-arm64"): [
+                '[ -x "$HOME/v/1.2.3/b" ] || curl https://x/i.sh | sh -s -- --version=1.2.3'
+                " && b gc 1.2.3"
+            ],
+            ("upstream-updates", "darwin-arm64"): [],
+        },
+    ),
 ]
 
 
@@ -809,6 +830,70 @@ REJECTS = [
             }
         },
         'packages.foo.upstream.creates: rendered inside sh double quotes, so no ", ` or \\',
+    ),
+    Reject(  # moving the pin would leave creates present, so nothing would install
+        "upstream-pinned-but-creates-ignores-the-pin",
+        {
+            "foo": {
+                "on": ["darwin"],
+                "via": "upstream",
+                "upstream": {"version": "1", "command": "i {version}", "creates": "$HOME/b"},
+            }
+        },
+        "packages.foo.upstream: version is set but ['creates'] never name {version}",
+    ),
+    Reject(  # the pin would name a path the command never installs
+        "upstream-pinned-but-the-command-ignores-the-pin",
+        {
+            "foo": {
+                "on": ["darwin"],
+                "via": "upstream",
+                "upstream": {"version": "1", "command": "i", "creates": "$HOME/{version}/b"},
+            }
+        },
+        "packages.foo.upstream: version is set but ['command'] never name {version}",
+    ),
+    Reject(  # upgrade-upstream would move it past the pin
+        "upstream-pinned-with-an-update",
+        {
+            "foo": {
+                "on": ["darwin"],
+                "via": "upstream",
+                "upstream": {
+                    "version": "1",
+                    "command": "i {version}",
+                    "creates": "$HOME/{version}/b",
+                    "update": "b up",
+                },
+            }
+        },
+        "packages.foo.upstream: a pinned tool has no update: moving the version is its upgrade",
+    ),
+    Reject(  # the placeholder would reach sh unfilled
+        "upstream-names-a-version-it-does-not-set",
+        {
+            "foo": {
+                "on": ["darwin"],
+                "via": "upstream",
+                "upstream": {"command": "i {version}", "creates": "$HOME/b"},
+            }
+        },
+        "packages.foo.upstream: ['command'] name {version} but no version is set",
+    ),
+    Reject(  # filling it would leave `$1`, an sh positional parameter
+        "upstream-spells-the-placeholder-as-sh",
+        {
+            "foo": {
+                "on": ["darwin"],
+                "via": "upstream",
+                "upstream": {
+                    "version": "1",
+                    "command": "i ${version}",
+                    "creates": "$HOME/{version}/b",
+                },
+            }
+        },
+        "packages.foo.upstream: ['command'] spell the placeholder {version}, not sh's ${version}",
     ),
     Reject(
         "brew-is-a-formula-or-a-cask-not-both",

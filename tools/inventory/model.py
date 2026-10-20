@@ -187,6 +187,9 @@ ShPath = Annotated[
 ]
 
 
+VERSION = "{version}"
+
+
 class Upstream(Strict):
     """Installed by the project's own installer, because no package manager here can.
 
@@ -195,12 +198,44 @@ class Upstream(Strict):
     No package manager upgrades it either: `update` is how, run by `mise run
     upgrade-upstream` for each one installed here. Absent for a tool that updates itself
     unasked (mise's auto_update). The command never uninstalls.
+
+    `version` pins it. Installers take a version each their own way (a flag, an argument, a
+    URL path), so the entry writes `{version}` where its installer wants it and resolution
+    fills it in. A pinned entry names the version in `creates` too, so moving the pin leaves
+    `creates` missing and the next run installs; and it has no `update`, because moving the
+    pin is the only upgrade.
     """
 
+    version: NonEmpty | None = None
     command: NonEmpty  # sh, run as written; no default — an empty install is not one
     # the executable the command leaves, in sh double-quote syntax ("$HOME/.local/bin/x")
     creates: ShPath
     update: NonEmpty | None = None  # sh, run as written, only while `creates` is an executable
+
+    @model_validator(mode="after")
+    def _pin_reaches_the_commands(self) -> Upstream:
+        fields = {"command": self.command, "creates": self.creates, "update": self.update or ""}
+        if shell := [k for k, v in fields.items() if "${version}" in v]:
+            raise ValueError(f"{shell} spell the placeholder {{version}}, not sh's ${{version}}")
+        named = [k for k, v in fields.items() if VERSION in v]
+        if self.version is None:
+            if named:
+                raise ValueError(f"{named} name {VERSION} but no version is set")
+        elif missing := [k for k in ("command", "creates") if k not in named]:
+            raise ValueError(f"version is set but {missing} never name {VERSION}")
+        elif self.update is not None:
+            raise ValueError("a pinned tool has no update: moving the version is its upgrade")
+        return self
+
+    def pinned(self) -> Upstream:
+        """This entry with `{version}` filled in, as the install script runs it: placeholders
+        gone, so `version` goes too (and the result still validates)."""
+        if self.version is None:
+            return self
+        return Upstream(
+            command=self.command.replace(VERSION, self.version),
+            creates=self.creates.replace(VERSION, self.version),
+        )
 
 
 Spec = Brew | Dnf | Mise | Uv | Upstream

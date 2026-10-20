@@ -35,14 +35,19 @@
 #                                    npm: tools.
 #   uv        { name | version }     via: uv only. name on PyPI; version spelled
 #                                    `name@version`.
-#   upstream  { command | creates | update }   via: upstream only. command:
-#                                    the project's own installer, run as
+#   upstream  { version | command | creates | update }   via: upstream only.
+#                                    command: the project's own installer, run as
 #                                    written, only while `creates` (the
 #                                    executable it leaves, sh syntax) is
 #                                    missing — it installs, never upgrades.
 #                                    update: the sh command that upgrades it,
 #                                    run by `mise run upgrade-upstream`; omit it
 #                                    only for a tool that updates itself unasked.
+#                                    version: a pin, filled in wherever command
+#                                    and creates write `{version}` (each
+#                                    installer takes it its own way); creates
+#                                    must name it, so moving the pin installs,
+#                                    and a pinned tool has no update.
 #                                    Removing the copy an old backend left is
 #                                    done by hand.
 #   completions map of command -> sh command whose stdout is that command's zsh

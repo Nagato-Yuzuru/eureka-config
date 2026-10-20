@@ -343,7 +343,7 @@ class Inventory:
             case UvPackage():
                 spec, name = pkg.uv, pkg.uv.name
             case UpstreamPackage():
-                spec, name = pkg.upstream, None  # named by its key
+                spec, name = pkg.upstream.pinned(), None  # named by its key
         return Resolved(key=key, name=name or key, spec=spec, completions=pkg.completions)
 
     def resolved(self, machine_id: str) -> list[Resolved]:
