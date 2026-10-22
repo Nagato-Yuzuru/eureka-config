@@ -170,6 +170,9 @@ creates = "$HOME/.jbcontext/versions/{version}/jbcontext_binary"
 [packages.make]
 on = ["darwin", "linux"]
 
+[packages.curl]
+on = ["darwin"]
+
 [packages.glibc-langpack-en]
 on = ["linux"]
 

@@ -42,12 +42,10 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
-    env:
-      SOURCE: ${{ github.workspace }}
     # Each step is a fresh login shell of an ordinary user, as after opening a new terminal.
     defaults:
       run:
-        shell: runuser -l me -w SOURCE,MISE_GITHUB_TOKEN -c 'bash -eo pipefail {0}'
+        shell: as-me {0}
     steps:
       - name: What a Fedora install already has, and its user
         shell: bash
@@ -56,12 +54,18 @@ jobs:
             sudo openssh-clients curl tar gzip xz procps-ng findutils which
           useradd -m me
           echo 'me ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/me
+          cat > /usr/local/bin/as-me <<'EOF'
+          #!/bin/sh
+          chmod a+r "$1"
+          exec runuser -l me -w GITHUB_WORKSPACE,MISE_GITHUB_TOKEN -c "bash -eo pipefail '$1'"
+          EOF
+          chmod +x /usr/local/bin/as-me
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Hand the checkout to the user
         shell: bash
-        run: chown -R me "$SOURCE"
+        run: chown -R me "$GITHUB_WORKSPACE"
 
       # The README's install steps.
       - run: curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -70,7 +74,7 @@ jobs:
         run: |
           # Stands in for an SSH identity: the externals clone public repos over SSH.
           git config --global url.https://github.com/.insteadOf git@github.com:
-          chezmoi init --apply "file://$SOURCE"
+          chezmoi init --apply "file://$GITHUB_WORKSPACE"
       - name: mise install
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
