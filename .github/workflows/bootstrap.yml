@@ -47,11 +47,12 @@ jobs:
       run:
         shell: as-me {0}
     steps:
+      # git only so the checkout is a repository to clone from; the README installs it too.
       - name: What a Fedora install already has, and its user
         shell: bash
         run: |
           dnf install -y --setopt=install_weak_deps=False \
-            sudo openssh-clients curl tar gzip xz procps-ng findutils which
+            sudo openssh-clients curl tar gzip xz procps-ng findutils which git
           useradd -m me
           echo 'me ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/me
           cat > /usr/local/bin/as-me <<'EOF'
