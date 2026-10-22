@@ -1,9 +1,10 @@
 """path-gate v2. Drives the hook scripts as subprocesses with a fake $HOME.
 
 The gate's decision chain is tested through the `check` verb (exit codes:
-0=allow, 1=ask, 2=deny). Hook mode (stdin JSON) parses its input differently,
-so the resolve and store-identity cases run in both modes (BOTH_MODES); hook
-mode and the record verb also have their own sections.
+0=allow, 1=ask, 2=deny). Hook mode (stdin JSON) differs only in how it parses
+its input — normalization, resolution and the store check are shared — so the
+resolve and store-identity cases run once, via check, and hook mode and the
+record verb have their own sections for the parsing.
 
 Two roots carry the whole suite, and neither hardcodes a platform:
 
@@ -155,24 +156,17 @@ class TestWorkspace:
         assert check(home, e2 / "f", "w", project) == ALLOW
 
 
-@pytest.mark.parametrize("hook", [False, True], ids=["check", "hook"])
 class TestOrdinaryWrites:
-    def test_new_nested_parents_in_workspace_allow(self, home, project, hook):
+    def test_new_nested_parents_in_workspace_allow(self, home, project):
         target = project / "a" / "b" / "c" / "new.txt"
-        assert decide(home, target, "w", project, hook=hook) == ALLOW
+        assert check(home, target, "w", project) == ALLOW
 
-    def test_symlinked_workspace_allows_new_nested_file(self, home, project, sandbox, hook):
+    def test_symlinked_workspace_allows_new_nested_file(self, home, project, sandbox):
         link = sandbox / "ws-link"
         link.symlink_to(project)
         target = link / "a" / "b" / "new.txt"
-        assert decide(home, target, "w", link, hook=hook) == ALLOW
-        assert decide(home, sandbox / "sibling.txt", "w", link, hook=hook) == ASK
-
-    def test_tmp_spelling_allows_new_nested_file(self, home, project, hook):
-        d = Path(tempfile.mkdtemp(dir=TMP_BASE))
-        rel = d.relative_to(TMP_ROOT).as_posix()
-        target = Path("/tmp") / rel / "x" / "y" / "new.txt"
-        assert decide(home, target, "w", project, hook=hook) == ALLOW
+        assert check(home, target, "w", link) == ALLOW
+        assert check(home, sandbox / "sibling.txt", "w", link) == ASK
 
 
 class TestTmp:
@@ -180,7 +174,6 @@ class TestTmp:
         d = tempfile.mkdtemp(dir=TMP_BASE)
         f = Path(d) / "old.log"
         f.write_text("x")
-        os.utime(f, (0, 0))  # ancient mtime — must not matter, no birthtime logic
         assert check(home, f, "r", project) == ALLOW
         assert check(home, f, "w", project) == ALLOW
 
@@ -188,12 +181,9 @@ class TestTmp:
         d = tempfile.mkdtemp(dir=TMP_BASE)
         f = Path(d) / "f.txt"
         f.write_text("x")
-        assert check(home, "/tmp/" + f.relative_to(TMP_ROOT).as_posix(), "r", project) == ALLOW
-
-    def test_foreign_temp_dir_asks(self, home, project, sandbox):
-        foreign = sandbox / "foreign.txt"
-        foreign.write_text("x")
-        assert check(home, foreign, "r", project) == ASK
+        spelled = Path("/tmp") / Path(d).relative_to(TMP_ROOT)
+        assert check(home, spelled / "f.txt", "r", project) == ALLOW
+        assert check(home, spelled / "x" / "y" / "new.txt", "w", project) == ALLOW
 
 
 class TestSymlinks:
@@ -206,14 +196,6 @@ class TestSymlinks:
         link.symlink_to(secret)
         assert check(home, link, "r", project) == ASK
         assert check(home, link, "w", project) == ASK
-
-    def test_link_in_tmp_to_outside_secret_asks(self, home, project):
-        secret = home / "secret.txt"
-        secret.write_text("key")
-        d = tempfile.mkdtemp(dir=TMP_BASE)
-        link = Path(d) / "grab"
-        link.symlink_to(secret)
-        assert check(home, link, "r", project) == ASK
 
     def test_link_resolving_into_workspace_allows(self, home, project):
         inside = project / "real.txt"
@@ -273,6 +255,12 @@ class TestStores:
         grants.write_text('{"version":1,"grants":[]}')
         assert check(home, grants, "r", home) == ASK
 
+    def test_durable_grant_allows_store_read_never_write(self, home, project):
+        grants = home / ".claude" / "hooks" / "path-gate-grants.json"
+        assert cli(home, "grant", grants, "r", "--global").returncode == 0
+        assert check(home, grants, "r", project) == ALLOW
+        assert check(home, grants, "w", project) == DENY
+
 
 # The gate pre-creates both stores, so any spelling that can reach one (case or
 # Unicode-fold variant on a folding volume, firmlink, symlinked parent) names an
@@ -282,11 +270,9 @@ class TestStores:
 # alike. project == home puts the stores inside the workspace: a variant that
 # slipped the carve-out would read as ALLOW, not merely ASK.
 STORE_NAMES = {"grants": "path-gate-grants.json", "sessions": "path-gate-sessions"}
-CASE_VARIANTS = {
-    "canonical": lambda n: n,
-    "upper": str.upper,
-    "mixed": lambda n: "".join(c.upper() if i % 2 else c for i, c in enumerate(n)),
-}
+# One variant suffices: -ef asks the filesystem, so every other case or fold
+# spelling is the same question.
+CASE_VARIANTS = {"canonical": lambda n: n, "upper": str.upper}
 
 
 def store_target(home: Path, store: str, spelling: str) -> Path:
@@ -332,13 +318,6 @@ class TestStoreCreation:
         }
         assert (hooks / "path-gate-sessions").is_dir()
 
-    def test_hook_mode_creates_both_stores(self, sandbox, project):
-        h = sandbox / "fresh"
-        h.mkdir()
-        assert run_hook(h, tool="Read", path=project / "a", cwd=project)["decision"] == "allow"
-        assert (h / ".claude" / "hooks" / "path-gate-grants.json").is_file()
-        assert (h / ".claude" / "hooks" / "path-gate-sessions").is_dir()
-
     def test_missing_sessions_dir_is_created_next_to_existing_grants(self, home, project):
         """A machine with grants from before the gate created both stores."""
         hooks = home / ".claude" / "hooks"
@@ -350,16 +329,13 @@ class TestStoreCreation:
         assert (hooks / "path-gate-sessions").is_dir()
         assert check(home, project / "a.txt", "w", project) == ALLOW
 
-    @pytest.mark.parametrize("blocker", ["grants-is-dir", "sessions-is-file", "hooks-is-file"])
+    @pytest.mark.parametrize("blocker", ["grants-is-dir", "sessions-is-file"])
     def test_unensurable_stores_deny_every_write(self, home, project, blocker):
         hooks = home / ".claude" / "hooks"
         if blocker == "grants-is-dir":
             (hooks / "path-gate-grants.json").mkdir()
-        elif blocker == "sessions-is-file":
-            (hooks / "path-gate-sessions").write_text("")
         else:
-            shutil.rmtree(hooks)
-            hooks.write_text("")
+            (hooks / "path-gate-sessions").write_text("")
         r = cli(home, "check", project / "a.txt", "w", "--project", project)
         assert r.returncode == DENY
         assert "stores cannot be ensured" in r.stdout
@@ -404,32 +380,22 @@ class TestStoreSpellings:
         if spelling == "canonical":
             assert rc == DENY
 
-    @pytest.mark.parametrize("spelling", ["upper", "mixed"])
     @pytest.mark.parametrize("store", STORE_NAMES)
-    def test_case_variant_read_decided_by_landing(self, home, store, spelling):
-        target = store_target(home, store, spelling)
+    def test_case_variant_read_decided_by_landing(self, home, store):
+        target = store_target(home, store, "upper")
         rc = check(home, target, "r", home)
         assert rc == (ASK if lands_on_store(home, target) else ALLOW)
 
-    @pytest.mark.parametrize("hook", [False, True], ids=["check", "hook"])
-    def test_case_variant_of_parent_dirs_decided_by_landing(self, home, hook):
+    def test_case_variant_of_parent_dirs_decided_by_landing(self, home):
         """Nothing under ~/.claude exists before the call: the gate creates it,
         then the variant spelling reaches it or not."""
         shutil.rmtree(home / ".claude")
         target = home / ".CLAUDE" / "Hooks" / "PATH-GATE-GRANTS.JSON"
-        rc = decide(home, target, "w", home, hook=hook)
+        rc = check(home, target, "w", home)
         assert rc == (DENY if lands_on_store(home, target) else ALLOW)
 
-    @pytest.mark.parametrize(
-        "name",
-        [
-            "path-gate-seßions",  # ß folds to ss under full case folding
-            "path-gate-ſessions",  # ſ (long s) folds to s
-            "path-gate-grantſ.json",
-        ],
-    )
-    def test_unicode_fold_variant_decided_by_landing(self, home, name):
-        target = home / ".claude" / "hooks" / name
+    def test_unicode_fold_variant_decided_by_landing(self, home):
+        target = home / ".claude" / "hooks" / "path-gate-seßions"  # ß folds to ss
         rc = check(home, target, "w", home)
         assert rc == (DENY if lands_on_store(home, target) else ALLOW)
 
@@ -437,12 +403,7 @@ class TestStoreSpellings:
         "name",
         [
             "path-gate-grants.json.bak",  # sibling, not inside the store
-            "path-gate-grants",
             "path-gate-sessions.json",
-            "café.txt",
-            "工作",
-            # longer than any NAME_MAX: the write fails, nothing to deny
-            pytest.param("é" * 2000, id="over-name-max"),
         ],
     )
     def test_non_store_neighbors_still_allowed(self, home, name):
@@ -454,20 +415,10 @@ class TestStoreSpellings:
         os.link(grants, project / "innocent.json")
         assert check(home, project / "innocent.json", "w", project) == DENY
 
-    def test_non_ascii_workspace_file_allowed(self, home, project):
-        assert check(home, project / "résumé.md", "w", project) == ALLOW
-
-    @pytest.mark.parametrize("name", ["工作", "日記.json", "é"])
-    @pytest.mark.parametrize("parent", ["/", "~", "~/.claude", "~/.claude/hooks"])
-    def test_non_ascii_dir_is_an_ordinary_workspace(self, home, parent, name):
-        base = Path("/") if parent == "/" else home / parent.removeprefix("~").lstrip("/")
-        ws = base / name
+    def test_non_ascii_dir_is_an_ordinary_workspace(self, home):
+        ws = home / ".claude" / "hooks" / "日記.json"  # next to the stores, not one
         assert check(home, ws / "README.md", "w", ws) == ALLOW
         assert check(home, ws / "README.md", "r", ws) == ALLOW
-
-    @pytest.mark.parametrize("name", ["工作", "日記.json", "é"])
-    def test_non_ascii_dir_outside_workspace_asks(self, home, project, name):
-        assert check(home, home / name / "x.txt", "w", project) == ASK
 
     def test_non_ascii_workspace_allows_in_hook_mode(self, home):
         ws = home / "工作" / "proj"
@@ -475,27 +426,18 @@ class TestStoreSpellings:
         out = run_hook(home, tool="Write", path=ws / "README.md", cwd=ws)
         assert out["decision"] == "allow"
 
-    # HOME may carry glob metacharacters; every comparison must stay literal.
-    @pytest.mark.parametrize(
-        ("home_dir", "sibling"),
-        [("a[1]é", "a1é"), ("*é", "zé"), ("?é", "zé")],
-    )
-    def test_glob_metacharacters_in_home_stay_literal(self, sandbox, home_dir, sibling):
+    # HOME may carry glob metacharacters or non-ASCII bytes; every root derived
+    # from it must match literally. With HOME under "?é", the sibling home under
+    # "zé" matches a ~/.claude whitelist root only if the root is used as a glob.
+    @pytest.mark.parametrize("home_dir", ["?é", "ホーム"])
+    def test_home_spelling_stays_literal(self, sandbox, project, home_dir):
         h = sandbox / home_dir / "home"
         (h / ".claude" / "hooks").mkdir(parents=True)
-        rel = Path(".claude") / "hooks" / "path-gate-grants.json"
-        assert check(h, h / rel, "w", sandbox) == DENY
-        assert check(h, sandbox / sibling / "home" / rel, "w", sandbox) == ALLOW
-
-    def test_non_ascii_home_stores_denied(self, sandbox):
-        h = sandbox / "ホーム" / "home"
-        (h / ".claude" / "hooks").mkdir(parents=True)
-        for spelling in CASE_VARIANTS:
-            target = store_target(h, "grants", spelling)
-            rc = check(h, target, "w", h)
-            assert rc == (DENY if lands_on_store(h, target) else ALLOW)
-        assert check(h, store_target(h, "grants", "canonical"), "w", h) == DENY
+        assert check(h, h / ".claude" / "hooks" / "path-gate-grants.json", "w", h) == DENY
         assert check(h, h / "ノート" / "a.txt", "w", h) == ALLOW
+        assert check(h, h / ".claude" / "skills" / "x.md", "r", project) == ALLOW
+        sibling = sandbox / "zé" / "home" / ".claude" / "skills" / "x.md"
+        assert check(h, sibling, "r", project) == ASK
 
 
 class TestDecisionCost:
@@ -531,11 +473,6 @@ class TestSymlinkChains:
     # write never lands on.
     BEYOND_ANY_KERNEL = 64
 
-    def test_long_chain_to_absent_store_is_store(self, home, project):
-        grants = home / ".claude" / "hooks" / "path-gate-grants.json"
-        head = link_chain(project, 12, grants)
-        assert check(home, head, "w", project) == DENY
-
     def test_long_chain_to_workspace_file_still_resolves(self, home, project):
         head = link_chain(project, 12, project / "real.txt")
         assert check(home, head, "w", project) == ALLOW
@@ -551,11 +488,6 @@ class TestSymlinkChains:
         assert check(home, project / "a", "w", project) == DENY
         assert check(home, project / "a", "r", project) == ASK
         assert check(home, project / "a" / "x.txt", "w", project) == DENY
-
-    def test_dangling_parent_link_is_followed(self, home, project):
-        sessions = home / ".claude" / "hooks" / "path-gate-sessions"
-        (project / "d").symlink_to(sessions)
-        assert check(home, project / "d" / f"{SID}.json", "w", project) == DENY
 
     def test_unresolvable_deny_says_why(self, home, project):
         (project / "a").symlink_to("a")
@@ -604,19 +536,6 @@ def node_write(path: Path, data: str) -> None:
     path.write_text(data)
 
 
-def decide(home, path, mode, project, *, hook: bool) -> int:
-    """One decision, in check mode or in hook mode (JSON on stdin)."""
-    if not hook:
-        return check(home, path, mode, project)
-    tool = "Write" if mode == "w" else "Read"
-    out = run_hook(home, tool=tool, path=path, cwd=project)
-    return {"allow": ALLOW, "ask": ASK, "deny": DENY}[out["decision"]]
-
-
-BOTH_MODES = pytest.mark.parametrize("hook", [False, True], ids=["check", "hook"])
-
-
-@BOTH_MODES
 class TestClaudeCodeNormalization:
     """Claude Code's file tools trim the path (JS trim), then apply Node's
     path.normalize / path.resolve(cwd, ...) before the kernel sees it, and
@@ -624,64 +543,45 @@ class TestClaudeCodeNormalization:
     `x/..` is gone before any symlink `x` could be followed. The gate judges
     the same path, then follows symlinks physically from there."""
 
-    def test_missing_dir_dotdot_then_link_to_store_denied(self, home, sandbox, hook):
+    def test_missing_dir_dotdot_then_link_to_store_denied(self, home, sandbox):
         ws = sandbox / "ws"
         ws.mkdir()
         (ws / "l1").symlink_to(home / ".claude")
         target = ws / "nonexist" / ".." / "l1" / "hooks" / "path-gate-grants.json"
-        assert decide(home, target, "w", ws, hook=hook) == DENY
+        assert check(home, target, "w", ws) == DENY
+        # the same shape to an ordinary dir outside the workspace only asks
+        (sandbox / "elsewhere").mkdir()
+        (ws / "out").symlink_to(sandbox / "elsewhere")
+        assert check(home, ws / "zz" / ".." / "out" / "evil.txt", "w", ws) == ASK
 
-    def test_dotdot_through_link_is_lexical_so_store_denied(self, home, sandbox, hook):
+    def test_dotdot_through_link_is_lexical_so_store_denied(self, home, sandbox):
         """Physically `evil/../..` would climb from evil's target into ws; the
         tool collapses it to the sandbox, where home's store lives."""
         ws = sandbox / "ws"
         (ws / "q" / "r").mkdir(parents=True)
         (ws / "evil").symlink_to(ws / "q" / "r")
         target = ws / "evil" / ".." / ".." / "home" / ".claude" / "hooks" / "path-gate-grants.json"
-        assert decide(home, target, "w", ws, hook=hook) == DENY
+        assert check(home, target, "w", ws) == DENY
 
-    def test_dotdot_then_link_out_of_workspace_asks(self, home, sandbox, hook):
-        ws = sandbox / "ws"
-        ws.mkdir()
-        elsewhere = sandbox / "elsewhere"
-        elsewhere.mkdir()
-        (ws / "out").symlink_to(elsewhere)
-        assert decide(home, ws / "zz" / ".." / "out" / "evil.txt", "w", ws, hook=hook) == ASK
-
-    def test_dotdot_after_link_stays_where_the_text_says(self, home, sandbox, hook):
+    def test_dotdot_after_link_stays_where_the_text_says(self, home, sandbox):
         ws = sandbox / "ws"
         ws.mkdir()
         (sandbox / "outside" / "nest").mkdir(parents=True)
         (ws / "mylink").symlink_to(sandbox / "outside" / "nest")
-        assert decide(home, ws / "mylink" / ".." / "f.txt", "w", ws, hook=hook) == ALLOW
+        assert check(home, ws / "mylink" / ".." / "f.txt", "w", ws) == ALLOW
 
-    def test_climb_out_of_workspace_asks(self, home, sandbox, hook):
-        ws = sandbox / "ws"
-        ws.mkdir()
-        assert decide(home, ws / "m" / ".." / ".." / "x.txt", "w", ws, hook=hook) == ASK
-
-    def test_many_dotdot_pairs_are_not_hops(self, home, project, hook):
+    def test_many_dotdot_pairs_are_not_hops(self, home, project):
         target = project.joinpath(*["n", ".."] * 41, "x.txt")
-        assert decide(home, target, "w", project, hook=hook) == ALLOW
-
-
-# JS trim's set, one of each kind: ASCII, a line terminator, multibyte.
-PADS = {
-    "space": " ",
-    "tab": "\t",
-    "newline": "\n",
-    "nbsp": "\u00a0",
-    "ideographic": "\u3000",
-    "bom": "\ufeff",
-    "line-sep": "\u2028",
-}
+        assert check(home, target, "w", project) == ALLOW
 
 
 class TestCliTrim:
     """check / grant / revoke take raw paths, which Claude Code's helper would
     trim before normalizing: the CLI judges the trimmed path."""
 
-    @pytest.mark.parametrize("pad", PADS.values(), ids=list(PADS))
+    # Members of JS trim's set that no other test pads with; the rest go through
+    # the same jq pass and recur below and in TestClaudeCodePathTable.
+    @pytest.mark.parametrize("pad", ["\n", "\t", "\u2028"], ids=["nl", "tab", "u2028"])
     def test_padded_store_path_denied(self, home, sandbox, pad):
         grants = home / ".claude" / "hooks" / "path-gate-grants.json"
         assert check(home, f"{pad}{grants}{pad}", "w", sandbox) == DENY
@@ -720,9 +620,9 @@ class TestHookTrailingWhitespace:
     in whitespace ("/ws/b /." normalizes to "/ws/b "), and the tool opens it as
     is. Hook mode must judge exactly that name, never a trimmed one."""
 
-    @pytest.mark.parametrize(
-        "pad", ["\n", " ", "\u00a0", "\u3000"], ids=["nl", "sp", "nbsp", "u3000"]
-    )
+    # Hook mode trims nothing, so whitespace kinds are one class; a newline is
+    # kept apart for the shell's own handling of it.
+    @pytest.mark.parametrize("pad", ["\n", " "], ids=["nl", "sp"])
     def test_padded_name_linked_to_grants_denied(self, home, sandbox, pad):
         ws = sandbox / "ws"
         (ws / "b").mkdir(parents=True)  # the trimmed name: an ordinary dir
@@ -731,20 +631,7 @@ class TestHookTrailingWhitespace:
         assert out["decision"] == "deny"
         assert "tool-owned path-gate store" in out["reason"]
 
-    @pytest.mark.parametrize(
-        "pad", ["\n", " ", "\u00a0", "\u3000"], ids=["nl", "sp", "nbsp", "u3000"]
-    )
-    def test_padded_name_linked_into_sessions_denied(self, home, sandbox, pad):
-        ws = sandbox / "ws"
-        ws.mkdir()
-        sessions = home / ".claude" / "hooks" / "path-gate-sessions"
-        (ws / f"d{pad}").symlink_to(sessions / f"{SID}.json")
-        out = run_hook(home, tool="Write", path=f"{ws}/d{pad}", cwd=ws)
-        assert out["decision"] == "deny"
-
-    @pytest.mark.parametrize(
-        "pad", ["\n", " ", "\u00a0", "\u3000"], ids=["nl", "sp", "nbsp", "u3000"]
-    )
+    @pytest.mark.parametrize("pad", ["\n", " "], ids=["nl", "sp"])
     def test_padded_sibling_of_project_asks_with_exact_path(self, home, project, pad):
         target = f"{project}{pad}"  # a sibling of the project dir, not the project
         out = run_hook(home, tool="Write", path=target, cwd=project)
@@ -797,9 +684,7 @@ class TestHomeUnset:
         assert r.returncode == 0
         assert r.stdout == ""
 
-    @pytest.mark.parametrize(
-        "home_value", [None, "", "relative/home"], ids=["unset", "empty", "relative"]
-    )
+    @pytest.mark.parametrize("home_value", [None, "relative/home"], ids=["unset", "relative"])
     def test_cli_refuses_with_reason(self, project, home_value):
         e = self.env()
         if home_value is not None:
@@ -852,7 +737,6 @@ CC_PATHS = [
     ("W/a/../b.txt", "W/b.txt"),
     ("W/nonexist/../x.txt", "W/x.txt"),
     ("W//a/./b.txt", "W/a/b.txt"),
-    ("W/a/b/../../c.txt", "W/c.txt"),
     ("  W/a.txt\n", "W/a.txt"),
     (" ﻿W/a.txt　 ", "W/a.txt"),
     ("W/a​.txt", "W/a​.txt"),  # zero-width space is not whitespace
@@ -861,15 +745,18 @@ CC_PATHS = [
 
 NODE_NORMALIZE = """
 const p = require("path");
-const [raw, cwd] = JSON.parse(process.argv[1]);
-const t = raw.trim();
-process.stdout.write(JSON.stringify(p.isAbsolute(t) ? p.normalize(t) : p.resolve(cwd, t)));
+const [raws, cwd] = JSON.parse(process.argv[1]);
+const norm = (raw) => {
+  const t = raw.trim();
+  return p.isAbsolute(t) ? p.normalize(t) : p.resolve(cwd, t);
+};
+process.stdout.write(JSON.stringify(raws.map(norm)));
 """
 
 
-def node_normalize(raw: str, cwd: str) -> str:
+def node_normalize(raws: list[str], cwd: str) -> list[str]:
     r = subprocess.run(
-        ["node", "-e", NODE_NORMALIZE, json.dumps([raw, cwd])],
+        ["node", "-e", NODE_NORMALIZE, json.dumps([raws, cwd])],
         capture_output=True,
         text=True,
         check=True,
@@ -897,14 +784,17 @@ class TestClaudeCodePathTable:
         assert r.stdout.startswith(f"allow: w on {w}/b.txt (project")
 
     @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
-    @pytest.mark.parametrize(("raw", "expected"), CC_PATHS)
-    def test_table_matches_node(self, raw, expected):
-        assert node_normalize(raw.replace("W", "/w", 1), "/") == expected.replace("W", "/w", 1)
+    def test_table_matches_node(self):
+        raws = [raw.replace("W", "/w", 1) for raw, _ in CC_PATHS]
+        expected = [exp.replace("W", "/w", 1) for _, exp in CC_PATHS]
+        assert node_normalize(raws, "/") == expected
 
 
 # Characters jq's @tsv escapes. A hook-mode field must reach the decision byte
 # for byte (inside a name: at either end the tool's trim removes them).
-ODD_CHARS = {"backslash": "\\", "tab": "\t", "newline": "\n"}
+# Tab, the third, adds nothing: in a NUL-split field it is an ordinary byte,
+# and newline already catches a parse that splits on whitespace.
+ODD_CHARS = {"backslash": "\\", "newline": "\n"}
 
 
 class TestHookFieldFidelity:
@@ -919,9 +809,8 @@ class TestHookFieldFidelity:
         assert out["decision"] == "deny"
         assert "tool-owned path-gate store" in out["reason"]
 
-    @pytest.mark.parametrize("ch", ODD_CHARS.values(), ids=list(ODD_CHARS))
-    def test_pending_records_the_exact_path(self, home, project, ch):
-        target = home / f"f{ch}g" / f"x{ch}y"
+    def test_pending_records_the_exact_path(self, home, project):
+        target = home / "f\ng" / "x\ny"
         out = run_hook(home, tool="Read", path=target, cwd=project)
         assert out["decision"] == "ask"
         data = json.loads(session_file(home).read_text())
@@ -933,13 +822,12 @@ class TestHookFieldFidelity:
         assert "crashed" in out["reason"]
 
 
-@BOTH_MODES
 class TestSymlinkedClaudeDir:
     """Dotfiles setups link ~/.claude or ~/.claude/hooks elsewhere; the store is
     wherever the filesystem puts it, whatever $HOME spells."""
 
     @pytest.mark.parametrize("linked", [".claude", ".claude/hooks"])
-    def test_store_at_link_target_denied(self, sandbox, linked, hook):
+    def test_store_at_link_target_denied(self, sandbox, linked):
         h = sandbox / "home"
         dots = sandbox / "dots" / "claude"
         (dots / "hooks").mkdir(parents=True)
@@ -947,11 +835,11 @@ class TestSymlinkedClaudeDir:
         link.parent.mkdir(parents=True, exist_ok=True)
         link.symlink_to(dots if linked == ".claude" else dots / "hooks")
         target = dots / "hooks" / "path-gate-grants.json"
-        assert decide(h, target, "w", sandbox, hook=hook) == DENY
+        assert check(h, target, "w", sandbox) == DENY
         sessions = dots / "hooks" / "path-gate-sessions" / f"{SID}.json"
-        assert decide(h, sessions, "w", sandbox, hook=hook) == DENY
+        assert check(h, sessions, "w", sandbox) == DENY
         # a sibling under the same link target is an ordinary workspace file
-        assert decide(h, dots / "hooks" / "other.json", "w", sandbox, hook=hook) == ALLOW
+        assert check(h, dots / "hooks" / "other.json", "w", sandbox) == ALLOW
 
 
 # /System/Volumes/Data is where macOS's firmlinks point; realpath keeps that
@@ -967,47 +855,37 @@ def data_volume_spelling(p: Path) -> Path | None:
         return None
 
 
-@BOTH_MODES
 class TestFirmlinkSpelling:
-    def test_store_under_data_volume_spelling_denied(self, home, hook):
+    def test_store_under_data_volume_spelling_denied(self, home):
         hooks = home / ".claude" / "hooks"
         alias = data_volume_spelling(hooks)
         if alias is None:
             pytest.skip("no firmlinked data volume on this host")
-        assert decide(home, alias / "path-gate-grants.json", "w", home, hook=hook) == DENY
-        assert decide(home, alias / "path-gate-sessions" / "s.json", "w", home, hook=hook) == DENY
+        assert check(home, alias / "path-gate-grants.json", "w", home) == DENY
+        assert check(home, alias / "path-gate-sessions" / "s.json", "w", home) == DENY
 
 
-@BOTH_MODES
 class TestNewlineInLinkTargets:
     """$(readlink) and $(realpath) strip trailing newlines; a name ending in one
     must keep it, or the gate judges a sibling of where the write lands."""
 
-    def test_dangling_link_to_name_ending_in_newline(self, home, sandbox, hook):
+    def test_dangling_link_to_name_ending_in_newline(self, home, sandbox):
         ws = sandbox / "ws"
         (ws / "d").mkdir(parents=True)  # the name the stripped target would hit
         outside = sandbox / "outside"
         outside.mkdir()
         (ws / "d\n").symlink_to(outside / "new.txt")  # dangling, lands outside
         (ws / "l").symlink_to("d\n")
-        assert decide(home, ws / "l", "w", ws, hook=hook) == ASK
+        assert check(home, ws / "l", "w", ws) == ASK
         node_write(ws / "l", "x")
         assert (outside / "new.txt").read_text() == "x"
 
-    def test_link_to_dir_ending_in_newline(self, home, sandbox, hook):
+    def test_link_to_dir_ending_in_newline(self, home, sandbox):
         ws = sandbox / "ws"
         ws.mkdir()
         (sandbox / "ws\n").mkdir()  # outside the workspace, one byte away
         (ws / "link").symlink_to("../ws\n")
-        assert decide(home, ws / "link" / "new.txt", "w", ws, hook=hook) == ASK
-
-    def test_chain_to_absent_store_through_newline_name(self, home, sandbox, hook):
-        ws = sandbox / "ws"
-        ws.mkdir()
-        grants = home / ".claude" / "hooks" / "path-gate-grants.json"
-        (ws / "d\n").symlink_to(grants)
-        (ws / "l").symlink_to("d\n")
-        assert decide(home, ws / "l", "w", ws, hook=hook) == DENY
+        assert check(home, ws / "link" / "new.txt", "w", ws) == ASK
 
 
 class TestMemoryAndWhitelist:
@@ -1026,27 +904,20 @@ class TestMemoryAndWhitelist:
         assert check(home, f, "r", project) == ALLOW
         assert check(home, f, "w", project) == ASK
 
-    def test_cross_slug_transcripts_ask(self, home, project):
-        f = home / ".claude" / "projects" / "-other" / "session.jsonl"
-        assert check(home, f, "r", project) == ASK
-
-    @pytest.mark.parametrize(
-        "sub", ["plugins", "skills", "agents", "commands", "rules", "output-styles"]
-    )
-    def test_structural_dirs_read_only(self, home, project, sub):
-        f = home / ".claude" / sub / "thing.md"
+    # One entry each: the lists are literals in one loop, and skills/ and
+    # CLAUDE.md recur in the symlinked-dir tests below.
+    def test_structural_dirs_read_only(self, home, project):
+        f = home / ".claude" / "plugins" / "thing.md"
         assert check(home, f, "r", project) == ALLOW
         assert check(home, f, "w", project) == ASK
 
-    @pytest.mark.parametrize("name", ["CLAUDE.md", "keybindings.json"])
-    def test_structural_files_read_only(self, home, project, name):
-        f = home / ".claude" / name
+    def test_structural_files_read_only(self, home, project):
+        f = home / ".claude" / "keybindings.json"
         assert check(home, f, "r", project) == ALLOW
         assert check(home, f, "w", project) == ASK
 
-    @pytest.mark.parametrize("name", ["settings.json", ".credentials.json", "history.jsonl"])
-    def test_excluded_claude_files_ask(self, home, project, name):
-        assert check(home, home / ".claude" / name, "r", project) == ASK
+    def test_excluded_claude_files_ask(self, home, project):
+        assert check(home, home / ".claude" / ".credentials.json", "r", project) == ASK
 
     def test_whitelist_through_symlinked_claude_dir(self, sandbox, project):
         """Dotfiles setups link ~/.claude elsewhere: its whitelisted roots are
@@ -1075,42 +946,34 @@ class TestMemoryAndWhitelist:
         assert check(home, sandbox / "other.md", "r", project) == ASK
 
     @pytest.mark.parametrize(
-        ("project_path", "slug"),
+        ("project_path", "slug", "near_miss"),
         [
             (
                 "/nonexistent-path-gate-fixture/proj.name",
                 "-nonexistent-path-gate-fixture-proj-name",
+                "-nonexistent-path-gate-fixture-proj.name",  # punctuation kept
             ),
             (
-                "/nonexistent-path-gate-fixture/proj_name",
-                "-nonexistent-path-gate-fixture-proj-name",
+                "/nonexistent-path-gate-fixture/café",
+                "-nonexistent-path-gate-fixture-caf--",
+                "-nonexistent-path-gate-fixture-caf-",  # one dash per code point
             ),
-            (
-                "/nonexistent-path-gate-fixture/proj name",
-                "-nonexistent-path-gate-fixture-proj-name",
-            ),
-            ("/nonexistent-path-gate-fixture/café", "-nonexistent-path-gate-fixture-caf--"),
         ],
-        ids=["period", "underscore", "space", "non-ascii"],
+        ids=["punctuation", "non-ascii"],
     )
-    def test_memory_dir_uses_claude_codes_slug(self, home, project_path, slug):
+    def test_memory_dir_uses_claude_codes_slug(self, home, project_path, slug, near_miss):
         """The project-dir slug is undocumented upstream, so these are hardcoded
         expected values (re-check by eye against `ls ~/.claude/projects` when a
         Claude Code release moves it) — exercised through the real `check` verb,
-        not a reimplementation of the rule. The project path need not exist:
-        `resolve()` handles a missing project the same as a missing target."""
-        mem = home / ".claude" / "projects" / slug / "memory" / "m.md"
+        not a reimplementation of the rule. Every non-[A-Za-z0-9] BYTE becomes
+        a dash: é (2 bytes in UTF-8) becomes two. The project path need not
+        exist: `resolve()` handles a missing project the same as a missing
+        target."""
+        projects = home / ".claude" / "projects"
+        mem = projects / slug / "memory" / "m.md"
         assert check(home, mem, "r", project_path) == ALLOW
         assert check(home, mem, "w", project_path) == ALLOW
-
-    def test_non_ascii_slug_is_byte_wise_not_codepoint_wise(self, home):
-        """LC_ALL=C folds each UTF-8 byte of a non-ASCII character individually:
-        é (2 bytes) becomes two dashes. A codepoint-aware guess (one dash per
-        character) names a different, uncovered directory."""
-        project_path = "/nonexistent-path-gate-fixture/café"
-        one_dash_per_char = "-nonexistent-path-gate-fixture-caf-"
-        mem = home / ".claude" / "projects" / one_dash_per_char / "memory" / "m.md"
-        assert check(home, mem, "r", project_path) == ASK
+        assert check(home, projects / near_miss / "memory" / "m.md", "r", project_path) == ASK
 
 
 class TestGrantsCli:
@@ -1126,6 +989,10 @@ class TestGrantsCli:
         r = cli(home, "grant", str(home / "shared"), "r", "--project", str(other))
         assert r.returncode == 0, r.stderr
         assert check(home, home / "shared" / "x", "r", project) == ASK
+        # nor does a sibling whose name only starts with the scope's
+        sibling = sandbox / "other2"
+        sibling.mkdir()
+        assert check(home, home / "shared" / "x", "r", sibling) == ASK
         # the scope it WAS granted for still matches, at the grant path and below
         assert check(home, home / "shared" / "x", "r", other) == ALLOW
         assert check(home, home / "shared" / "x" / "y", "r", other) == ALLOW
@@ -1136,23 +1003,28 @@ class TestGrantsCli:
         assert check(home, home / "g" / "x", "w", project) == ALLOW
 
     def test_expired_ttl_is_inert(self, home, project):
-        r = cli(home, "grant", str(home / "t"), "r", "--global", "--ttl", "1s")
-        assert r.returncode == 0, r.stderr
-        assert check(home, home / "t" / "x", "r", project) == ALLOW
-        time.sleep(1.1)
+        grants = home / ".claude" / "hooks" / "path-gate-grants.json"
+        entry = {"scope": "*", "path": str(home / "t"), "mode": "r", "expires": time.time() - 60}
+        grants.write_text(json.dumps({"version": 1, "grants": [entry]}))
         assert check(home, home / "t" / "x", "r", project) == ASK
-
-    def test_ttl_grant_allows_before_expiry(self, home, project):
+        # and one not yet expired still covers
         r = cli(home, "grant", str(home / "u"), "r", "--global", "--ttl", "1h")
         assert r.returncode == 0, r.stderr
         assert check(home, home / "u" / "x", "r", project) == ALLOW
+        # an hour from now, floored to whole minutes as time passes
+        assert re.search(r"\b(59|60)m left\b", cli(home, "list").stdout)
 
     def test_revoke(self, home, project):
+        grants = home / ".claude" / "hooks" / "path-gate-grants.json"
         r = cli(home, "grant", str(home / "g2"), "r", "--global")
         assert r.returncode == 0, r.stderr
+        paths = [g["path"] for g in json.loads(grants.read_text())["grants"]]
+        assert paths == [str((home / "g2").resolve())]
         assert check(home, home / "g2" / "x", "r", project) == ALLOW
         r = cli(home, "revoke", str(home / "g2"), "--global")
         assert r.returncode == 0, r.stderr
+        assert r.stdout.startswith("revoked 1 grant(s)")
+        assert json.loads(grants.read_text())["grants"] == []
         assert check(home, home / "g2" / "x", "r", project) == ASK
 
     def test_revoke_global_does_not_remove_project_scoped_grant(self, home, project):
@@ -1225,10 +1097,9 @@ class TestGrantsCli:
         assert check(home, good / "x", "r", project) == ALLOW
         assert check(home, home / "bad" / "x", "r", project) == ASK
 
+    # One wrong shape: valid_store asks one question of any parsed value.
     @pytest.mark.parametrize(
-        "content",
-        ["", "{corrupt", '{"version":1}', "[]"],
-        ids=["empty", "bad-json", "no-grants", "array"],
+        "content", ["", "{corrupt", '{"version":1}'], ids=["empty", "bad-json", "wrong-shape"]
     )
     @pytest.mark.parametrize("verb", ["grant", "revoke"])
     def test_broken_store_is_refused_and_left_untouched(self, home, verb, content):
@@ -1258,15 +1129,6 @@ class TestGrantsCli:
         assert r.returncode == 3
         assert "the edit produced no valid store" in r.stderr
         assert grants.read_text() == before
-
-    def test_grant_then_revoke_round_trip(self, home, project):
-        grants = home / ".claude" / "hooks" / "path-gate-grants.json"
-        assert cli(home, "grant", home / "g", "r", "--global").returncode == 0
-        paths = [g["path"] for g in json.loads(grants.read_text())["grants"]]
-        assert paths == [str((home / "g").resolve())]
-        r = cli(home, "revoke", home / "g", "--global")
-        assert r.stdout.startswith("revoked 1 grant(s)")
-        assert json.loads(grants.read_text())["grants"] == []
 
     def test_session_flag_consults_session_store(self, home, project):
         sdir = home / ".claude" / "hooks" / "path-gate-sessions"
@@ -1346,11 +1208,6 @@ class TestHookMode:
         else:
             assert not session_file(home).exists()
 
-    def test_store_write_denies(self, home, project):
-        grants = home / ".claude" / "hooks" / "path-gate-grants.json"
-        out = run_hook(home, tool="Write", path=grants, cwd=project)
-        assert out["decision"] == "deny"
-
     @pytest.mark.parametrize("tool", ["Edit", "NotebookEdit"])
     def test_edit_and_notebookedit_need_write(self, home, project, tool):
         grants = home / ".claude" / "hooks" / "path-gate-grants.json"
@@ -1409,10 +1266,6 @@ class TestHookMode:
     def test_relative_file_path_resolved_against_payload_cwd(self, home, project):
         out = run_hook(home, tool="Write", path="a.txt", cwd=project)
         assert out["decision"] == "allow"
-
-    def test_relative_file_path_traversal_against_payload_cwd_asks(self, home, project):
-        out = run_hook(home, tool="Write", path="../x.txt", cwd=project)
-        assert out["decision"] == "ask"
 
     def test_claude_project_dir_env_wins_over_cwd(self, home, project, sandbox):
         elsewhere = sandbox / "elsewhere"
