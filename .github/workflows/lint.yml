@@ -18,6 +18,10 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      UV_FROZEN: "1"
+      # claude/mods' check generates types by running Claude Code, which CI has no login for.
+      SKIP: mods-check
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
