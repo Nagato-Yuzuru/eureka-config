@@ -1,2 +1,4 @@
 #:schema https://raw.githubusercontent.com/SchemaStore/schemastore/master/src/schemas/json/uv.json
 exclude-newer = "P7D"
+# trust-store data: every release is a revocation, the cooldown only delays it
+exclude-newer-package = { certifi = false }
