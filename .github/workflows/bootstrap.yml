@@ -1,26 +1,13 @@
 # A fresh Fedora machine, set up by the README's install steps from this commit's source.
 # Catches what the tests cannot: a package dnf no longer has, a dead COPR, a bootstrap step
 # in the wrong order. Weekly as well, since those break without a commit here.
+#
+# `bootstrap` is a required check, so it reports on every pull request: one that touches no
+# deployed file passes it without the slow run.
 name: bootstrap
 
 "on":
-  pull_request:
-    paths: &paths
-      - ".chezmoi*"
-      - ".chezmoidata/**"
-      - ".chezmoitemplates/**"
-      - "dot_*"
-      - "dot_*/**"
-      - "run_*"
-      - "Makefile"
-      - "tools/inventory/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "README.md"
-      - ".github/workflows/bootstrap.yml"
-  push:
-    branches: [main]
-    paths: *paths
+  pull_request: {}
   schedule:
     - cron: "17 5 * * 1"
   workflow_dispatch: {}
@@ -32,7 +19,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      deploy: ${{ steps.diff.outputs.deploy }}
+    steps:
+      - id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          deploy=true
+          if [[ -n "$PR" ]]; then
+            files=$(gh pr diff "$PR" --name-only)
+            grep -qE '^(\.chezmoi|\.chezmoidata/|\.chezmoitemplates/|dot_|run_|Makefile$|tools/inventory/|pyproject\.toml$|uv\.lock$|\.python-version$|README\.md$|\.github/workflows/bootstrap\.yml$)' <<<"$files" || deploy=false
+          fi
+          echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
+
   fedora:
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -83,3 +94,16 @@ jobs:
 
       - name: A second apply changes nothing
         run: chezmoi verify
+
+  bootstrap:
+    needs: [changes, fedora]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          FEDORA: ${{ needs.fedora.result }}
+        run: |
+          echo "changes: $CHANGES, fedora: $FEDORA"
+          [[ "$CHANGES" == success && "$FEDORA" =~ ^(success|skipped)$ ]]
