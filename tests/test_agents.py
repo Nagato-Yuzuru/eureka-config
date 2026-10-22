@@ -646,7 +646,9 @@ def test_type_matches_file_name_case_exactly(home: Path):
     assert "subagent_type 'Pinned' has no agent definition" in reason
 
 
-@pytest.mark.parametrize("other_name", ["name: pinned", 'name: "pinned"', "'name': pinned"])
+@pytest.mark.parametrize(
+    "other_name", ["name: pinned", 'name: "pinned"', "'name': pinned", "name: pinned  # alias"]
+)
 def test_second_file_claiming_the_name_denies(home: Path, other_name: str):
     write_agent(home, "pinned.md", agent_text())
     other = write_agent(home, "zz.md", f"---\n{other_name}\n---\nbody\n")
