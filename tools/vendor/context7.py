@@ -15,10 +15,9 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from _upstream import REPO_ROOT, GitHub, UpstreamChanged, converge, forbid, replace
+from _upstream import NPX, REPO_ROOT, GitHub, UpstreamChanged, converge, forbid, replace
 
 REPO, BRANCH = "upstash/context7", "master"
-NPX = r"(^|[\s`(;&|])np[mx]([\s;&|)`]|$)"  # npm/npx where block-package-managers.sh sees a command
 
 
 def skill(text: str) -> str:
