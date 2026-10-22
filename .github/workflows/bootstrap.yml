@@ -41,7 +41,9 @@ jobs:
           fi
           echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
 
-  fedora:
+  # Not `fedora`: ci.yml's required check has that name, and a skipped job here would
+  # report under it as a pass.
+  fresh-install:
     needs: changes
     if: needs.changes.outputs.deploy == 'true'
     strategy:
@@ -96,14 +98,14 @@ jobs:
         run: chezmoi verify
 
   bootstrap:
-    needs: [changes, fedora]
+    needs: [changes, fresh-install]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - env:
           CHANGES: ${{ needs.changes.result }}
-          FEDORA: ${{ needs.fedora.result }}
+          INSTALL: ${{ needs.fresh-install.result }}
         run: |
-          echo "changes: $CHANGES, fedora: $FEDORA"
-          [[ "$CHANGES" == success && "$FEDORA" =~ ^(success|skipped)$ ]]
+          echo "changes: $CHANGES, fresh-install: $INSTALL"
+          [[ "$CHANGES" == success && "$INSTALL" =~ ^(success|skipped)$ ]]
