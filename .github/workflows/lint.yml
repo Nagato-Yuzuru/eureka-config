@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      UV_FROZEN: "1"
+      UV_LOCKED: "1"
       # claude/mods' check generates types by running Claude Code, which CI has no login for.
       SKIP: mods-check
     steps:

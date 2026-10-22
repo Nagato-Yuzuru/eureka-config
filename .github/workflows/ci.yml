@@ -14,8 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Install the lock as is: it was resolved under the release cooldown in the user's uv.toml.
-  UV_FROZEN: "1"
+  UV_LOCKED: "1"
 
 jobs:
   macos:
