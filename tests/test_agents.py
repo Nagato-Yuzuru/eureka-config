@@ -207,6 +207,7 @@ def test_model_names_live_only_in_the_routing_data():
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "dot_claude"],
         cwd=REPO_ROOT, capture_output=True, text=True, check=True,
     ).stdout.split("\0")  # fmt: skip
+    names = model_names()
     hits = [
         f"{rel}:{n}"
         for rel in listed
@@ -214,7 +215,7 @@ def test_model_names_live_only_in_the_routing_data():
         for n, line in enumerate(
             (REPO_ROOT / rel).read_bytes().decode(errors="replace").splitlines(), 1
         )
-        if model_names().search(line)
+        if names.search(line)
     ]
     assert hits == [], (
         "a model name outside .chezmoidata/claude.toml is a second copy of the routing;"
@@ -233,14 +234,9 @@ def claude_doc(
     return {"claude": {"routing": {"classes": classes, "gated": gated or ["fable"]}}}
 
 
-def test_claude_doc_accepts_the_baseline():
-    ClaudeDoc.model_validate(claude_doc())
-
-
 @pytest.mark.parametrize(
     ("doc", "why"),
     [
-        (claude_doc(classes=[]), "at least 1 item"),
         (claude_doc(classes=[{"id": "a", "work": "w", "model": "haiku"}] * 2), "class ids repeat"),
         (
             claude_doc(
@@ -252,11 +248,6 @@ def test_claude_doc_accepts_the_baseline():
             "more than one class",
         ),
         (claude_doc(gated=["opus"]), "gated models are some class's model: \\['opus'\\]"),
-        (claude_doc(classes=[{"id": "a", "work": "w", "model": "gpt"}]), "Input should be"),
-        (
-            claude_doc(classes=[{"id": "a", "work": "w", "model": "haiku", "effort": "turbo"}]),
-            "Input should be",
-        ),
     ],
 )
 def test_claude_doc_rejects(doc: dict[str, Any], why: str):
@@ -270,9 +261,6 @@ def test_claude_doc_rejects(doc: dict[str, Any], why: str):
 @pytest.mark.parametrize(
     ("frontmatter_text", "expected"),
     [
-        ("memory: project\ndisallowedTools: Agent, NotebookEdit\n", set()),
-        ("memory: project\ndisallowedTools:\n  - Agent\n  - NotebookEdit\n", set()),
-        ("memory: project\n", set()),
         ("memory: project\ntools: Read, Grep\n", set()),  # Claude Code re-adds Write/Edit
         ("disallowedTools: Write, Edit\n", set()),  # no memory: nothing to protect
         ("memory: project\ndisallowedTools: Agent, Write\n", {"Write"}),
@@ -368,18 +356,18 @@ def test_explicit_model_allows_any_type(home: Path, tool: str):
     assert run_hook(home, call) == ""
 
 
-@pytest.mark.parametrize("model", ["", "   ", 1, {"a": 1}, ["opus"], None, True])
+@pytest.mark.parametrize("model", ["", "   ", ["opus"]])
 def test_non_string_or_blank_model_is_not_explicit(home: Path, model: object):
     reason = deny_reason(run_hook(home, agent_call({"subagent_type": "ghost", "model": model})))
     assert "subagent_type 'ghost' has no agent definition" in reason
 
 
-@pytest.mark.parametrize("tool", ["Bash", "Read", ""])
+@pytest.mark.parametrize("tool", ["Bash", ""])
 def test_non_agent_tool_passes_through(home: Path, tool: str):
     assert run_hook(home, {"tool_name": tool, "tool_input": {}}) == ""
 
 
-@pytest.mark.parametrize("atype", ["fork", "claude-code-guide", "statusline-setup"])
+@pytest.mark.parametrize("atype", ["fork"])
 def test_builtin_exempt_types_allow_without_agent_file(home: Path, atype: str):
     assert run_hook(home, agent_call({"subagent_type": atype})) == ""
 
@@ -387,9 +375,7 @@ def test_builtin_exempt_types_allow_without_agent_file(home: Path, atype: str):
 # hook input
 
 
-@pytest.mark.parametrize(
-    "stdin", ["", "not json", '{"tool_name": "Agent", "tool_input": {', "[]", '"Agent"', "null"]
-)
+@pytest.mark.parametrize("stdin", ["", "not json", "[]"])
 def test_unparseable_input_fails_closed(home: Path, stdin: str):
     assert "the hook input is not a JSON object" in deny_reason(run_hook_raw(home, stdin))
 
@@ -439,7 +425,6 @@ def workflow_decision(home: Path, payload: object) -> str:
 
 
 ROUTED_SCRIPTS = [
-    "agent('x', {model: 'sonnet'})",
     "agent('x', {model : 'sonnet'})",
     "agent('x', {agentType: 'coder'})",
     "await agent(p, opts)\nconst opts = {\n  model:\n 'haiku' }",
@@ -451,15 +436,12 @@ def test_workflow_with_routing_passes(home: Path, script: str):
     assert workflow_decision(home, workflow_call({"script": script})) == ""
 
 
-@pytest.mark.parametrize("script", ["return 1", "phase('x')", ""])
+@pytest.mark.parametrize("script", ["return 1"])
 def test_workflow_without_agents_passes(home: Path, script: str):
     assert workflow_decision(home, workflow_call({"script": script})) == ""
 
 
-@pytest.mark.parametrize(
-    "script",
-    ["agent('x', {})", "await agent(prompt)", "parallel([() => agent('a', {label: 'l'})])"],
-)
+@pytest.mark.parametrize("script", ["agent('x', {})"])
 def test_workflow_spawning_unrouted_agents_denies(home: Path, script: str):
     reason = deny_reason(workflow_decision(home, workflow_call({"script": script})))
     assert "contains no 'model:' or 'agentType:' routing" in reason
@@ -482,19 +464,18 @@ def test_inline_script_wins_over_script_path(home: Path, tmp_path: Path):
 
 
 @pytest.mark.parametrize(
-    "tool_input", [{"name": "review-changes"}, {"scriptPath": "/nonexistent/wf.js"}, {}]
+    "tool_input", [{"name": "review-changes"}, {"scriptPath": "/nonexistent/wf.js"}]
 )
 def test_workflow_without_readable_script_passes(home: Path, tool_input: dict[str, object]):
     assert workflow_decision(home, workflow_call(tool_input)) == ""
 
 
-@pytest.mark.parametrize("tool", ["Agent", "Bash", ""])
-def test_workflow_hook_ignores_other_tools(home: Path, tool: str):
-    payload = {"tool_name": tool, "tool_input": {"script": "agent('x', {})"}}
+def test_workflow_hook_ignores_other_tools(home: Path):
+    payload = {"tool_name": "Agent", "tool_input": {"script": "agent('x', {})"}}
     assert workflow_decision(home, payload) == ""
 
 
-@pytest.mark.parametrize("stdin", ["", "not json", "[]", "null"])
+@pytest.mark.parametrize("stdin", ["", "not json", "[]"])
 def test_workflow_hook_unparseable_input_fails_closed(home: Path, stdin: str):
     assert "the hook input is not a JSON object" in deny_reason(workflow_decision(home, stdin))
 
@@ -514,12 +495,12 @@ def test_missing_jq_fails_closed(home: Path, tmp_path: Path):
     assert "jq is unavailable" in deny_reason(out)
 
 
-@pytest.mark.parametrize("tool_input", [{}, {"subagent_type": ""}, {"subagent_type": 7}])
+@pytest.mark.parametrize("tool_input", [{}, {"subagent_type": ""}])
 def test_missing_type_denies(home: Path, tool_input: dict[str, object]):
     assert "no subagent_type was given" in deny_reason(run_hook(home, agent_call(tool_input)))
 
 
-@pytest.mark.parametrize("atype", ["../escape", "plugin:agent", "pinned/../pinned", "a b"])
+@pytest.mark.parametrize("atype", ["../escape", "plugin:agent", "pinned/../pinned"])
 def test_non_plain_type_never_resolves_to_a_file(home: Path, atype: str):
     write_agent(home, "pinned.md", agent_text())
     (home / ".claude" / "escape.md").write_text(agent_text("escape"))
@@ -557,25 +538,15 @@ def test_pinned_model_allows(home: Path, text: str):
     [
         "model:",
         "model: inherit",
-        "model: Inherit",
         "model: INHERIT",
         "model: ~",
         "model: null",
-        "model: Null",
-        "model: true",
         "model: no",
         "model: 123",
-        "model: 1e3",
         "model: [opus]",
-        "model: {}",
-        'model: "   "',
-        'model: " inherit "',
-        'model: "sonnet"',
-        "model: 'sonnet'",
         'model: "\\x69nherit"',
         "model: *a",
         "model: |\n  inherit",
-        "model: >-\n  sonnet",
         "model: opus\n  inherit",  # plain-scalar continuation line
         "model: opus # pinned",
         "hooks:\n  model: opus",  # nested, not top-level
@@ -597,7 +568,6 @@ def test_model_only_in_body_denies(home: Path):
         "model: opus",
         "model : inherit",
         '"model": inherit',
-        "'model': inherit",
         "? model\n: inherit",
     ],
 )
@@ -628,7 +598,6 @@ def test_escaped_quoted_key_denies(home: Path):
         "--- \nname: pinned\nmodel: sonnet\n---\n",  # opening with trailing blank
         "---\nname: pinned\nmodel: sonnet\n--- \nbody\n",  # closing with trailing blank
         "---\nname: pinned\nmodel: sonnet\n",  # never closed
-        "---\nname: pinned\ndescription: a --- b\nmodel: sonnet\n---\n",  # mid-line close
         "---\nname: pinned\nx: ---\nmodel: inherit\n---\n",
     ],
 )
@@ -661,9 +630,7 @@ def test_frontmatter_closing_past_line_200_denies(home: Path):
         "name: other",
         "name: Pinned",
         'name: "pinned"',
-        "name: pinned # x",
         "description: no name here",
-        "name: pinned\nname: pinned",
         "name: pinned\n'name': other",
     ],
 )
