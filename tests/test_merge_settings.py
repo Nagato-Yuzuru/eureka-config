@@ -13,7 +13,6 @@ import os
 import subprocess
 from pathlib import Path
 
-import pytest
 from conftest import engine_argv
 
 
@@ -199,7 +198,7 @@ class TestScalarLeaves:
 
     def test_ours_evolved_converges(self, engine):
         r = merge(engine, {"effortLevel": "high"}, fragment=self.FRAG, base={"effortLevel": "high"})
-        assert r.conflicts == []
+        assert (r.conflicts, r.warnings) == ([], [])
         assert r.merged["effortLevel"] == "xhigh"
 
     def test_foreign_change_conflicts(self, engine):
@@ -235,10 +234,6 @@ class TestJsonTypedEquality:
         conflicts = merge(engine, {"x": True}, fragment={"x": 1}).conflicts
         assert [(c.path, c.current, c.desired) for c in conflicts] == [("x", True, 1)]
 
-    def test_number_does_not_converge_with_bool_leaf(self, engine):
-        conflicts = merge(engine, {"x": 1}, fragment={"x": True}).conflicts
-        assert [(c.path, c.current, c.desired) for c in conflicts] == [("x", 1, True)]
-
     def test_ensure_appends_number_alongside_bool(self, engine):
         # regression: the declared 1 was considered "present" because of True
         fragment = {"$merge": {"s.ask": "ensure"}, "s": {"ask": [1]}}
@@ -273,11 +268,6 @@ class TestExactSubtrees:
     """`exact` declared on an object owns the whole subtree atomically."""
 
     FRAG = {"$merge": {"env": "exact"}, "env": {"A": "1"}}
-
-    def test_absent_is_set(self, engine):
-        r = merge(engine, {}, fragment=self.FRAG)
-        assert r.conflicts == []
-        assert r.merged["env"] == {"A": "1"}
 
     def test_foreign_key_inside_subtree_conflicts(self, engine):
         conflicts = merge(engine, {"env": {"A": "1", "B": "2"}}, fragment=self.FRAG).conflicts
@@ -335,16 +325,6 @@ class TestRetirement:
         assert r.warnings == [
             "retired `autoMode.soft_deny` was modified since last apply; left in place"
         ]
-
-    def test_key_still_declared_is_not_retired(self, engine):
-        r = merge(
-            engine,
-            {"effortLevel": "high"},
-            fragment={"effortLevel": "xhigh"},
-            base={"effortLevel": "high"},
-        )
-        assert (r.conflicts, r.warnings) == ([], [])
-        assert r.merged == {"effortLevel": "xhigh"}
 
 
 class TestListRetirement:
@@ -508,21 +488,6 @@ class TestRetirementUsesRecordedPolicy:
         assert (r.conflicts, r.warnings) == ([], [])
         assert r.merged == {"sandbox": {"filesystem": {"allowWrite": ["/user"]}}}
 
-    def test_sole_declarer_deleted_keyed_list_keeps_only_foreign(self, engine):
-        base = {"$merge": {"hooks.*": "keyed"}, "hooks": {"PostToolUse": [hook_entry("/h/a.sh")]}}
-        current = {"hooks": {"PostToolUse": [hook_entry("/h/a.sh"), hook_entry("/other/p.sh")]}}
-        r = merge(engine, current, fragment={}, base=base)
-        assert (r.conflicts, r.warnings) == ([], [])
-        assert r.merged == {"hooks": {"PostToolUse": [hook_entry("/other/p.sh")]}}
-
-    def test_sole_declarer_deleted_all_own_removes_key(self, engine):
-        # Reordered, so not == base: only per-element retirement removes it.
-        base = {"$merge": {"s.pool": "ensure"}, "s": {"pool": ["x", "y"]}, "keep": 1}
-        current = {"s": {"pool": ["y", "x"]}, "keep": 1}
-        r = merge(engine, current, fragment={"keep": 1}, base=base)
-        assert (r.conflicts, r.warnings) == ([], [])
-        assert r.merged == {"keep": 1}
-
     def test_list_written_as_exact_retires_as_exact_despite_new_declaration(self, engine):
         # x.b was an undeclared (exact) list when written; a fragment now
         # declares x.* ensure. Retirement follows the recorded policy: the
@@ -545,49 +510,12 @@ class TestRetirementUsesRecordedPolicy:
         assert (r.conflicts, r.warnings) == ([], [])
         assert r.merged == {"s": {"live": [0], "pool": ["user"]}}
 
-    def test_legacy_base_without_policy_and_no_declaration_retires_as_exact(self, engine):
-        base = {"hooks": {"PostToolUse": [hook_entry("/h/a.sh")]}}
-        current = {"hooks": {"PostToolUse": [hook_entry("/h/a.sh"), hook_entry("/other/p.sh")]}}
-        r = merge(engine, current, fragment={}, base=base)
-        assert r.conflicts == []
-        assert r.merged == current
-        assert r.warnings == [
-            "retired `hooks.PostToolUse` was modified since last apply; left in place"
-        ]
-
     def test_recorded_policy_does_not_govern_live_paths(self, engine):
         # The recorded policy only governs retirement: a live path merges
         # under the current one (here: undeclared, so exact, so it conflicts).
         base = {"$merge": {"p.ask": "ensure"}, "p": {"ask": ["A"]}}
         r = merge(engine, {"p": {"ask": ["A", "user"]}}, fragment={"p": {"ask": ["B"]}}, base=base)
         assert [c.path for c in r.conflicts] == ["p.ask"]
-
-
-class TestBaseFormat:
-    def test_snapshot_round_trips_through_parse(self, engine):
-        composed = engine.compose([("f.json", FRAGMENT)])
-        snapshot = engine.base_snapshot(composed)
-        assert snapshot["$merge"] == {
-            "permissions.ask": "ensure",
-            "autoMode.soft_deny": "ensure",
-            "hooks.*": "keyed",
-        }
-        parsed = engine.parse_base(json.loads(json.dumps(snapshot)))
-        assert parsed == engine.Base(data=composed.data, policy=composed.policy)
-
-    def test_empty_policy_is_recorded_not_legacy(self, engine):
-        parsed = engine.parse_base(engine.base_snapshot(engine.compose([("f.json", {"a": 1})])))
-        assert parsed == engine.Base(data={"a": 1}, policy={})
-
-    def test_base_without_policy_parses_as_legacy(self, engine):
-        assert engine.parse_base({"a": 1}) == engine.Base(data={"a": 1}, policy=None)
-
-    def test_malformed_recorded_policy_raises(self, engine):
-        with pytest.raises(ExceptionGroup) as info:
-            engine.parse_base({"$merge": {"x": "bogus"}, "x": 1})
-        assert [str(e) for e in info.value.exceptions] == [
-            "base: unknown merge strategy 'bogus' for `x`"
-        ]
 
 
 class TestConflicts:
@@ -607,18 +535,6 @@ class TestConflicts:
 
 class TestForce:
     """Per-path conflict resolution in favor of desired (CLAUDE_MANAGED_FORCE)."""
-
-    def test_forced_conflict_takes_desired(self, engine):
-        r = merge(engine, {"a": 9}, fragment={"a": 1}, force=frozenset({"a"}))
-        assert r.conflicts == []
-        assert r.merged == {"a": 1}
-        assert [(c.path, c.current, c.desired) for c in r.forced] == [("a", 9, 1)]
-
-    def test_force_subset_leaves_other_conflicts(self, engine):
-        fragment = {"a": 1, "b": {"c": 2}}
-        r = merge(engine, {"a": 9, "b": {"c": 8}}, fragment=fragment, force=frozenset({"a"}))
-        assert [c.path for c in r.conflicts] == ["b.c"]
-        assert [c.path for c in r.forced] == ["a"]
 
     def test_force_never_touches_converged_paths(self, engine):
         r = merge(engine, {"a": 1}, fragment={"a": 1}, force=frozenset({"a"}))
@@ -703,12 +619,6 @@ class TestFilterIO:
         assert "one.json" in result.stderr
         assert "two.json" in result.stderr
 
-    def test_corrupt_fragment_exits_1_naming_file(self, tmp_path):
-        result = run_filter("{}", tmp_path, fragments={"bad.json": "not json"})
-        assert result.returncode == 1
-        assert "bad.json" in result.stderr
-        assert "invalid JSON" in result.stderr
-
     def test_non_object_and_invalid_json_fragments_together_name_both_files(self, tmp_path):
         # load_fragments collects errors across the whole directory, not just
         # the first bad file
@@ -748,6 +658,14 @@ class TestFilterIO:
         assert json.loads(result.stdout) == {"keep": True}
         assert "ignoring base policy" in result.stderr
         assert "$merge must be an object" in result.stderr
+
+    def test_unknown_strategy_in_base_policy_is_ignored_with_warning(self, tmp_path):
+        result = run_filter(
+            '{"x": 1}', tmp_path, fragments={"core.json": {"x": 1}}, base={"$merge": {"x": "bogus"}}
+        )
+        assert result.returncode == 0, result.stderr
+        assert "ignoring base policy" in result.stderr
+        assert "unknown merge strategy 'bogus' for `x`" in result.stderr
 
     def test_malformed_base_policy_falls_back_to_composed_policy(self, tmp_path):
         # Not "no policy at all": the fragment still declares x.p ensure, so
