@@ -27,7 +27,13 @@ dev = [
     "yamllint>=1.38.0",
     "jsonschema>=4.26.0",
     "pyyaml>=6.0.3",
+    "pytest-xdist>=3.8.0",
+    "zizmor>=1.31.0",
 ]
+
+# A floor, not a pin: uv is kept at the latest by its own installer.
+[tool.uv]
+required-version = ">=0.13"
 
 [tool.ruff]
 line-length = 100

@@ -1,5 +1,5 @@
-# Checks for what runs on GitHub's runners: the workflows themselves, and the scripts they call
-# tested on the runner image they run on. The rest of the suite runs in prek (make check).
+# The test suite on each OS the dotfiles deploy to, with tools from that OS's package
+# manager. workflow-scripts tests what other workflows run, on their runner image.
 name: ci
 
 "on":
@@ -13,8 +13,49 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Install the lock as is: it was resolved under the release cooldown in the user's uv.toml.
+  UV_FROZEN: "1"
+
 jobs:
-  actions:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Install the tools the hooks and templates call
+        run: brew install chezmoi shellcheck grep
+      - run: make test
+
+  fedora:
+    runs-on: ubuntu-latest
+    container: fedora:44@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Install the tools the hooks and templates call
+        run: >-
+          dnf install -y --setopt=install_weak_deps=False
+          chezmoi git make jq ShellCheck nodejs python3 zsh findutils diffutils which
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      # Not as root: root ignores the file modes the path gate's tests rely on.
+      - name: make test
+        run: |
+          useradd -m tester
+          chown -R tester .
+          runuser -u tester -- env "PATH=$PATH" HOME=/home/tester \
+            UV_CACHE_DIR=/home/tester/.cache/uv make test
+
+  workflow-scripts:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -23,9 +64,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-      - name: jactionlint
-        run: jactionlint
       - name: Tests of the scripts workflows run
-        run: uv run --frozen pytest -q tests/test_upstream_watch.py tests/test_vendor.py
+        run: uv run pytest -q tests/test_upstream_watch.py tests/test_vendor.py

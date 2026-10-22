@@ -1,0 +1,40 @@
+# Every prek hook. On a pull request the autofix.ci app commits what the fixers rewrote; the
+# workflow name is how the app identifies it.
+name: autofix.ci
+
+"on":
+  push:
+    branches: [main]
+  pull_request: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UV_FROZEN: "1"
+      # claude/mods' check generates types by running Claude Code, which CI has no login for.
+      SKIP: mods-check
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Run the hooks, keeping what the fixers rewrite
+        run: prek run --all-files || true
+      - name: Hand the rewrites to autofix.ci
+        if: github.event_name == 'pull_request'
+        uses: autofix-ci/action@c5b2d67aa2274e7b5a18224e8171550871fc7e4a # v1.3.4
+      - name: Fail on what the fixers rewrote
+        if: github.event_name != 'pull_request'
+        run: git diff --exit-code
+      - name: Fail on what no hook fixes
+        run: prek run --all-files --show-diff-on-failure
