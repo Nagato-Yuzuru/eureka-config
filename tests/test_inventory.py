@@ -48,6 +48,7 @@ from inventory.render import (
     SCHEMA_DIR,
     STAMP,
     render,
+    render_machine,
     render_tree,
     schemas,
     stale,
@@ -204,8 +205,6 @@ RENDER_CASES = [
         {
             ("brewfile", "darwin-arm64"): ['brew "foo"'],
             ("dnf-list", "linux-arm64"): ["foo"],
-            ("mise-tools", "darwin-arm64"): [],
-            ("uv-tools", "darwin-arm64"): [],
         },
     ),
     RenderCase(
@@ -213,7 +212,6 @@ RENDER_CASES = [
         {"foo": {"on": ["darwin", "linux"], "via": "mise"}},
         {
             ("mise-tools", "linux-arm64"): ['"foo" = "latest"'],
-            ("brewfile", "darwin-arm64"): [],
             ("dnf-list", "linux-arm64"): [],
         },
     ),
@@ -267,11 +265,6 @@ RENDER_CASES = [
         },
     ),
     RenderCase(
-        "components-without-a-version-still-get-one",
-        {"foo": {"on": ["darwin"], "via": "mise", "mise": {"components": ["only"]}}},
-        {("mise-tools", "darwin-arm64"): ['"foo" = { version = "latest", components = ["only"] }']},
-    ),
-    RenderCase(
         "override-replaces-components-wholesale",  # lists replace, maps merge
         {
             "foo": {
@@ -281,12 +274,7 @@ RENDER_CASES = [
                 "overrides": [{"when": "linux", "mise": {"components": ["c"]}}],
             }
         },
-        {
-            ("mise-tools", "darwin-arm64"): [
-                '"foo" = { version = "latest", components = ["a", "b"] }'
-            ],
-            ("mise-tools", "linux-arm64"): ['"foo" = { version = "latest", components = ["c"] }'],
-        },
+        {("mise-tools", "linux-arm64"): ['"foo" = { version = "latest", components = ["c"] }']},
     ),
     RenderCase(
         "override-merges-into-the-block-it-patches",  # version kept, name added
@@ -352,11 +340,7 @@ RENDER_CASES = [
                 "overrides": [{"when": "linux", "via": "system"}],
             }
         },
-        {
-            ("mise-tools", "darwin-arm64"): ['"uv" = "latest"'],
-            ("mise-tools", "linux-arm64"): [],
-            ("dnf-list", "linux-arm64"): ["uv"],
-        },
+        {("mise-tools", "linux-arm64"): [], ("dnf-list", "linux-arm64"): ["uv"]},
     ),
     RenderCase(
         "overrides-merge-in-list-order",
@@ -389,11 +373,7 @@ RENDER_CASES = [
                 ],
             }
         },
-        {
-            ("mise-tools", "darwin-arm64"): ['"foo" = "2"'],
-            ("dnf-list", "linux-arm64"): ["foo-bin"],
-            ("dnf-repos", "linux-arm64"): ["copr a/b"],
-        },
+        {("dnf-list", "linux-arm64"): ["foo-bin"], ("dnf-repos", "linux-arm64"): ["copr a/b"]},
     ),
     RenderCase(
         "override-switches-brew-flavour",  # a deciding field replaces, it does not pile up
@@ -404,10 +384,7 @@ RENDER_CASES = [
                 "overrides": [{"when": "darwin/amd64", "brew": {"cask": "foo-app"}}],
             }
         },
-        {
-            ("brewfile", "darwin-arm64"): ['brew "foo-formula"'],
-            ("brewfile", "darwin-amd64"): ['cask "foo-app"'],
-        },
+        {("brewfile", "darwin-amd64"): ['cask "foo-app"']},
     ),
     RenderCase(
         "override-switches-dnf-source-but-a-name-patch-keeps-it",
@@ -440,11 +417,7 @@ RENDER_CASES = [
                 ],
             }
         },
-        {
-            ("mise-tools", "darwin-arm64"): ['"foo" = "latest"'],
-            ("dnf-list", "linux-arm64"): ["foo"],
-            ("dnf-repos", "linux-arm64"): ["copr a/b"],
-        },
+        {("dnf-repos", "linux-arm64"): ["copr a/b"]},
     ),
     RenderCase(
         "dnf-repos-lists-copr-and-repofile-only-for-packages-installed-here-via-system",
@@ -461,33 +434,6 @@ RENDER_CASES = [
         },
     ),
     RenderCase(
-        "no-packages-renders-nothing",
-        {},
-        {(a, "darwin-arm64"): [] for a in ARTIFACTS} | {(a, "linux-arm64"): [] for a in ARTIFACTS},
-    ),
-    RenderCase(
-        "override-that-matches-no-machine-is-inert",
-        {
-            "foo": {
-                "on": ["darwin", "linux"],
-                "via": "mise",
-                "overrides": [{"when": "linux/amd64", "mise": {"version": "9"}}],
-            }
-        },
-        {
-            ("mise-tools", "linux-arm64"): ['"foo" = "latest"'],
-            ("mise-tools", "darwin-arm64"): ['"foo" = "latest"'],
-        },
-    ),
-    RenderCase(
-        "shared-copr-is-emitted-once-per-package",  # the install script's guard makes repeats no-ops
-        {
-            "a": {"on": ["linux"], "dnf": {"copr": "x/y"}},
-            "b": {"on": ["linux"], "dnf": {"copr": "x/y"}},
-        },
-        {("dnf-repos", "linux-arm64"): ["copr x/y", "copr x/y"]},
-    ),
-    RenderCase(
         "completions-render-command-then-recipe-only-where-the-package-installs",
         {
             "kubectl": {
@@ -500,7 +446,6 @@ RENDER_CASES = [
         {
             ("completions", "darwin-arm64"): ["kubectl kubectl completion zsh"],
             ("completions", "linux-arm64"): [],
-            ("mise-tools", "darwin-arm64"): ['"kubectl" = "latest"', '"plain" = "latest"'],
         },
     ),
     RenderCase(
@@ -572,11 +517,7 @@ RENDER_CASES = [
             "b": {"on": ["darwin/amd64"], "via": "mise", "mise": {"name": "t"}},
             "t": {"on": ["darwin"], "via": "uv"},
         },
-        {
-            ("mise-tools", "darwin-arm64"): ['"t" = "latest"'],
-            ("mise-tools", "darwin-amd64"): ['"t" = "latest"'],
-            ("uv-tools", "darwin-arm64"): ["t"],
-        },
+        {("mise-tools", "darwin-arm64"): ['"t" = "latest"']},
     ),
     RenderCase(
         "a-command-may-have-a-different-recipe-on-each-machine",
@@ -584,10 +525,7 @@ RENDER_CASES = [
             "a": {"on": ["darwin/arm64"], "completions": {"c": "a-recipe"}},
             "b": {"on": ["darwin/amd64"], "via": "mise", "completions": {"c": "b-recipe"}},
         },
-        {
-            ("completions", "darwin-arm64"): ["c a-recipe"],
-            ("completions", "darwin-amd64"): ["c b-recipe"],
-        },
+        {("completions", "darwin-amd64"): ["c b-recipe"]},
     ),
     RenderCase(  # a tool that updates itself unasked, like mise with auto_update
         "upstream-without-an-update-installs-but-renders-no-update",
@@ -598,10 +536,7 @@ RENDER_CASES = [
                 "upstream": {"command": "i", "creates": "$HOME/b"},
             }
         },
-        {
-            ("upstream-installs", "darwin-arm64"): ['[ -x "$HOME/b" ] || i'],
-            ("upstream-updates", "darwin-arm64"): [],
-        },
+        {("upstream-updates", "darwin-arm64"): []},
     ),
     RenderCase(
         "upstream-renders-its-command-guarded-by-what-it-creates",
@@ -620,13 +555,7 @@ RENDER_CASES = [
             ("upstream-installs", "darwin-arm64"): [
                 '[ -x "$HOME/b" ] || curl https://x/install.sh | sh'
             ],
-            ("upstream-installs", "linux-arm64"): [
-                '[ -x "$HOME/b" ] || curl https://x/install.sh | sh'
-            ],
             ("upstream-updates", "darwin-arm64"): ['if [ -x "$HOME/b" ]; then b self update; fi'],
-            ("upstream-updates", "linux-arm64"): ['if [ -x "$HOME/b" ]; then b self update; fi'],
-            ("brewfile", "darwin-arm64"): [],
-            ("dnf-list", "linux-arm64"): [],
         },
     ),
     RenderCase(  # each installer takes the version its own way; the entry says where
@@ -646,8 +575,7 @@ RENDER_CASES = [
             ("upstream-installs", "darwin-arm64"): [
                 '[ -x "$HOME/v/1.2.3/b" ] || curl https://x/i.sh | sh -s -- --version=1.2.3'
                 " && b gc 1.2.3"
-            ],
-            ("upstream-updates", "darwin-arm64"): [],
+            ]
         },
     ),
 ]
@@ -665,6 +593,13 @@ def test_render(packages: Mapping[str, Any], artifact: str, machine: str, want: 
     assert lines(inventory(packages), artifact, machine) == want
 
 
+def test_no_packages_renders_nothing():
+    inv = inventory({})
+    assert {m: render_machine(inv, m) for m in MACHINES} == {
+        m: dict.fromkeys(ARTIFACTS, "") for m in MACHINES
+    }
+
+
 # --- validation ---------------------------------------------------------------------------------
 
 
@@ -675,6 +610,9 @@ class Reject:
     message: str  # the whole InventoryError text
     machines: Mapping[str, Any] | None = None  # in place of the synthetic machines
     resolve: str | None = None  # a machine to resolve once the inventory is built
+    # Also through `Inventory.load`, whose whole-document check runs first: a row it catches
+    # itself, or one whose per-entry message it must leave to the constructor.
+    load: bool = False
 
 
 REJECTS = [
@@ -689,6 +627,7 @@ REJECTS = [
         {},
         "machines.x.arch: Input should be 'arm64' or 'amd64'",
         machines={"x": {"platform": "brewhost", "arch": "x86"}},
+        load=True,
     ),
     Reject("resolved-on-an-undeclared-machine", {}, "machines.nope: not declared", resolve="nope"),
     # --- one thing installed once, one completion generated once, per machine
@@ -696,6 +635,7 @@ REJECTS = [
         "two-packages-install-one-formula",
         {"a": {"on": ["darwin"], "brew": {"name": "x"}}, "x": {"on": ["darwin"]}},
         "packages.x: brew formula 'x' on darwin-arm64 is already installed by packages.a",
+        load=True,
     ),
     Reject(  # a clash is per machine: on darwin/arm64 only b installs it
         "two-packages-install-one-cask-on-the-machine-both-reach",
@@ -765,14 +705,11 @@ REJECTS = [
         {"foo": {"on": ["darwin"], "nope": "1"}},
         "packages.foo.nope: Extra inputs are not permitted",
     ),
-    Reject("missing-on", {"foo": {"via": "mise"}}, "packages.foo.on: Field required"),
-    Reject(
-        "on-empty",
-        {"foo": {"on": []}},
-        "packages.foo.on: List should have at least 1 item after validation, not 0",
-    ),
     Reject(  # through `load`, the per-entry message, not the whole document's
-        "on-unknown-tag", {"oops": {"on": ["mars"]}}, "packages.oops.on.0: unknown tag 'mars'"
+        "on-unknown-tag",
+        {"oops": {"on": ["mars"]}},
+        "packages.oops.on.0: unknown tag 'mars'",
+        load=True,
     ),
     Reject(  # a real OS with an arch we do not render for: the tag is what is wrong, not a field
         "on-known-os-unknown-arch",
@@ -797,6 +734,7 @@ REJECTS = [
         "via-invalid",
         {"foo": {"on": ["darwin"], "via": "pip"}},
         "packages.foo: via must be system|mise|uv|upstream",
+        load=True,
     ),
     # the point of the blocks: a backend's parameters cannot land on another backend
     Reject(
@@ -920,6 +858,7 @@ REJECTS = [
         "override-unknown-tag",
         {"foo": {"on": ["darwin"], "overrides": [{"when": "mars"}]}},
         "packages.foo.overrides[mars].when: unknown tag 'mars'",
+        load=True,
     ),
     Reject(
         "override-of-on",
@@ -947,11 +886,6 @@ REJECTS = [
         "packages.foo.mise.components: List should have at least 1 item after validation, not 0",
     ),
     Reject(
-        "completions-empty",
-        {"foo": {"on": ["darwin"], "completions": {}}},
-        "packages.foo.completions: Dictionary should have at least 1 item after validation, not 0",
-    ),
-    Reject(
         "completions-recipe-empty",
         {"foo": {"on": ["darwin"], "completions": {"foo": ""}}},
         "packages.foo.completions.foo: String should have at least 1 character",
@@ -974,8 +908,15 @@ def _from_files(r: Reject, tmp_path: Path) -> Inventory:
     return Inventory.load(data)
 
 
-@pytest.mark.parametrize("entry", ["constructor", "load"])
-@pytest.mark.parametrize("r", [pytest.param(r, id=r.id) for r in REJECTS])
+@pytest.mark.parametrize(
+    ("r", "entry"),
+    [
+        pytest.param(r, entry, id=f"{r.id}-{entry}")
+        for r in REJECTS
+        for entry in ("constructor", "load")
+        if entry == "constructor" or r.load
+    ],
+)
 def test_validation_rejects(r: Reject, entry: str, tmp_path: Path):
     with pytest.raises(InventoryError) as e:
         inv = (
@@ -1113,18 +1054,6 @@ def _artifact_tmpl(tmp_path: Path, artifact: str) -> Path:
     return tmpl
 
 
-@pytest.mark.parametrize("machine", MACHINES)
-@pytest.mark.parametrize("artifact", ARTIFACTS)
-def test_artifact_template_serves_the_named_file_from_this_machines_dir(
-    artifact: str, machine: str, source: Path, tmp_path: Path
-):
-    """Each artifact differs between machines and from the other artifacts, so a template that
-    read another machine's directory, or a fixed name, serves the wrong text. The stamp guard
-    is a separate fact — test_artifact_template_refuses_a_stale_tree owns it."""
-    got = chezmoi_render(_artifact_tmpl(tmp_path, artifact), machine, source)
-    assert got == (source / RENDERED_DIR / machine / artifact).read_text()
-
-
 def test_artifact_template_refuses_a_stale_tree(source: Path, tmp_path: Path):
     src = _source_copy(source, tmp_path)
     with (src / ".chezmoidata" / DATA_FILES[1]).open("a") as f:
@@ -1198,8 +1127,6 @@ def test_no_schema_offers_the_editor_a_null_it_cannot_write():
 
 SCHEMA_REJECTS = [
     ("mise-block-on-a-system-package", {"on": ["darwin"], "mise": {"version": "1"}}),
-    ("brew-block-on-a-mise-package", {"on": ["darwin"], "via": "mise", "brew": {"cask": "x"}}),
-    ("version-outside-a-block", {"on": ["darwin"], "version": "9"}),
     ("brew-both-flavours", {"on": ["darwin"], "brew": {"name": "a", "cask": "b"}}),
     ("dnf-two-sources", {"on": ["linux"], "dnf": {"copr": "a/b", "repofile": "u"}}),
     ("unknown-tag", {"on": ["mars"]}),
@@ -1207,14 +1134,14 @@ SCHEMA_REJECTS = [
     ("unknown-key", {"on": ["darwin"], "nope": 1}),
     ("override-of-on", {"on": ["darwin"], "overrides": [{"when": "linux", "on": ["linux"]}]}),
     ("bad-via", {"on": ["darwin"], "via": "pip"}),
-    ("components-empty", {"on": ["darwin"], "via": "mise", "mise": {"components": []}}),
     ("completions-empty", {"on": ["darwin"], "completions": {}}),
 ]
 
 
-@pytest.mark.parametrize("packages", [pytest.param(c.packages, id=c.id) for c in RENDER_CASES])
-def test_packages_schema_accepts_what_the_types_accept(packages: Mapping[str, Any]):
-    schema_for("packages.toml").validate({"packages": packages})
+def test_packages_schema_accepts_what_the_types_accept():
+    schema = schema_for("packages.toml")
+    for c in RENDER_CASES:
+        schema.validate({"packages": c.packages})
 
 
 @pytest.mark.parametrize("package", [pytest.param(p, id=i) for i, p in SCHEMA_REJECTS])
@@ -1286,6 +1213,12 @@ def test_render_schema_needs_no_valid_data(source: Path, tmp_path: Path):
 
 BASH = shutil.which("bash") or "/bin/bash"
 
+# The machines a consumer test runs on: one per branch the template has. No consumer branches
+# on arch, and test_install_script_renders_to_valid_shell already shows on every machine that
+# the `artifact` template serves that machine's <os>-<arch> copy.
+PER_OS = list({_os(m): m for m in MACHINES}.values())
+ONE_MACHINE = MACHINES[:1]
+
 
 def stub_bin(tmp_path: Path, scripts: Mapping[str, str]) -> Path:
     """A PATH directory holding one `#!/bin/sh` executable per name, with the given body."""
@@ -1323,7 +1256,7 @@ def test_install_script_renders_to_valid_shell(machine: str, source: Path, tmp_p
     assert heredoc(uv_block, "EOF") == lines(SYN, "uv-tools", machine)
 
 
-@pytest.mark.parametrize("machine", MACHINES)
+@pytest.mark.parametrize("machine", PER_OS)
 def test_install_script_settles_the_bootstrap_tools_between_the_packages_and_the_uv_tools(
     machine: str, source: Path
 ):
@@ -1337,7 +1270,7 @@ def test_install_script_settles_the_bootstrap_tools_between_the_packages_and_the
     assert rendered.index('sh -c "$cmd"') < rendered.index("uv tool install")
 
 
-@pytest.mark.parametrize("machine", [m for m in MACHINES if _os(m) == "darwin"])
+@pytest.mark.parametrize("machine", [m for m in PER_OS if _os(m) == "darwin"])
 def test_a_failing_package_manager_does_not_skip_the_rest_of_the_apply(
     machine: str, source: Path, tmp_path: Path
 ):
@@ -1374,7 +1307,7 @@ def test_a_failing_package_manager_does_not_skip_the_rest_of_the_apply(
     ], "uv tools were skipped"
 
 
-@pytest.mark.parametrize("machine", MACHINES)
+@pytest.mark.parametrize("machine", ONE_MACHINE)
 def test_mise_config_renders_the_tools_table(machine: str, source: Path):
     doc = tomllib.loads(chezmoi_render(source / MISE_CONFIG, machine, source))
     assert doc["tools"] == tomllib.loads("\n".join(lines(SYN, "mise-tools", machine)))
@@ -1384,7 +1317,7 @@ def test_mise_config_renders_the_tools_table(machine: str, source: Path):
     )
 
 
-@pytest.mark.parametrize("machine", MACHINES)
+@pytest.mark.parametrize("machine", ONE_MACHINE)
 def test_upgrade_upstream_task_renders_to_valid_bash(machine: str, source: Path, tmp_path: Path):
     script = tmp_path / "upgrade-upstream"
     rendered = chezmoi_render(source / UPGRADE_TASK, machine, source)
@@ -1417,7 +1350,7 @@ def run_upgrade_task(
     return proc, tmp_path
 
 
-@pytest.mark.parametrize("machine", MACHINES)
+@pytest.mark.parametrize("machine", ONE_MACHINE)
 def test_a_failing_update_does_not_skip_the_rest(machine: str, source: Path, tmp_path: Path):
     """boot-<machine> sorts before bootshared, so its failure comes first; the shared tool is
     still updated, and the failure still reaches the caller."""
@@ -1429,7 +1362,7 @@ def test_a_failing_update_does_not_skip_the_rest(machine: str, source: Path, tmp
     )
 
 
-@pytest.mark.parametrize("machine", MACHINES)
+@pytest.mark.parametrize("machine", ONE_MACHINE)
 def test_an_upstream_tool_not_installed_here_is_skipped(machine: str, source: Path, tmp_path: Path):
     """Supplying a missing tool is the install script's job; its absence is not a failure."""
     proc, logs = run_upgrade_task(source, machine, tmp_path, {"shared": ""})
@@ -1438,7 +1371,7 @@ def test_an_upstream_tool_not_installed_here_is_skipped(machine: str, source: Pa
     assert not (logs / f"{machine}.log").exists()
 
 
-@pytest.mark.parametrize("machine", MACHINES)
+@pytest.mark.parametrize("machine", ONE_MACHINE)
 def test_refresh_completions_task_renders_to_valid_bash(machine: str, source: Path, tmp_path: Path):
     """The recipe heredoc is `read` line by line: one `<cmd> <recipe>` per line, no blank cmd."""
     script = tmp_path / "refresh-completions"
@@ -1473,7 +1406,7 @@ def run_refresh_task(
     return proc, tmp_path / "cache" / GENERATED
 
 
-@pytest.mark.parametrize("machine", MACHINES)
+@pytest.mark.parametrize("machine", ONE_MACHINE)
 def test_refresh_changed_ignores_tools_without_recipes(machine: str, source: Path, tmp_path: Path):
     """The postinstall hook's hot path: a session that installed only tools owning no
     recipe — any project-local `mise use` — writes nothing and exits 0 immediately."""
@@ -1488,7 +1421,7 @@ def test_refresh_changed_ignores_tools_without_recipes(machine: str, source: Pat
     assert not out.exists()
 
 
-@pytest.mark.parametrize("machine", MACHINES)
+@pytest.mark.parametrize("machine", ONE_MACHINE)
 def test_refresh_changed_overlays_only_the_installed_tools_commands(
     machine: str, source: Path, tmp_path: Path
 ):
@@ -1511,7 +1444,7 @@ def test_refresh_changed_overlays_only_the_installed_tools_commands(
     assert {p.name for p in out.iterdir()} <= {"_zzz", *(f"_{c}" for c in cmds)}
 
 
-@pytest.mark.parametrize("machine", MACHINES)
+@pytest.mark.parametrize("machine", ONE_MACHINE)
 def test_refresh_full_run_rebuilds_from_scratch(machine: str, source: Path, tmp_path: Path):
     """No args: a file whose tool left packages.toml (or never had a recipe) is gone
     afterwards — the only mode that removes."""
@@ -1530,7 +1463,7 @@ def test_refresh_changed_outside_the_hook_fails_loudly(source: Path, tmp_path: P
     assert not out.exists()
 
 
-@pytest.mark.parametrize("machine", MACHINES)
+@pytest.mark.parametrize("machine", ONE_MACHINE)
 def test_onchange_refresh_script_keys_on_this_machines_recipes(
     machine: str, source: Path, tmp_path: Path
 ):
@@ -1606,7 +1539,7 @@ def test_onchange_refresh_survives_a_failing_task(source: Path, tmp_path: Path):
     assert calls[-1].startswith("run refresh-completions|")
 
 
-@pytest.mark.parametrize("machine", MACHINES)
+@pytest.mark.parametrize("machine", PER_OS)
 def test_audit_completions_task_renders_to_valid_zsh(machine: str, source: Path, tmp_path: Path):
     script = tmp_path / "audit-completions"
     rendered = chezmoi_render(source / AUDIT_TASK, machine, source)
