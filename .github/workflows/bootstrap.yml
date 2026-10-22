@@ -1,0 +1,80 @@
+# A fresh Fedora machine, set up by the README's install steps from this commit's source.
+# Catches what the tests cannot: a package dnf no longer has, a dead COPR, a bootstrap step
+# in the wrong order. Weekly as well, since those break without a commit here.
+name: bootstrap
+
+"on":
+  pull_request:
+    paths: &paths
+      - ".chezmoi*"
+      - ".chezmoidata/**"
+      - ".chezmoitemplates/**"
+      - "dot_*"
+      - "dot_*/**"
+      - "run_*"
+      - "Makefile"
+      - "tools/inventory/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "README.md"
+      - ".github/workflows/bootstrap.yml"
+  push:
+    branches: [main]
+    paths: *paths
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: bootstrap-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fedora:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    container: fedora:44@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      SOURCE: ${{ github.workspace }}
+    # Each step is a fresh login shell of an ordinary user, as after opening a new terminal.
+    defaults:
+      run:
+        shell: runuser -l me -w SOURCE,MISE_GITHUB_TOKEN -c 'bash -eo pipefail {0}'
+    steps:
+      - name: What a Fedora install already has, and its user
+        shell: bash
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            sudo openssh-clients curl tar gzip xz procps-ng findutils which
+          useradd -m me
+          echo 'me ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/me
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Hand the checkout to the user
+        shell: bash
+        run: chown -R me "$SOURCE"
+
+      # The README's install steps.
+      - run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - run: sudo dnf install -y chezmoi git make
+      - name: chezmoi init --apply
+        run: |
+          # Stands in for an SSH identity: the externals clone public repos over SSH.
+          git config --global url.https://github.com/.insteadOf git@github.com:
+          chezmoi init --apply "file://$SOURCE"
+      - name: mise install
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+        run: mise install
+
+      - name: A second apply changes nothing
+        run: chezmoi verify
