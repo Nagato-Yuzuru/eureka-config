@@ -48,9 +48,10 @@ repos:
         pass_filenames: false
         files: ^(tools/inventory/|\.schema/|uv\.lock$)
 
+      # Pinned by the repo's mise.toml, like oxfmt: rules change between releases.
       - id: shellcheck
         name: shellcheck
-        entry: shellcheck
+        entry: mise x -- shellcheck
         language: system
         files: \.sh$
 

@@ -3,6 +3,7 @@
 jactionlint = "2.2.0"
 oxfmt = "0.73.0"
 prek = "0.5.5"
+shellcheck = "0.11.0"
 
 [hooks]
 postinstall = "prek install"
