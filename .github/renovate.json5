@@ -1,0 +1,46 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["config:recommended"],
+  // The release cooldown pnpm, uv and mise apply on the machines.
+  minimumReleaseAge: "7 days",
+  schedule: ["before 6am on monday"],
+  // autofix.ci commits formatter rewrites to Renovate's branches; Renovate keeps rebasing them.
+  gitIgnoredAuthors: ["114827586+autofix-ci[bot]@users.noreply.github.com"],
+  // Scripts in tools/vendor/ declare their dependencies inline (PEP 723).
+  pep723: { enabled: true },
+  lockFileMaintenance: {
+    enabled: true,
+    automerge: true,
+    schedule: ["before 6am on the first day of the month"],
+  },
+  // One weekly PR of trivial updates, merged once the required checks pass. Everything else,
+  // majors above all, opens its own PR for review.
+  packageRules: [
+    {
+      matchUpdateTypes: ["digest", "pin", "pinDigest", "patch"],
+      groupName: "trivial",
+      automerge: true,
+    },
+    {
+      description: "Minors of what only lints, tests or runs CI",
+      matchUpdateTypes: ["minor"],
+      matchManagers: ["github-actions", "mise"],
+      groupName: "trivial",
+      automerge: true,
+    },
+    {
+      matchUpdateTypes: ["minor"],
+      matchManagers: ["pep621"],
+      matchDepTypes: ["dependency-groups"],
+      groupName: "trivial",
+      automerge: true,
+    },
+    {
+      matchUpdateTypes: ["minor"],
+      matchManagers: ["npm"],
+      matchDepTypes: ["devDependencies"],
+      groupName: "trivial",
+      automerge: true,
+    },
+  ],
+}
