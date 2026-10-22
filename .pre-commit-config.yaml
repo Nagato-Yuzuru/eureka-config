@@ -40,6 +40,14 @@ repos:
         pass_filenames: false
         files: ^(tests/.*\.py|tools/.*\.py|pyproject\.toml)$
 
+      # .schema/ is committed for the editor.
+      - id: render-schema
+        name: render schema
+        entry: uv run render schema
+        language: system
+        pass_filenames: false
+        files: ^(tools/inventory/|\.schema/|uv\.lock$)
+
       - id: shellcheck
         name: shellcheck
         entry: shellcheck
@@ -47,10 +55,11 @@ repos:
         files: \.sh$
 
       # Scoped to the files that already conform; the rest of the tree (skills
-      # markdown, vendored configs) has never been oxfmt-formatted.
+      # markdown, vendored configs) has never been oxfmt-formatted. Pinned by the
+      # repo's mise.toml, which the shell may not have activated.
       - id: oxfmt
         name: oxfmt
-        entry: oxfmt --write
+        entry: mise x -- oxfmt --write
         language: system
         files: ^(\.chezmoidata/.*\.toml|\.pre-commit-config\.yaml|\.yamllint\.yaml)$
 
@@ -68,10 +77,8 @@ repos:
         pass_filenames: false
         files: ^(\.github/|mise\.toml$)
 
-      # `make test`, the same entry a person runs (Makefile). files: what the tests read.
-      - id: pytest
-        name: pytest
-        entry: make -s test
+      - id: zizmor
+        name: zizmor
+        entry: uv run zizmor --offline
         language: system
-        pass_filenames: false
-        files: ^(Makefile|tests/|tools/|claude-managed\.d/|\.chezmoiignore|\.chezmoitemplates/|\.chezmoidata/|pyproject\.toml|uv\.lock|run_onchange_before_install-packages\.sh\.tmpl|run_onchange_after_refresh-completions\.sh\.tmpl|dot_claude/|run_onchange_after_snapshot-claude-managed\.py\.tmpl|dot_config/mise/(config\.toml\.tmpl|tasks/)|dot_Brewfile\.tmpl)
+        files: ^\.github/workflows/

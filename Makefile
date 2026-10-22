@@ -7,15 +7,16 @@
 	uv run render
 	@touch $@
 
-# The repo's checks, one entry point for a person and for prek's pytest hook alike.
+# The repo's checks, one entry point for a person and for CI alike. Commits run only the
+# prek hooks; the suite runs here on demand and in CI (.github/workflows/ci.yml).
 #   make check                       lint, then test: everything
-#   make test PYTEST_ARGS='-k gate'  pytest, after bringing .rendered/ up to date
-#   make lint                        every other prek hook, over all tracked files
+#   make test PYTEST_ARGS='-k gate'  pytest across all cores, after bringing .rendered/ up to date
+#   make lint                        every prek hook, over all tracked files
 .PHONY: check test lint
 check: lint test
 
 test: .rendered/STAMP
-	uv run pytest -q $(PYTEST_ARGS)
+	uv run pytest -q -n auto $(PYTEST_ARGS)
 
 lint:
-	prek run --all-files --skip pytest
+	prek run --all-files
