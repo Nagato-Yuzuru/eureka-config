@@ -37,6 +37,7 @@ from typing import Any
 
 import pytest
 import yaml
+from conftest import chezmoi_source
 from pydantic import ValidationError
 
 from inventory.model import ClaudeDoc
@@ -65,11 +66,11 @@ def parse_frontmatter(text: str) -> dict[str, Any]:
 
 @functools.cache
 def render(tmpl: Path) -> str:
-    """`chezmoi execute-template` over the real source. An empty config (not the user's): its
+    """`chezmoi execute-template` over a copy of the real source. An empty config (not the user's): its
     read-source-state hook would run `make` from inside the test run."""
     proc = subprocess.run(
         [
-            "chezmoi", "execute-template", "--source", str(REPO_ROOT),
+            "chezmoi", "execute-template", "--source", str(chezmoi_source()),
             "--config-format", "toml", "--config", os.devnull, "--file", str(tmpl),
         ],
         text=True,

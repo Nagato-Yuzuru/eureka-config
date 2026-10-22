@@ -20,16 +20,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import FILTER_WRAPPER, FRAGMENT_DIR, REPO_ROOT, SNAPSHOT_WRAPPER
+from conftest import FILTER_WRAPPER, FRAGMENT_DIR, REPO_ROOT, SNAPSHOT_WRAPPER, chezmoi_source
 
 PARTIAL = REPO_ROOT / ".chezmoitemplates" / "claude-managed-fragments"
 
 
-def execute(tmpl: Path, source: Path = REPO_ROOT, data: dict[str, Any] | None = None) -> str:
-    """`chezmoi execute-template` over a source dir. An empty config (not the user's): its
+def execute(tmpl: Path, source: Path | None = None, data: dict[str, Any] | None = None) -> str:
+    """`chezmoi execute-template` over a source dir (a copy of the real one by default). An empty config (not the user's): its
     read-source-state hook would run `make` from inside the test run."""
     argv = [
-        "chezmoi", "execute-template", "--source", str(source),
+        "chezmoi", "execute-template", "--source", str(source or chezmoi_source()),
         "--config-format", "toml", "--config", os.devnull, "--file", str(tmpl),
     ]  # fmt: skip
     if data is not None:

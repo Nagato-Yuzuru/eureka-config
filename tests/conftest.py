@@ -3,10 +3,14 @@ the way the chezmoi wrappers do."""
 
 from __future__ import annotations
 
+import atexit
+import functools
 import importlib.machinery
 import importlib.util
 import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +21,28 @@ ENGINE_PATH = REPO_ROOT / "tools" / "claude_managed.py"
 FILTER_WRAPPER = REPO_ROOT / "dot_claude" / "modify_settings.json.tmpl"
 SNAPSHOT_WRAPPER = REPO_ROOT / "run_onchange_after_snapshot-claude-managed.py.tmpl"
 FRAGMENT_DIR = REPO_ROOT / "claude-managed.d"
+
+
+@functools.cache
+def chezmoi_source() -> Path:
+    """A copy of the source dir to render from. chezmoi stats every entry under --source, and
+    test_path_gate's sandbox lives in the repo, so a render over REPO_ROOT trips on links a
+    concurrent test is creating or deleting. Dot entries other than .chezmoi* and .rendered/
+    are never deployed and stay behind."""
+    dst = Path(tempfile.mkdtemp(prefix="chezmoi-source-")) / "source"
+    atexit.register(shutil.rmtree, dst.parent, ignore_errors=True)
+
+    def skip(directory: str, names: list[str]) -> set[str]:
+        at_root = Path(directory) == REPO_ROOT
+        return {
+            n
+            for n in names
+            if n == "node_modules"
+            or (at_root and n.startswith(".") and not n.startswith(".chezmoi") and n != ".rendered")
+        }
+
+    shutil.copytree(REPO_ROOT, dst, symlinks=True, ignore=skip)
+    return dst
 
 
 def load_module(name: str, path: Path):
