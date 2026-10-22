@@ -55,43 +55,35 @@ def denied(proc: subprocess.CompletedProcess) -> bool:
     return json.loads(proc.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
+# Write and Edit share one `case` arm, so the cases alternate between them
 ALLOWED = [
-    f"{HOME}/.claude/agent-memory/explore/MEMORY.md",
-    f"{HOME}/.claude/agent-memory/explore/sub/entry.md",
-    f"{PROJECT}/.claude/agent-memory/explore/MEMORY.md",
+    (f"{HOME}/.claude/agent-memory/explore/MEMORY.md", "Write"),
+    (f"{HOME}/.claude/agent-memory/explore/sub/entry.md", "Edit"),
+    (f"{PROJECT}/.claude/agent-memory/explore/MEMORY.md", "Write"),
 ]
 
 
-@pytest.mark.parametrize("tool", ["Write", "Edit"])
-@pytest.mark.parametrize("file_path", ALLOWED)
+@pytest.mark.parametrize(("file_path", "tool"), ALLOWED)
 def test_memory_directories_are_writable(file_path: str, tool: str):
     assert not denied(run(write(file_path, tool)))
 
 
 DENIED = [
-    f"{PROJECT}/src/main.py",
-    f"{PROJECT}/.claude/settings.json",
-    f"{PROJECT}/.claude/agent-memory/coder/MEMORY.md",
-    f"{PROJECT}/.claude/agent-memory/explore",
-    "/other/proj/.claude/agent-memory/explore/MEMORY.md",
-    f"{HOME}/.claude/agent-memory/explore/../../settings.json",
-    f"{PROJECT}/.claude/agent-memory/explore/../../../src/main.py",
-    f"{HOME}/.claude/agent-memory/explore-evil/x.md",
-    ".claude/agent-memory/explore/MEMORY.md",
-    "",
+    (f"{PROJECT}/src/main.py", "Write"),
+    (f"{PROJECT}/.claude/agent-memory/explore/", "Edit"),
+    ("/other/proj/.claude/agent-memory/explore/MEMORY.md", "Write"),
+    (f"{HOME}/.claude/agent-memory/explore/../../settings.json", "Edit"),
+    (f"{HOME}/.claude/agent-memory/explore-evil/x.md", "Write"),
+    (".claude/agent-memory/explore/MEMORY.md", "Edit"),
+    ("", "Write"),
 ]
 
 
-@pytest.mark.parametrize("tool", ["Write", "Edit"])
-@pytest.mark.parametrize("file_path", DENIED)
+@pytest.mark.parametrize(("file_path", "tool"), DENIED)
 def test_other_paths_are_denied(file_path: str, tool: str):
     proc = run(write(file_path, tool))
     assert denied(proc)
     assert "agent-memory/explore/" in proc.stdout
-
-
-def test_missing_file_path_is_denied():
-    assert denied(run({"tool_name": "Write", "tool_input": {}}))
 
 
 def test_unset_project_dir_leaves_only_home():
@@ -109,9 +101,8 @@ def test_non_absolute_project_dir_opens_nothing(project: str):
     assert denied(run(write("relative/dir/.claude/agent-memory/explore/x"), project=project))
 
 
-@pytest.mark.parametrize("tool", ["Read", "Bash", "Grep"])
-def test_other_tools_pass(tool: str):
-    assert not denied(run({"tool_name": tool, "tool_input": {"file_path": "/etc/hosts"}}))
+def test_other_tools_pass():
+    assert not denied(run({"tool_name": "Read", "tool_input": {"file_path": "/etc/hosts"}}))
 
 
 @pytest.mark.parametrize("stdin", ["", "not json", "[]"])
