@@ -23,6 +23,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COOLDOWN = timedelta(days=7)  # the release cooldown pnpm, uv and mise are configured with
+NPX = r"(^|[\s`(;&|])np[mx]([\s;&|)`]|$)"  # npm/npx where block-package-managers.sh sees a command
 
 
 class UpstreamChanged(Exception):

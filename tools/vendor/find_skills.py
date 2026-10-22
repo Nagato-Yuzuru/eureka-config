@@ -16,11 +16,10 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from _upstream import REPO_ROOT, GitHub, UpstreamChanged, converge, forbid, replace
+from _upstream import NPX, REPO_ROOT, GitHub, UpstreamChanged, converge, forbid, replace
 
 REPO, BRANCH = "vercel-labs/skills", "main"
 PATH, TARGET = "skills/find-skills/SKILL.md", "dot_agents/skills/find-skills/SKILL.md"
-NPX = r"(^|[\s`(;&|])np[mx]([\s;&|)`]|$)"  # npm/npx where block-package-managers.sh sees a command
 
 
 def main() -> None:
