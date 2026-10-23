@@ -1,5 +1,5 @@
 # Weekly watch of upstreams our files were forked from but no longer track line by line: the
-# principle-* skills came from cursor/plugins' pstack; Air Context's agent harness (instructions,
+# principle-* skills and a few others came from cursor/plugins' pstack; Air Context's agent harness (instructions,
 # hooks, subagents, MCP, the skills we do not vendor) is reviewed rather than adopted. The
 # reviewed point lives in each entry's issues (contract in tools/upstream-watch.sh); closing the
 # issue a run opens marks its head reviewed. An entry's first run needs a closed issue with its
@@ -25,7 +25,10 @@ jobs:
       matrix:
         include:
           - upstream: cursor/plugins
-            pathspec: pstack/skills/principle-*/SKILL.md
+            pathspec: >-
+              pstack/skills/principle-*/SKILL.md pstack/skills/blast-radius
+              pstack/skills/create-verification-skill pstack/skills/in-your-own-words
+              pstack/skills/maintain-verification-skill pstack/skills/sharpen
             label: upstream-watch
             track: head
           # Released with the CLI, so reviewed per release tag. context-search is vendored by
