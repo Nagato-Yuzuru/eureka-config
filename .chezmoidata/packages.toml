@@ -158,7 +158,7 @@ on = ["darwin", "linux"]
 via = "upstream"
 
 [packages.jbcontext.upstream]
-version = "0.9.17.1213"
+version = "0.9.18.1257"
 command = """\
   curl -fsSL https://download.jetbrains.com/jetbrains-context/release/download-jbcontext.sh \
   | bash -s -- --version={version} --no-path-update \
