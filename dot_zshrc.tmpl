@@ -32,8 +32,7 @@ ANTIDOTE_HOME="${XDG_CACHE_HOME}/antidote"
 zsh_plugins_txt=${ZDOTDIR:-$HOME}/.zsh_plugins.txt
 zsh_plugins_zsh=${ZDOTDIR:-$HOME}/.zsh_plugins.zsh
 
-source "${XDG_DATA_HOME}/zsh/antidote/antidote.zsh"  # cloned by .chezmoiexternal.toml.tmpl
-
+source "${XDG_DATA_HOME}/zsh/antidote/antidote.zsh" # cloned by .chezmoiexternal.toml.tmpl
 
 antidote_clones=($ANTIDOTE_HOME/*(N/))
 if [[ ! -s $zsh_plugins_zsh || ! $zsh_plugins_zsh -nt $zsh_plugins_txt || $#antidote_clones -eq 0 ]]; then
@@ -64,7 +63,7 @@ autoload -Uz compinit
 # assignment, not `[[ -n …(#q…) ]]`: that form needs extendedglob, and without it the test
 zcompdump=${ZDOTDIR:-$HOME}/.zcompdump
 zcompdump_stale=($zcompdump(Nmh+24) ${^fpath}(N/e:'[[ $REPLY -nt $zcompdump ]]':))
-if [[ ! -s $zcompdump ]] || (( $#zcompdump_stale )); then
+if [[ ! -s $zcompdump ]] || (($#zcompdump_stale)); then
     # compinit rewrites an existing dump only when the count of completion files changed, so
     # a stale dump would keep its old mtime and every later shell would take this branch again.
     rm -f $zcompdump
@@ -84,7 +83,7 @@ autoload bashcompinit && bashcompinit
 
 eval "$(mise activate zsh)"
 {{- if eq .chezmoi.os "darwin" }}
-eval "$(fnox activate zsh)"  # darwin-only in packages.toml
+eval "$(fnox activate zsh)" # darwin-only in packages.toml
 {{- end }}
 
 source $zsh_plugins_zsh
@@ -166,6 +165,9 @@ autoload -Uz edit-command-line
 zle -N edit-command-line
 bindkey '^U' backward-kill-line
 bindkey '^X^E' edit-command-line
+
+bindkey '^[[27;2;13~' accept-line # shift+enter
+bindkey '^[[27;5;13~' accept-line # ctrl+enter
 
 autoload -Uz reverse-menu-complete
 zle -N reverse-menu-complete
