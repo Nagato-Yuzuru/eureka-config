@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Upstream watch, run by .github/workflows/upstream-watch.yml: diff $PATHSPEC in the clone at $1
-# from the reviewed point to its tip and open, or update, one issue labeled $LABEL with a summary,
-# the commits, and the diff. The reviewed point is the head marker of the newest closed $LABEL
+# from the reviewed point to its tip and open, or update, one issue labeled $LABEL with the changed
+# files, the commits, and the diff. Upstream's #N references are qualified so they link there. The reviewed point is the head marker of the newest closed $LABEL
 # issue; an open one keeps its own base, so it accumulates until closed.
 #
 # The tip is HEAD, or with TRACK=releases the newest v* tag: upstreams whose files ship with a
@@ -54,46 +54,74 @@ if [[ -z "$diff" ]]; then
   exit 0
 fi
 
-# The size of the change per included pathspec, each with every exclusion applied.
-summary() {
-  local excludes=() spec stat
+url="https://github.com/$UPSTREAM"
+
+# The pathspecs as a sentence: the included ones, then the excluded ones after "except".
+watched() {
+  local in=() out=() spec
   for spec in "${specs[@]}"; do
-    if [[ "$spec" == :!* || "$spec" == ':(exclude)'* ]]; then excludes+=("$spec"); fi
+    case "$spec" in
+      ':!'*) out+=("\`${spec#:!}\`") ;;
+      ':(exclude)'*) out+=("\`${spec#:(exclude)}\`") ;;
+      *) in+=("\`$spec\`") ;;
+    esac
   done
-  for spec in "${specs[@]}"; do
-    if [[ "$spec" == :!* || "$spec" == ':(exclude)'* ]]; then continue; fi
-    # The +-form: bash before 4.4 calls an empty array unbound under set -u.
-    stat=$(git -C "$clone" diff --shortstat "$base" "$tip" -- "$spec" ${excludes[@]+"${excludes[@]}"})
-    if [[ -n "$stat" ]]; then echo "- \`$spec\`:$stat"; fi
-  done
+  # The +-form: bash before 4.4 calls an empty array unbound under set -u.
+  echo "Watching ${in[*]}${out[*]+, except ${out[*]}}"
+}
+
+# Each changed file with its line counts.
+files() {
+  local added deleted path
+  git -C "$clone" diff --numstat "$base" "$tip" -- "${specs[@]}" |
+    while IFS=$'\t' read -r added deleted path; do
+      if [[ "$added" == - ]]; then echo "- \`$path\` (binary)"; else echo "- \`$path\` +$added −$deleted"; fi
+    done
+}
+
+# A bare #N on stdin is an issue in the upstream, not ours: qualify it so GitHub links there.
+upstream_refs() {
+  sed -E "s,(^|[^[:alnum:]/&#])#([0-9]+),\\1$UPSTREAM#\\2,g"
+}
+
+# Release notes on stdin, their headings pushed two levels down to sit under the release's ###.
+demote() {
+  awk '/^(```|~~~)/ { fence = !fence }
+    !fence && /^#+ / { match($0, /^#+/); n = RLENGTH + 2; if (n > 6) n = 6
+      $0 = substr("######", 1, n) substr($0, RLENGTH + 1) }
+    { print }'
 }
 
 body=$(mktemp)
 {
   echo "<!-- upstream-watch base=$base head=$tip -->"
-  echo "\`$UPSTREAM\` \`$PATHSPEC\`, ${base:0:12}..${tip:0:12}${tag:+ ($tag)}:" \
-    "https://github.com/$UPSTREAM/compare/$base...$tip"
+  echo "**[$UPSTREAM]($url)** [\`${base:0:12}...${tip:0:12}\`]($url/compare/$base...$tip)${tag:+ ($tag)}"
   echo
-  echo "Port what earns it into our fork, then close this issue to mark ${tip:0:12} reviewed."
+  watched
   echo
-  echo "## Summary"
+  echo "Port what earns it into our fork, then close this issue to mark \`${tip:0:12}\` reviewed."
   echo
-  summary
+  echo "## Files"
+  echo
+  files
   if [[ -n "${tag:-}" ]]; then
+    echo
+    echo "## Releases"
     # Tags already reachable from the reviewed point were reviewed with it.
     git -C "$clone" tag --list 'v*' --merged "$tip" --no-merged "$base" --sort=-v:refname |
       while read -r t; do
         notes=$(gh release view "$t" -R "$UPSTREAM" --json body --jq .body)
         echo
-        echo "### $t"
+        echo "### [$t]($url/releases/tag/$t)"
         echo
-        head -c 8000 <<<"$notes"
+        head -c 8000 <<<"$notes" | demote | upstream_refs
       done
   fi
   echo
   echo "## Commits"
   echo
-  git -C "$clone" log --format='- %h %ad %s' --date=short "$base..$tip" -- "${specs[@]}"
+  git -C "$clone" log --format="- [\`%h\`]($url/commit/%H) %ad %s" --date=short "$base..$tip" -- "${specs[@]}" |
+    upstream_refs
   echo
 } >"$body"
 # GitHub caps an issue body at 65536 characters; past that, the compare link has the rest.
@@ -110,9 +138,11 @@ if ((budget > 0)); then
   } >>"$body"
 fi
 
+# The range and paths are in the body; the title names the upstream, and the release under review.
+title="upstream-watch: $UPSTREAM${tag:+ $tag}"
 if [[ -n "$open" ]]; then
-  gh issue edit "$open" --body-file "$body"
+  gh issue edit "$open" --title "$title" --body-file "$body"
 else
   gh label create "$LABEL" --color ededed --force
-  gh issue create --title "upstream-watch: $UPSTREAM $PATHSPEC" --label "$LABEL" --body-file "$body"
+  gh issue create --title "$title" --label "$LABEL" --body-file "$body"
 fi
