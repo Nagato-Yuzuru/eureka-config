@@ -7,9 +7,10 @@ issue. Upstream is a local git repository; gh is a fake that answers the issue q
 - changes since the newest closed issue's head open an issue whose marker carries that head as
   base and the upstream HEAD as head, listing only the commits under PATHSPEC
 - an open issue is edited in place and keeps its own base
-- PATHSPEC takes several pathspecs, `:!x` excluding; the summary sizes each included one
-- TRACK=releases reviews at the newest v* tag, not HEAD, and carries the notes of the releases
-  past the reviewed point
+- the issue is titled by the upstream alone, and upstream's #N references link to the upstream
+- PATHSPEC takes several pathspecs, `:!x` excluding; the issue lists each changed file
+- TRACK=releases reviews at the newest v* tag, not HEAD, adds it to the title, and carries the
+  notes of the releases past the reviewed point, their headings below the release's
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ case "$1 $2" in
     if [[ "$*" == *"--state open"* ]]; then printf '%s\\n' "$FAKE_OPEN"
     else printf '%s\\n' "$FAKE_CLOSED_BODY"; fi ;;
   "issue view") printf '%s\\n' "$FAKE_OPEN_BODY" ;;
-  "release view") printf 'notes for %s\\n' "$3" ;;
+  "release view") printf '## Fixes\\n- %s fixes (#3)\\n' "$3" ;;
   *) for ((i = 1; i <= $#; i++)); do
        if [[ "${!i}" == --body-file ]]; then j=$((i + 1)); cp "${!j}" "$FAKE_BODY"; fi
      done ;;
@@ -187,7 +188,22 @@ def test_an_open_issue_is_edited_and_keeps_its_base(tmp_path: Path, upstream: Up
     assert "-a1\n+a3" in run.body
 
 
-def test_excluded_paths_count_neither_as_change_nor_in_the_summary(
+def title(run: Run) -> str:
+    [write] = [w for w in run.writes if w.startswith("issue ")]
+    return write.split("--title ", 1)[1].split(" --", 1)[0]
+
+
+def test_the_title_names_the_upstream_and_refs_link_upstream(tmp_path: Path, upstream: Upstream):
+    reviewed = upstream.commit("skills/principle-a/SKILL.md", "a1\n", "add a")
+    upstream.commit("skills/principle-a/SKILL.md", "a2\n", "reword a (#5), see o/r#4 and #6")
+    run = watch(tmp_path, upstream, closed_body=marker(head=reviewed))
+    assert run.proc.returncode == 0, run.proc.stderr
+    assert run.body is not None
+    assert title(run) == "upstream-watch: o/r"
+    assert commits(run.body) == ["reword a (o/r#5), see o/r#4 and o/r#6"]
+
+
+def test_excluded_paths_count_neither_as_change_nor_in_the_file_list(
     tmp_path: Path, upstream: Upstream
 ):
     reviewed = upstream.commit("skills/a/SKILL.md", "a1\n", "add a")
@@ -202,12 +218,10 @@ def test_excluded_paths_count_neither_as_change_nor_in_the_summary(
     )
     assert run.proc.returncode == 0, run.proc.stderr
     assert run.body is not None
-    assert section(run.body, "Summary") == [
-        "- `skills`: 1 file changed, 1 insertion(+), 1 deletion(-)",
-        "- `hooks`: 1 file changed, 2 insertions(+)",
-    ]
+    assert section(run.body, "Files") == ["- `hooks/h.sh` +2 −0", "- `skills/a/SKILL.md` +1 −1"]
     assert commits(run.body) == ["reword a", "add hook"]
-    assert "vendored" not in run.body.split("## Summary", 1)[1]
+    assert "Watching `skills` `hooks`, except `skills/vendored`" in run.body
+    assert "vendored/" not in run.body
 
 
 def test_only_excluded_changes_write_nothing(tmp_path: Path, upstream: Upstream):
@@ -237,8 +251,15 @@ def test_releases_are_reviewed_at_the_newest_tag_with_their_notes(
     assert run.body is not None
     assert f"<!-- upstream-watch base={reviewed} head={released} -->" in run.body
     assert commits(run.body) == ["reword tool again", "reword tool"]
-    notes = [ln for ln in section(run.body, "Summary") if not ln.startswith("- ")]
-    assert notes == ["### v0.9.11", "notes for v0.9.11", "### v0.9.10", "notes for v0.9.10"]
+    assert title(run) == "upstream-watch: o/r v0.9.11"
+    assert section(run.body, "Releases") == [
+        "### [v0.9.11](https://github.com/o/r/releases/tag/v0.9.11)",
+        "#### Fixes",
+        "- v0.9.11 fixes (o/r#3)",
+        "### [v0.9.10](https://github.com/o/r/releases/tag/v0.9.10)",
+        "#### Fixes",
+        "- v0.9.10 fixes (o/r#3)",
+    ]
     assert "+t3" in run.body and "t4" not in run.body
 
 
