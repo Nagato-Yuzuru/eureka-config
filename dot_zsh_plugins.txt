@@ -1,6 +1,10 @@
 ohmyzsh/ohmyzsh path:lib/history.zsh
 ohmyzsh/ohmyzsh path:lib/directories.zsh
 
+# termsupport reports the cwd to the terminal (OSC 7) and needs omz_urlencode from functions
+ohmyzsh/ohmyzsh path:lib/functions.zsh
+ohmyzsh/ohmyzsh path:lib/termsupport.zsh
+
 # clone only: .zshrc puts <clone>/src on fpath itself, before compinit
 zsh-users/zsh-completions kind:clone
 
