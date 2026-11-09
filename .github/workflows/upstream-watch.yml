@@ -32,9 +32,12 @@ jobs:
             label: upstream-watch
             track: head
           # Released with the CLI, so reviewed per release tag. context-search is vendored by
-          # tools/vendor/jbcontext.py and arrives as the vendor-sync PR instead.
+          # tools/vendor/jbcontext.py and arrives as the vendor-sync PR instead. The */codex
+          # variants target an agent we do not run; their claude and shared siblings stay watched.
           - upstream: JetBrains/context
-            pathspec: instructions hooks agents skills mcp :!skills/context-search
+            pathspec: >-
+              instructions hooks agents skills mcp :!skills/context-search
+              :!instructions/codex :!agents/codex
             label: upstream-watch:jbcontext
             track: releases
     concurrency:
