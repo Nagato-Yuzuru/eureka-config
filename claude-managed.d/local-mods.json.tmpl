@@ -1,10 +1,13 @@
-{{- /* Mods in claude/mods/, linked to ~/.claude/mods, registered as a directory marketplace. */ -}}
+{{- /* Mods in claude/mods/, linked to ~/.claude/mods, registered as a directory marketplace.
+     cockpit is listed there with a github source; autoUpdate pulls its new commits. */ -}}
 {
   "enabledPlugins": {
-    "zle-words@local-mods": true
+    "zle-words@local-mods": true,
+    "cockpit@local-mods": true
   },
   "extraKnownMarketplaces": {
     "local-mods": {
+      "autoUpdate": true,
       "source": {
         "source": "directory",
         "path": {{ joinPath .chezmoi.homeDir ".claude" "mods" | toJson }}

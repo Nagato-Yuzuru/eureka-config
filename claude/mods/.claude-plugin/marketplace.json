@@ -3,6 +3,10 @@
   "owner": {"name": "Nagato Yuzuru"},
   "plugins": [
     {"name": "zle-words", "source": "./zle-words"},
-    {"name": "jbcontext", "source": "./jbcontext"}
+    {"name": "jbcontext", "source": "./jbcontext"},
+    {
+      "name": "cockpit",
+      "source": {"source": "github", "repo": "Nagato-Yuzuru/cc-cockpit"}
+    }
   ]
 }
