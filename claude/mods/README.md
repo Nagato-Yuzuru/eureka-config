@@ -5,9 +5,10 @@ folder holds ours, laid out like the [`mods/` folder of the Claude Code
 repository](https://github.com/anthropics/claude-code/tree/main/mods), and the
 local plain plugins that share their marketplace and checks.
 
-| Mod                      | What it does                                                                                                    |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| [`zle-words`](zle-words) | zsh's word widgets in the prompt box: `ctrl+w`, `alt+backspace`, `alt+b/f/d`, word boundaries from `$WORDCHARS` |
+| Mod                                                      | What it does                                                                                                                                                  |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`cockpit`](https://github.com/Nagato-Yuzuru/cc-cockpit) | Interface additions, such as a context window meter above the prompt. Lives in its own repo; Claude Code installs it from GitHub and tracks its latest commit |
+| [`zle-words`](zle-words)                                 | zsh's word widgets in the prompt box: `ctrl+w`, `alt+backspace`, `alt+b/f/d`, word boundaries from `$WORDCHARS`                                               |
 
 | Plugin                   | What it does                                                                                                        |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
