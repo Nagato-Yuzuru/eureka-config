@@ -198,10 +198,6 @@ def model_names() -> re.Pattern[str]:
     return re.compile(rf"\b({'|'.join(map(re.escape, names))})\b", re.IGNORECASE)
 
 
-# Display code turning model ids into names: it names models, it routes nothing.
-NOT_ROUTING = ("dot_claude/statusline/",)
-
-
 def test_model_names_live_only_in_the_routing_data():
     listed = subprocess.run(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "dot_claude"],
@@ -211,7 +207,7 @@ def test_model_names_live_only_in_the_routing_data():
     hits = [
         f"{rel}:{n}"
         for rel in listed
-        if rel and not rel.startswith(NOT_ROUTING) and (REPO_ROOT / rel).is_file()
+        if rel and (REPO_ROOT / rel).is_file()
         for n, line in enumerate(
             (REPO_ROOT / rel).read_bytes().decode(errors="replace").splitlines(), 1
         )
