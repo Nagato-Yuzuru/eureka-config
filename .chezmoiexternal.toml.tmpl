@@ -1,5 +1,5 @@
 # Git repos cloned into place — upstream tools under $XDG_DATA_HOME (see .chezmoidata/xdg.toml),
-# plus my own nvim config under ~/.config.
+# plus my own nvim and rex configs under ~/.config.
 # Tracks upstream default branch; pulled at most once per refreshPeriod
 # (force with `chezmoi apply --refresh-externals`).
 
@@ -26,4 +26,13 @@
     url = "git@github.com:Nagato-Yuzuru/my-nvim-config.git"
     refreshPeriod = "168h"
     [".config/nvim".pull]
+        args = ["--ff-only"]
+
+# Rex config — my own repo, same edit-in-clone workflow as nvim, hence the same
+# --ff-only refresh pull.
+[".config/rex"]
+    type = "git-repo"
+    url = "git@github.com:Nagato-Yuzuru/rexrc.git"
+    refreshPeriod = "168h"
+    [".config/rex".pull]
         args = ["--ff-only"]
