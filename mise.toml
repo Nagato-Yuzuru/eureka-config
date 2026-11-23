@@ -1,6 +1,6 @@
 # The tools prek's hooks run, pinned so a commit and CI agree (Python tools: uv.lock).
 [tools]
-jactionlint = "2.5.0"
+jactionlint = "2.6.0"
 oxfmt = "0.74.0"
 prek = "0.5.10"
 shellcheck = "0.11.0"
