@@ -83,6 +83,7 @@ jobs:
 
       # The README's install steps.
       - run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - run: sudo dnf upgrade -y
       - run: sudo dnf install -y chezmoi git make
       - name: chezmoi init --apply
         run: |
