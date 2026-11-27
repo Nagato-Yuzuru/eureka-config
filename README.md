@@ -11,6 +11,7 @@ reads anything else.
 ```sh
 curl -LsSf https://astral.sh/uv/install.sh | sh    # then open a new shell
 brew install chezmoi                               # macOS; git and make come with Xcode's CLT
+sudo dnf upgrade -y                                # Fedora
 sudo dnf install -y chezmoi git make               # Fedora
 chezmoi init --apply git@github.com:Nagato-Yuzuru/eureka-config.git
 mise install
