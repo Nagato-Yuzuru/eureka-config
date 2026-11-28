@@ -5,6 +5,10 @@ ohmyzsh/ohmyzsh path:lib/directories.zsh
 ohmyzsh/ohmyzsh path:lib/functions.zsh
 ohmyzsh/ohmyzsh path:lib/termsupport.zsh
 
+# OSC 133 prompt marks (prompt jump, exit status); local, kept by chezmoi.
+# Not kind:defer: the first prompt would miss its marks.
+$XDG_CONFIG_HOME/zsh/plugins/osc133
+
 # clone only: .zshrc puts <clone>/src on fpath itself, before compinit
 zsh-users/zsh-completions kind:clone
 
